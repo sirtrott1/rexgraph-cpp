@@ -1,0 +1,11 @@
+id,time,subject,predicate,object,expected,reason
+Q01,2,1,biolink:treats,3,0,future treatment assertion must not leak backward
+Q02,5,1,biolink:treats,3,1,Drug_A treatment assertion is active
+Q03,12,1,biolink:treats,3,0,Drug_A treatment assertion is stale after day 10
+Q04,12,2,biolink:treats,3,1,Drug_B treatment assertion is active
+Q05,8,5,demo:recommends,1,1,earlier guideline recommendation is active
+Q06,8,5,demo:recommends,2,0,later guideline recommendation must not leak backward
+Q07,12,5,demo:recommends,1,0,earlier guideline recommendation is stale
+Q08,12,5,demo:recommends,2,1,later guideline recommendation is active
+Q09,3,10,demo:associated_with,3,0,retrospective validity cannot be used before evidence was asserted
+Q10,6,10,demo:associated_with,3,1,association is available after evidence ingestion

@@ -1,0 +1,15 @@
+id,subject,predicate,object,valid_from,valid_to,asserted_at,source,confidence
+F01,1,biolink:studied_to_treat,3,0,4,0,Study_A,2/3
+F02,1,biolink:treats,3,4,10,4,Guideline_update_A,4/5
+F03,1,biolink:contraindicated_in,4,7,INF,7,Safety_signal_A,1
+F04,2,biolink:studied_to_treat,3,6,10,6,Study_B,3/5
+F05,2,biolink:treats,3,10,INF,10,Guideline_update_B,9/10
+F06,5,demo:recommends,1,4,10,4,Guideline_v1,1
+F07,5,demo:recommends,2,10,INF,10,Guideline_v2,1
+F08,6,demo:supports,1,0,INF,0,Study_A,2/3
+F09,7,demo:supports,2,6,INF,6,Study_B,3/5
+F10,8,demo:has_condition,3,0,INF,0,Synthetic_case,1
+F11,8,demo:has_risk,4,7,INF,7,Synthetic_case_update,1
+F12,1,demo:associated_with,9,7,INF,7,Safety_signal_A,3/4
+F13,10,demo:associated_with,3,2,INF,5,Late_evidence_ingest,7/10
+F14,7,demo:supports,10,5,INF,5,Study_Biomarker,7/10

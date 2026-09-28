@@ -1,0 +1,6 @@
+id,source,target,departure,arrival,label
+C01,100,101,1,2,symptom_to_test
+C02,101,104,1,3,static_shortcut_that_departed_too_early
+C03,101,102,3,4,test_to_diagnosis
+C04,102,103,5,6,diagnosis_to_therapy
+C05,103,104,8,9,therapy_to_recovery

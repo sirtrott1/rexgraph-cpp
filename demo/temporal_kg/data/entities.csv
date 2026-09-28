@@ -1,0 +1,16 @@
+id,name,category
+1,Drug_A,biolink:Drug
+2,Drug_B,biolink:Drug
+3,Condition_X,biolink:Disease
+4,Renal_Risk,biolink:PhenotypicFeature
+5,Synthetic_Guideline,biolink:InformationContentEntity
+6,Study_A,biolink:InformationContentEntity
+7,Study_B,biolink:InformationContentEntity
+8,Synthetic_Cohort,biolink:PopulationOfIndividualOrganisms
+9,Adverse_Event_Y,biolink:PhenotypicFeature
+10,Biomarker_Z,biolink:MolecularEntity
+100,Symptom_Onset,demo:ClinicalEvent
+101,Diagnostic_Test,demo:ClinicalEvent
+102,Diagnosis_Confirmed,demo:ClinicalEvent
+103,Therapy_Initiated,demo:ClinicalEvent
+104,Recovery_Observed,demo:ClinicalEvent
