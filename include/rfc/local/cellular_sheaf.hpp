@@ -28,6 +28,8 @@ public:
 
     explicit LinearCellularSheaf(const LinearRelationalFiberSystem& fibers) : LinearCellularSheaf(fibers.stalks()) {}
 
+    LinearCellularSheaf(const LinearStalkBundle&&) = delete;
+    LinearCellularSheaf(const LinearRelationalFiberSystem&&) = delete;
     [[nodiscard]] const LinearStalkBundle& stalks() const noexcept { return *stalks_; }
     [[nodiscard]] const core::RelationalComplex& complex() const noexcept { return stalks_->complex(); }
 

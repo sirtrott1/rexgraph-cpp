@@ -129,16 +129,11 @@ inline NativeAtlasManifest decode_native_atlas_manifest(std::span<const std::byt
     const auto canonical=encode_native_atlas_manifest(m,limits);require(canonical.size()==bytes.size() && std::equal(canonical.begin(),canonical.end(),bytes.begin()),"noncanonical atlas declaration manifest");return m;
 }
 inline void write_native_atlas(const NativeAtlas& atlas,const std::filesystem::path& path){
-    if(std::filesystem::exists(path))throw std::invalid_argument("atlas output already exists");
     const auto bytes=encode_native_atlas(atlas);
-    native_atlas_detail::bound(bytes.size(),static_cast<std::size_t>(std::numeric_limits<std::streamsize>::max()),"atlas stream size overflow");
-    std::ofstream out(path,std::ios::binary);
-    if(!out)throw std::runtime_error("cannot create atlas archive");
-    out.write(reinterpret_cast<const char*>(bytes.data()),static_cast<std::streamsize>(bytes.size()));
-    out.close();if(!out)throw std::runtime_error("atlas archive write failed");
+    write_file_exact(path, bytes, FilePublication::CreateNew);
 }
 inline NativeAtlas read_native_atlas(const std::filesystem::path& path,const NativeAtlasLimits& limits={}){
-    const auto size=std::filesystem::file_size(path);native_atlas_detail::bound(size,limits.max_archive_bytes,"atlas file byte budget");
-    ReadOnlyMappedFile file(path);return decode_native_atlas(file.bytes(),limits);
+    const auto bytes=read_file_exact(path,limits.max_archive_bytes);
+    return decode_native_atlas(bytes,limits);
 }
 } // namespace rfc::storage

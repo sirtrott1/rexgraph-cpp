@@ -630,10 +630,7 @@ inline LocalBlockWriteStats write_local_blocks(const core::RelationalComplex& so
     w.patch_u64(header + 128u, rfcx_detail::fnv1a64(std::span<const std::byte>(w.bytes()).subspan(local_rfcx_detail::header_size)));
     w.patch_u64(header + 136u, source_payload_hash);
 
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    if (!out) throw std::runtime_error("unable to create RFCX local-block file");
-    out.write(reinterpret_cast<const char*>(w.bytes().data()), static_cast<std::streamsize>(w.bytes().size()));
-    if (!out) throw std::runtime_error("unable to write RFCX local-block file");
+    write_file_exact(path, w.bytes());
     return {static_cast<std::uint64_t>(w.size()), static_cast<std::uint64_t>(blocks.size()),
             static_cast<std::uint64_t>(glue.shared_cell_count())};
 }

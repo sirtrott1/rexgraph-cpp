@@ -83,6 +83,7 @@ inline std::map<std::size_t, std::vector<numeric::Rational>> sparse_tower_operat
 inline TowerOperatorBasis reduce_tower_operator_channels(
     const core::RelationalComplex& complex,
     std::vector<TowerOperatorChannelKind> candidates) {
+    for (const auto channel : candidates) validate_tower_operator_channel(channel);
     if (candidates.empty()) throw std::invalid_argument("tower operator reduction requires candidates");
     const auto sparse_rows = tower_detail::sparse_tower_operator_rows(complex, candidates);
     std::vector<std::vector<numeric::Rational>> matrix;
@@ -110,7 +111,9 @@ inline TowerOperatorBasis reduce_tower_operator_channels(
 inline std::vector<std::int64_t> reduce_machine_tower_channel_gains(
     const TowerOperatorBasis& basis,
     const std::vector<std::int64_t>& original_gains) {
+    if (!basis.complex) throw std::invalid_argument("unbound tower basis");
     if (original_gains.size() != basis.candidates.size()) throw std::invalid_argument("tower operator gain count mismatch");
+    detail::validate_basis_coordinates(basis.coordinates,basis.candidates.size(),basis.rank(),basis.independent_indices);
     std::vector<numeric::Rational> reduced(basis.rank(), numeric::Rational{0});
     for (std::size_t j = 0; j < original_gains.size(); ++j) {
         for (std::size_t i = 0; i < basis.rank(); ++i) reduced[i] += original_gains[j] * basis.coordinates[j][i];
@@ -120,5 +123,8 @@ inline std::vector<std::int64_t> reduce_machine_tower_channel_gains(
     for (const auto& value : reduced) result.push_back(rational_to_i64_exact(value));
     return result;
 }
+
+inline TowerOperatorBasis reduce_tower_operator_channels(const core::RelationalComplex&&,
+    std::vector<TowerOperatorChannelKind>) = delete;
 
 } // namespace rfc::learning

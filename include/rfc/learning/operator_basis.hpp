@@ -35,6 +35,23 @@ struct OperatorChannelBasis {
 
 namespace detail {
 
+inline void validate_basis_coordinates(const std::vector<std::vector<numeric::Rational>>& coordinates,
+                                       std::size_t candidates, std::size_t rank,
+                                       const std::vector<std::size_t>& independent) {
+    if (coordinates.size() != candidates) throw std::invalid_argument("operator basis row count");
+    for (const auto index : independent)
+        if (index >= candidates) throw std::invalid_argument("operator basis index");
+    for (const auto& row : coordinates) {
+        if (row.size() != rank) throw std::invalid_argument("operator basis coordinate width");
+        for (const auto& q : row) {
+            const auto n=q.get_num(), d=q.get_den();
+            if (d<=0) throw std::invalid_argument("operator basis rational denominator");
+            numeric::Integer gcd; mpz_gcd(gcd.get_mpz_t(),n.get_mpz_t(),d.get_mpz_t());
+            if (gcd!=1) throw std::invalid_argument("noncanonical operator basis rational");
+        }
+    }
+}
+
 inline std::vector<std::size_t> rref_pivot_columns(std::vector<std::vector<numeric::Rational>> matrix) {
     if (matrix.empty()) return {};
     const std::size_t rows = matrix.size();
@@ -227,6 +244,7 @@ inline OperatorChannelBasis reduce_operator_channels(
     const core::RelationalComplex& complex,
     core::Grade grade,
     std::vector<OperatorChannelKind> candidates) {
+    for (const auto channel : candidates) validate_operator_channel(channel);
     if (candidates.empty()) throw std::invalid_argument("operator channel reduction requires candidates");
     if (grade.value >= complex.grade_count()) throw std::out_of_range("operator channel reduction grade");
 
@@ -273,7 +291,12 @@ inline std::int64_t rational_to_i64_exact(const numeric::Rational& value) {
 inline std::vector<std::int64_t> reduce_machine_channel_gains(
     const OperatorChannelBasis& basis,
     const std::vector<std::int64_t>& original_gains) {
+    if (!basis.complex || basis.coordinates.size() != basis.candidates.size())
+        throw std::invalid_argument("invalid operator basis coordinate count");
+    for (const auto& row : basis.coordinates) if (row.size() != basis.rank())
+        throw std::invalid_argument("invalid operator basis coordinate width");
     if (original_gains.size() != basis.candidates.size()) throw std::invalid_argument("operator gain count mismatch");
+    detail::validate_basis_coordinates(basis.coordinates,basis.candidates.size(),basis.rank(),basis.independent_indices);
     std::vector<numeric::Rational> reduced(basis.rank(), numeric::Rational{0});
     for (std::size_t j = 0; j < original_gains.size(); ++j) {
         for (std::size_t i = 0; i < basis.rank(); ++i) reduced[i] += original_gains[j] * basis.coordinates[j][i];
@@ -283,5 +306,8 @@ inline std::vector<std::int64_t> reduce_machine_channel_gains(
     for (const auto& value : reduced) result.push_back(rational_to_i64_exact(value));
     return result;
 }
+
+inline OperatorChannelBasis reduce_operator_channels(const core::RelationalComplex&&,
+    core::Grade, std::vector<OperatorChannelKind>) = delete;
 
 } // namespace rfc::learning

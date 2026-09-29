@@ -1,6 +1,7 @@
 #pragma once
 #include "rfc/core/identity.hpp"
 #include "rfc/numeric/exact_matrix.hpp"
+#include "rfc/machine/checked_size.hpp"
 #include <cstddef>
 #include <stdexcept>
 #include <utility>
@@ -29,7 +30,7 @@ public:
         for (const auto& block : blocks_) {
             if (block.row_offset != expected_offset) throw std::invalid_argument("local tensor block offsets must be contiguous");
             if (block.map.cols() != source_dimension_) throw std::invalid_argument("local tensor block source dimension mismatch");
-            expected_offset += block.map.rows();
+            expected_offset = machine::checked_size_add(expected_offset, block.map.rows());
         }
         rows_ = expected_offset;
     }

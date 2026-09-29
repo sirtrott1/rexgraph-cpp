@@ -2,6 +2,7 @@
 // or general SQL parser. Every write creates a new file exclusively.
 #include "rfc/database/interpretation_codec.hpp"
 #include "rfc/database/native_query.hpp"
+#include "rfc/storage/native_series_codec.hpp"
 #ifdef RFC_LOCAL_SQLITE
 #include "rfc/io/sqlite_interpretation.hpp"
 #endif
@@ -106,8 +107,15 @@ V literal(const native_query_detail::Scalar& s,std::string_view input){
     const auto slash=input.find('/');auto numerator=integer(input.substr(0,slash));auto denominator=slash==input.npos?numeric::Integer(1):integer(input.substr(slash+1));
     require(denominator!=0,"zero denominator");numeric::Rational q(numerator,denominator);q.canonicalize();return V::rational(std::move(q));
 }
-constexpr const char* help=R"(rfc_local — local exact-data developer preview (Phase 03F6)
+constexpr const char* help=R"(rfc_local — local exact-data developer preview (Phase 05)
   doctor
+  series-create SOURCE.rfcx CHANNELS.rfcxe OUT.rfcxs NAMESPACE
+  series-append BASE.rfcxs FRAMES.rfcxt OUT.rfcxs
+  series-inspect FILE.rfcxs
+  series-at FILE.rfcxs SEQUENCE            # inspect a retained endpoint
+  series-checkpoint FILE.rfcxs SEQUENCE OUT.rfcxs
+  series-compact FILE.rfcxs OUT.rfcxs [SEQUENCE ...]  # retain all history
+  series-field FILE.rfcxs FIRST LAST TENSOR_KEY       # exact propagated channels
   sample OUT.rfcxi [base|changed]
   inspect FILE.rfcxi
   show FILE.rfcxi KIND [LIMIT]              # defaults to 10, maximum 1000
@@ -147,13 +155,51 @@ int main(int argc,char** argv){try{
     if(argc<2 || std::string_view(argv[1])=="--help" || std::string_view(argv[1])=="help"){std::cout<<help;return 0;}
     const std::string command=argv[1];Json j;
     if(command=="doctor"){
-        require(argc==2,"doctor takes no arguments");j.add("{\"release\":\"03F6-local-preview\",\"cpp\":20,\"sqlite\":");
+        require(argc==2,"doctor takes no arguments");j.add("{\"release\":\"05-local-preview\",\"cpp\":20,\"sqlite\":");
 #ifdef RFC_LOCAL_SQLITE
         j.add("true,\"sqlite_version\":");j.str(sqlite3_libversion());
 #else
         j.add("false");
 #endif
         j.add(",\"gmp_version\":");j.str(gmp_version);j.add(",\"network\":false,\"transactions\":false}");
+    }else if(command=="series-create"){
+        require(argc==6,"series-create SOURCE CHANNELS OUT NAMESPACE");
+        storage::MappedRfcx source(argv[2]);const auto endpoint=storage::read_temporal_endpoint(source,argv[3]);
+        const storage::NativeTemporalSeries series(endpoint,number(argv[5]));
+        j.add("{\"written\":true,\"sequence\":");j.id(series.first_sequence());j.add("}");
+        write_new(argv[4],storage::encode_native_series(series));
+    }else if(command=="series-append"){
+        require(argc==5,"series-append BASE FRAMES OUT");auto series=storage::read_native_series(argv[2]);
+        storage::ReadOnlyMappedFile frames(argv[3]);series.append_stream(frames.bytes());
+        j.add("{\"written\":true,\"last_sequence\":");j.id(series.last_sequence());j.add("}");
+        write_new(argv[4],storage::encode_native_series(series));
+    }else if(command=="series-inspect"){
+        require(argc==3,"series-inspect FILE");const auto series=storage::read_native_series(argv[2]);
+        j.add("{\"namespace\":");j.id(series.source_namespace());j.add(",\"first_sequence\":");j.id(series.first_sequence());
+        j.add(",\"last_sequence\":");j.id(series.last_sequence());j.add(",\"segments\":");j.id(series.segment_count());
+        j.add(",\"bytes\":");j.id(series.archive_bytes());j.add(",\"checkpoints\":[");bool first=true;
+        for(const auto seq:series.checkpoint_sequences()){if(!first)j.add(",");first=false;j.id(seq);}j.add("]}");
+    }else if(command=="series-at"){
+        require(argc==4,"series-at FILE SEQUENCE");const auto series=storage::read_native_series(argv[2]);const auto pin=series.at(number(argv[3]));
+        j.add("{\"sequence\":");j.id(pin.sequence());j.add(",\"starting_sequence\":");j.id(pin.stats().starting_sequence);
+        j.add(",\"replayed_segments\":");j.id(pin.stats().replayed_segments);j.add(",\"used_checkpoint\":");j.add(pin.stats().used_checkpoint?"true":"false");
+        j.add(",\"tensors\":");j.id(pin.endpoint().tensors.size());j.add(",\"grades\":[");
+        for(std::size_t k=0;k<pin.endpoint().source.grade_count();++k){if(k)j.add(",");const auto& arena=pin.endpoint().source.grade(core::Grade{static_cast<std::uint16_t>(k)});
+            j.add("{\"grade\":");j.id(k);j.add(",\"cells\":");j.id(arena.cell_count());j.add(",\"retained_occurrences\":");j.id(arena.incidence_count());j.add("}");}j.add("]}");
+    }else if(command=="series-checkpoint" || command=="series-compact"){
+        const bool compact=command=="series-compact";require(compact?argc>=4:argc==5,"series-checkpoint FILE SEQUENCE OUT / series-compact FILE OUT [SEQUENCE ...]");
+        auto series=storage::read_native_series(argv[2]);
+        if(compact){std::vector<std::uint64_t> selected;for(int i=4;i<argc;++i)selected.push_back(number(argv[i]));series.repack_checkpoints(selected);}
+        else series.checkpoint(number(argv[3]));
+        j.add("{\"written\":true,\"retained_segments\":");j.id(series.segment_count());j.add("}");
+        write_new(argv[compact?3:4],storage::encode_native_series(series));
+    }else if(command=="series-field"){
+        require(argc==6,"series-field FILE FIRST LAST TENSOR_KEY");const auto series=storage::read_native_series(argv[2]);
+        const auto evolution=series.difference(number(argv[3]),number(argv[4])).field_evolution(number(argv[5]));
+        const auto vector=[&](const numeric::RationalVector& xs){j.add("[");bool first=true;for(const auto& q:xs){if(!first)j.add(",");first=false;j.str(q.get_str());}j.add("]");};
+        j.add("{\"carrier\":");j.id(evolution.carrier);j.add(",\"transported_initial\":");vector(evolution.accumulation.transported_initial);
+        j.add(",\"propagated_innovations\":[");bool first=true;for(const auto& xs:evolution.accumulation.propagated_innovations){if(!first)j.add(",");first=false;vector(xs);}
+        j.add("],\"terminal\":");vector(evolution.accumulation.terminal);j.add("}");
     }else if(command=="sample"){
         require(argc==3 || argc==4,"sample OUT [base|changed]");const auto mode=argc==4?std::string_view(argv[3]):"base";require(mode=="base" || mode=="changed","unknown sample mode");
         const auto snapshot=sample(mode=="changed");inspect(j,snapshot);write_new(argv[2],encode_interpreted_snapshot(snapshot));

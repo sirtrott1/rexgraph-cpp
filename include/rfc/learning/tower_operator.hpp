@@ -15,6 +15,14 @@ enum class TowerOperatorChannelKind : std::uint8_t {
     Dirac
 };
 
+inline void validate_tower_operator_channel(TowerOperatorChannelKind kind) {
+    switch (kind) {
+        case TowerOperatorChannelKind::Identity: case TowerOperatorChannelKind::Lowering:
+        case TowerOperatorChannelKind::Raising: case TowerOperatorChannelKind::Dirac: return;
+    }
+    throw std::invalid_argument("unknown tower operator channel");
+}
+
 inline std::string_view tower_operator_channel_name(TowerOperatorChannelKind kind) noexcept {
     switch (kind) {
         case TowerOperatorChannelKind::Identity: return "identity";
@@ -28,6 +36,7 @@ inline std::string_view tower_operator_channel_name(TowerOperatorChannelKind kin
 inline field::MachineLatticeTowerField apply_tower_operator_channel(
     TowerOperatorChannelKind kind,
     const field::MachineLatticeTowerField& input) {
+    validate_tower_operator_channel(kind);
     switch (kind) {
         case TowerOperatorChannelKind::Identity: return input;
         case TowerOperatorChannelKind::Lowering: return field::lattice_lowering_apply(input);

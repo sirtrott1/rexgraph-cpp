@@ -34,10 +34,11 @@ public:
             occurrence_slots_.push_back(slot);
             occurrence_lower_.push_back(lower);
             ++multiplicity_[lower];
-            occurrence_offsets_.push_back(occurrence_offsets_.back() + dim);
+            occurrence_offsets_.push_back(machine::checked_size_add(occurrence_offsets_.back(), dim));
         }
     }
 
+    LinearOccurrenceCover(const LinearStalkBundle&&, core::Grade) = delete;
     [[nodiscard]] core::Grade upper_grade() const noexcept { return upper_grade_; }
     [[nodiscard]] core::Grade lower_grade() const noexcept { return lower_grade_; }
     [[nodiscard]] std::size_t occurrence_count() const noexcept { return occurrence_slots_.size(); }
@@ -126,11 +127,22 @@ public:
     [[nodiscard]] numeric::RationalVector scatter_sections(const std::vector<RelationLocalSection>& sections) const {
         numeric::RationalVector local(occurrence_dimension(), numeric::Rational{0});
         std::vector<bool> written(occurrence_count(), false);
+        const auto& arena = stalks_->complex().grade(upper_grade_);
+        std::vector<bool> source_written(arena.cell_count(), false);
         for (const auto& section : sections) {
             if (section.relation.grade != upper_grade_) throw std::invalid_argument("relation section belongs to another grade");
+            if (section.relation.index >= arena.cell_count()) throw std::out_of_range("relation section owner");
+            if (source_written[section.relation.index]) throw std::invalid_argument("duplicate relation section");
+            source_written[section.relation.index] = true;
+            if (section.upper_value.size() != stalks_->dimension(section.relation))
+                throw std::invalid_argument("relation section upper stalk dimension mismatch");
             for (const auto& occurrence : section.boundary_values) {
                 if (occurrence.incidence_slot >= incidence_to_occurrence_.size()) throw std::out_of_range("relation section incidence slot");
-                const auto o = incidence_to_occurrence_[occurrence.incidence_slot];
+                const auto slot = occurrence.incidence_slot;
+                if (arena.upper_index[slot] != section.relation.index ||
+                    occurrence.lower != core::CellId{lower_grade_, arena.lower_index[slot]})
+                    throw std::invalid_argument("relation section occurrence owner/participant mismatch");
+                const auto o = incidence_to_occurrence_[slot];
                 if (o == absent) throw std::logic_error("relation section refers to inactive occurrence");
                 if (written[o]) throw std::invalid_argument("occurrence contribution written more than once");
                 const auto dim = occurrence_offsets_[o + 1u] - occurrence_offsets_[o];

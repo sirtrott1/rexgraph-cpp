@@ -1,0 +1,20 @@
+cmake_minimum_required(VERSION 3.24)
+project(rfc_engine_consumer LANGUAGES CXX)
+if(NOT RFC_SOURCE_DIR)
+  message(FATAL_ERROR "Set RFC_SOURCE_DIR to the pinned RFC source root")
+endif()
+# Standalone host example. No downloads, engine dependency, tests/apps or optional
+# providers are pulled into this downstream mathematical consumer.
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+foreach(option RFC_BUILD_APPS RFC_BUILD_LOCAL_TOOLS RFC_BUILD_TESTS RFC_BUILD_BENCHMARKS
+               RFC_BUILD_CAPABILITY_DEMO RFC_BUILD_LEARNING)
+  set(${option} OFF CACHE BOOL "" FORCE)
+endforeach()
+add_subdirectory("${RFC_SOURCE_DIR}" rfc EXCLUDE_FROM_ALL)
+add_library(engine_math STATIC engine_math.cpp)
+set_target_properties(engine_math PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_compile_features(engine_math PUBLIC cxx_std_20)
+target_include_directories(engine_math PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(engine_math PRIVATE rfc::core)
+add_executable(engine_math_smoke main.cpp)
+target_link_libraries(engine_math_smoke PRIVATE engine_math)

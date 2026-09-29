@@ -626,6 +626,8 @@ class TemporalSegmentStreamDecoder {
 template <class Consumer>
 inline void visit_temporal_segments(const std::filesystem::path &path, Consumer &&consume,
                                     const TemporalReadLimits &limits = {}) {
+    validate_file_path(path);
+    if (!std::filesystem::is_regular_file(path)) throw std::invalid_argument("temporal stream must be a regular file");
     temporal_source_detail::require(std::filesystem::file_size(path) <= limits.max_file_bytes,
                                     "temporal stream exceeds byte limit");
     std::ifstream in(path, std::ios::binary);
@@ -655,11 +657,15 @@ inline TemporalSegment read_temporal_segment(const std::filesystem::path &path,
     temporal_source_detail::require(segments.size() == 1, "expected exactly one temporal segment");
     return std::move(segments.front());
 }
-// Single-writer append only. Existing frames are validated before append and
-// never rewritten. This is NOT a transaction/crash-recovery/multiwriter API.
+// Single-writer logical append. Existing frames are validated and copied byte
+// for byte into a staged replacement; a failed write cannot tear the old stream.
+// This adds O(existing file bytes) physical copy work, not bounded in-place append.
+// It is NOT an fsync transaction/crash-recovery/multiwriter API.
 inline std::uint64_t append_temporal_segment(const std::filesystem::path &path,
                                              const TemporalSegment &segment,
                                              const TemporalReadLimits &limits = {}) {
+    validate_file_path(path);
+    file_io_detail::check_destination(path, FilePublication::ReplaceRegular);
     std::size_t frame_count = 0;
     if (std::filesystem::exists(path) && std::filesystem::file_size(path) != 0) {
         std::optional<std::array<std::uint64_t, 3>> tail;
@@ -680,13 +686,24 @@ inline std::uint64_t append_temporal_segment(const std::filesystem::path &path,
     temporal_source_detail::require(previous_size <= limits.max_file_bytes &&
                                         bytes.size() <= limits.max_file_bytes - previous_size,
                                     "append would exceed temporal byte limit");
-    std::ofstream out(path, std::ios::binary | std::ios::app);
-    if (!out)
-        throw std::runtime_error("unable to open temporal append stream");
-    out.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-    out.flush();
-    if (!out)
-        throw std::runtime_error("unable to append temporal segment");
+    publish_file_exact(path, FilePublication::ReplaceRegular, [&](std::ostream& out) {
+        if (previous_size) {
+            std::ifstream in(path, std::ios::binary);
+            if (!in) throw std::runtime_error("cannot reopen temporal predecessor");
+            std::array<std::byte, 65536> chunk;
+            std::uintmax_t copied = 0;
+            while (in) {
+                in.read(reinterpret_cast<char*>(chunk.data()), static_cast<std::streamsize>(chunk.size()));
+                const auto n = static_cast<std::size_t>(in.gcount());
+                temporal_source_detail::require(n <= previous_size - copied, "temporal predecessor grew during copy");
+                write_stream_exact(out, std::span<const std::byte>(chunk).first(n));
+                copied += n;
+            }
+            if (in.bad() || !in.eof() || copied != previous_size)
+                throw std::runtime_error("temporal predecessor changed or failed during copy");
+        }
+        write_stream_exact(out, bytes);
+    });
     return bytes.size();
 }
 

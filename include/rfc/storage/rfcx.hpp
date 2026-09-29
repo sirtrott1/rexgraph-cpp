@@ -1,4 +1,5 @@
 #pragma once
+#include "rfc/storage/file_io.hpp"
 
 #include "rfc/composite/execution.hpp"
 #include "rfc/core/builder.hpp"
@@ -671,10 +672,7 @@ inline RfcxImage encode_rfcx(const core::RelationalComplex& complex) {
 inline RfcxWriteStats write_rfcx(const core::RelationalComplex& complex,
                                  const std::filesystem::path& path) {
     const auto image = encode_rfcx(complex);
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    if (!out) throw std::runtime_error("unable to create RFCX file");
-    out.write(reinterpret_cast<const char*>(image.bytes.data()), static_cast<std::streamsize>(image.bytes.size()));
-    if (!out) throw std::runtime_error("unable to write RFCX file");
+    write_file_exact(path, image.bytes);
     return image.stats;
 }
 

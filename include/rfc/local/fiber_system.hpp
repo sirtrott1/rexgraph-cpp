@@ -50,6 +50,19 @@ public:
         overrides_[grade.value][incidence_slot] = std::move(map);
     }
 
+    // Check the declared carrier contract without materializing a transport.
+    // Zero source amplitudes do not excuse an undefined rectangular map.
+    void validate_transport(core::Grade grade, std::size_t incidence_slot) const {
+        if (grade.value == 0 || grade.value >= complex().grade_count()) throw std::out_of_range("flag map grade");
+        const auto& arena = complex().grade(grade);
+        if (incidence_slot >= arena.incidence_count()) throw std::out_of_range("flag map incidence");
+        if (overrides_[grade.value][incidence_slot]) return;
+        const core::CellId upper{grade, arena.upper_index[incidence_slot]};
+        const core::CellId lower{core::Grade{static_cast<std::uint16_t>(grade.value - 1u)}, arena.lower_index[incidence_slot]};
+        if (stalks_.dimension(upper) != stalks_.dimension(lower))
+            throw std::logic_error("non-equal stalk dimensions require an explicit flag transport");
+    }
+
     [[nodiscard]] LinearFlagMap flag_map(core::Grade grade, std::size_t incidence_slot) const {
         if (grade.value == 0 || grade.value >= complex().grade_count()) throw std::out_of_range("flag map grade");
         const auto& arena = complex().grade(grade);
@@ -79,7 +92,7 @@ public:
             if (!occurrence.exists) continue;
             auto flag = flag_map(grade, occurrence.incidence_slot);
             blocks.push_back(LocalTensorBlock{flag.lower, flag.incidence_slot, offset, std::move(flag.transport)});
-            offset += blocks.back().map.rows();
+            offset = machine::checked_size_add(offset, blocks.back().map.rows());
         }
         return LocalRelationTensor(source, stalks_.dimension(source), std::move(blocks));
     }

@@ -74,21 +74,12 @@ inline TemporalEndpoint decode_temporal_endpoint(core::RelationalComplex source,
 }
 inline std::uint64_t write_temporal_endpoint(const TemporalEndpoint& endpoint,const std::filesystem::path& path) {
     const auto bytes=encode_temporal_endpoint(endpoint);
-    std::ofstream out(path,std::ios::binary|std::ios::trunc);
-    if(!out)throw std::runtime_error("unable to create temporal endpoint sidecar");
-    out.write(reinterpret_cast<const char*>(bytes.data()),static_cast<std::streamsize>(bytes.size()));out.flush();
-    if(!out)throw std::runtime_error("unable to write temporal endpoint sidecar");
+    write_file_exact(path, bytes);
     return bytes.size();
 }
 inline TemporalEndpoint read_temporal_endpoint(const MappedRfcx& source,const std::filesystem::path& path,
                                                const TemporalReadLimits& limits={}) {
-    const auto size=std::filesystem::file_size(path);
-    temporal_source_detail::require(size<=limits.max_file_bytes,"endpoint sidecar exceeds byte limit");
-    std::ifstream in(path,std::ios::binary);
-    if(!in)throw std::runtime_error("unable to open endpoint sidecar");
-    std::vector<std::byte> bytes(static_cast<std::size_t>(size));
-    in.read(reinterpret_cast<char*>(bytes.data()),static_cast<std::streamsize>(bytes.size()));
-    if(!in)throw std::runtime_error("unable to read endpoint sidecar");
+    const auto bytes = read_file_exact(path, limits.max_file_bytes);
     auto materialized=source.materialize();
     temporal_source_detail::require(encode_rfcx(materialized).stats.payload_hash==source.payload_hash(),
                                    "endpoint source is not canonical reconstructible RFCX");

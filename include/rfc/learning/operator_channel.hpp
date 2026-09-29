@@ -15,6 +15,14 @@ enum class OperatorChannelKind : std::uint8_t {
     Hodge
 };
 
+inline void validate_operator_channel(OperatorChannelKind kind) {
+    switch (kind) {
+        case OperatorChannelKind::Identity: case OperatorChannelKind::HodgeDown:
+        case OperatorChannelKind::HodgeUp: case OperatorChannelKind::Hodge: return;
+    }
+    throw std::invalid_argument("unknown operator channel");
+}
+
 inline std::string_view operator_channel_name(OperatorChannelKind kind) noexcept {
     switch (kind) {
         case OperatorChannelKind::Identity: return "identity";
@@ -28,6 +36,7 @@ inline std::string_view operator_channel_name(OperatorChannelKind kind) noexcept
 inline field::MachineLatticeField apply_operator_channel(
     OperatorChannelKind kind,
     const field::MachineLatticeField& input) {
+    validate_operator_channel(kind);
     const auto& complex = input.complex();
     const auto grade = input.grade();
     if (kind == OperatorChannelKind::Identity) return input;
@@ -60,6 +69,7 @@ inline field::MachineLatticeField apply_operator_channel(
 inline field::ExactLatticeField apply_operator_channel(
     OperatorChannelKind kind,
     const field::ExactLatticeField& input) {
+    validate_operator_channel(kind);
     const auto& complex = input.complex();
     const auto grade = input.grade();
     if (kind == OperatorChannelKind::Identity) return input;

@@ -18,6 +18,7 @@ class RelationalLocalCarrier {
 public:
     explicit RelationalLocalCarrier(const core::RelationalComplex& complex) noexcept : complex_(&complex) {}
 
+    RelationalLocalCarrier(const core::RelationalComplex&&) = delete;
     [[nodiscard]] const core::RelationalComplex& complex() const noexcept { return *complex_; }
 
     void validate_cell(core::CellId cell) const {

@@ -20,9 +20,14 @@ public:
         if (upper_grade.value == 0 || upper_grade.value >= fibers.complex().grade_count()) {
             throw std::out_of_range("grade tensor field requires a positive grade");
         }
+        const auto& arena = fibers.complex().grade(upper_grade_);
+        const auto exists = fibers.complex().signature().existence_aspect();
+        for (std::size_t slot = 0; slot < arena.incidence_count(); ++slot)
+            if (arena.aspects.get(exists, slot)) fibers.validate_transport(upper_grade_, slot);
         upper_offsets_ = fibers.stalks().offsets(upper_grade_);
     }
 
+    GradeTensorField(const LinearRelationalFiberSystem&&, core::Grade) = delete;
     [[nodiscard]] core::Grade upper_grade() const noexcept { return upper_grade_; }
     [[nodiscard]] const LinearOccurrenceCover& occurrence_cover() const noexcept { return cover_; }
     [[nodiscard]] std::size_t source_dimension() const noexcept { return upper_offsets_.back(); }

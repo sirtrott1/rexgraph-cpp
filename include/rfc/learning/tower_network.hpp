@@ -17,9 +17,15 @@ public:
                               std::int64_t bias = 0,
                               IntegerActivation activation = IntegerActivation::Identity)
         : complex_(&complex), channels_(std::move(channels)), gains_(std::move(gains)), bias_(bias), activation_(activation) {
+        validate_integer_activation(activation_);
+        for (const auto channel : channels_) validate_tower_operator_channel(channel);
         if (channels_.size() != gains_.size()) throw std::invalid_argument("tower layer channel/gain mismatch");
     }
 
+    CompiledIntegerTowerLayer(const core::RelationalComplex&&,
+        std::vector<TowerOperatorChannelKind>, std::vector<std::int64_t>,
+        std::int64_t = 0, IntegerActivation = IntegerActivation::Identity) = delete;
+    [[nodiscard]] const core::RelationalComplex& complex() const noexcept { return *complex_; }
     [[nodiscard]] const std::vector<TowerOperatorChannelKind>& channels() const noexcept { return channels_; }
     [[nodiscard]] const std::vector<std::int64_t>& gains() const noexcept { return gains_; }
 
@@ -64,6 +70,7 @@ inline CompiledIntegerTowerLayerPlan compile_integer_tower_layer(
     const std::vector<std::int64_t>& original_gains,
     std::int64_t bias = 0,
     IntegerActivation activation = IntegerActivation::Identity) {
+    validate_integer_activation(activation);
     auto basis = reduce_tower_operator_channels(complex, candidate_channels);
     auto reduced = reduce_machine_tower_channel_gains(basis, original_gains);
     CompiledIntegerTowerLayer layer(complex, basis.basis_channels(), reduced, bias, activation);
@@ -73,7 +80,11 @@ inline CompiledIntegerTowerLayerPlan compile_integer_tower_layer(
 class IntegerTowerNetwork {
 public:
     explicit IntegerTowerNetwork(const core::RelationalComplex& complex) : complex_(&complex) {}
-    void add_layer(CompiledIntegerTowerLayer layer) { layers_.push_back(std::move(layer)); }
+    IntegerTowerNetwork(const core::RelationalComplex&&) = delete;
+    void add_layer(CompiledIntegerTowerLayer layer) {
+        if (&layer.complex() != complex_) throw std::invalid_argument("tower network layer source mismatch");
+        layers_.push_back(std::move(layer));
+    }
     [[nodiscard]] std::size_t size() const noexcept { return layers_.size(); }
 
     [[nodiscard]] field::MachineLatticeTowerField forward(const field::MachineLatticeTowerField& input) const {
@@ -107,6 +118,7 @@ inline IntegerTowerFit fit_small_integer_tower_layer(
     std::int64_t parameter_min,
     std::int64_t parameter_max,
     IntegerActivation activation = IntegerActivation::Identity) {
+    validate_integer_activation(activation);
     if (basis.complex != &complex) throw std::invalid_argument("tower fit basis mismatch");
     if (samples.empty()) throw std::invalid_argument("tower fit requires samples");
     if (parameter_min > parameter_max) throw std::invalid_argument("invalid tower parameter range");
@@ -156,5 +168,10 @@ inline IntegerTowerFit fit_small_integer_tower_layer(
     }
     return best;
 }
+
+inline CompiledIntegerTowerLayerPlan compile_integer_tower_layer(
+    const core::RelationalComplex&&, const std::vector<TowerOperatorChannelKind>&,
+    const std::vector<std::int64_t>&, std::int64_t = 0,
+    IntegerActivation = IntegerActivation::Identity) = delete;
 
 } // namespace rfc::learning

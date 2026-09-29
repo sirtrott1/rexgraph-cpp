@@ -1,4 +1,5 @@
 #pragma once
+#include "rfc/storage/file_io.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -48,16 +49,17 @@ public:
     }
 
     void open(const std::filesystem::path& path) {
+        validate_file_path(path);
         close();
 #if defined(__unix__) || defined(__APPLE__)
-        fd_ = ::open(path.c_str(), O_RDONLY);
+        fd_ = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK);
         if (fd_ < 0) throw std::runtime_error("unable to open mapped file");
         struct stat st {};
         if (::fstat(fd_, &st) != 0) {
             close();
             throw std::runtime_error("unable to stat mapped file");
         }
-        if (st.st_size < 0 || static_cast<std::uintmax_t>(st.st_size) > static_cast<std::uintmax_t>(std::numeric_limits<std::ptrdiff_t>::max())) {
+        if (!S_ISREG(st.st_mode) || st.st_size < 0 || static_cast<std::uintmax_t>(st.st_size) > static_cast<std::uintmax_t>(std::numeric_limits<std::ptrdiff_t>::max())) {
             close();
             throw std::runtime_error("invalid mapped file size");
         }
@@ -83,6 +85,7 @@ public:
             in.read(reinterpret_cast<char*>(owned_.data()), static_cast<std::streamsize>(owned_.size()));
             if (!in) throw std::runtime_error("unable to read file");
         }
+        if (in.peek() != std::char_traits<char>::eof() || in.bad()) throw std::runtime_error("file changed or unreadable during read");
         data_ = owned_.data();
         size_ = owned_.size();
 #endif

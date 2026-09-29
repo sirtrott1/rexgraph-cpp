@@ -33,18 +33,29 @@ inline std::int64_t checked_sub_i64(std::int64_t lhs, std::int64_t rhs) {
 #endif
 }
 
+// Portable reference: check signed bounds before multiplication, never after UB.
+inline std::int64_t checked_mul_i64_portable(std::int64_t lhs, std::int64_t rhs) {
+    constexpr auto lo = std::numeric_limits<std::int64_t>::min();
+    constexpr auto hi = std::numeric_limits<std::int64_t>::max();
+    bool overflow = false;
+    if (lhs > 0) {
+        if (rhs > 0) overflow = lhs > hi / rhs;
+        else if (rhs < 0) overflow = rhs < lo / lhs;
+    } else if (lhs < 0) {
+        if (rhs > 0) overflow = lhs < lo / rhs;
+        else if (rhs < 0) overflow = lhs < hi / rhs;
+    }
+    if (overflow) throw std::overflow_error("int64 multiplication overflow");
+    return lhs * rhs;
+}
+
 inline std::int64_t checked_mul_i64(std::int64_t lhs, std::int64_t rhs) {
 #if defined(__GNUC__) || defined(__clang__)
     std::int64_t result{};
     if (__builtin_mul_overflow(lhs, rhs, &result)) throw std::overflow_error("int64 multiplication overflow");
     return result;
 #else
-    if (lhs == 0 || rhs == 0) return 0;
-    if (lhs == -1 && rhs == std::numeric_limits<std::int64_t>::min()) throw std::overflow_error("int64 multiplication overflow");
-    if (rhs == -1 && lhs == std::numeric_limits<std::int64_t>::min()) throw std::overflow_error("int64 multiplication overflow");
-    const auto result = lhs * rhs;
-    if (result / rhs != lhs) throw std::overflow_error("int64 multiplication overflow");
-    return result;
+    return checked_mul_i64_portable(lhs, rhs);
 #endif
 }
 

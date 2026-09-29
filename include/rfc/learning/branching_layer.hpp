@@ -16,7 +16,10 @@ public:
     BranchTypeGainLayer(const local::RelationalFiberSystem& fibers, core::Grade grade)
         : fibers_(&fibers), grade_(grade), tensor_(fibers, grade) {}
 
+    BranchTypeGainLayer(const local::RelationalFiberSystem&&, core::Grade) = delete;
     void set_gain(core::RelationTypeId type, numeric::Rational gain) {
+        (void)fibers_->complex().signature().type(type);
+        if (gain.get_den() == 0) throw std::invalid_argument("zero branch gain denominator");
         gain.canonicalize();
         gains_[type] = std::move(gain);
     }

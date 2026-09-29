@@ -15,13 +15,20 @@ enum class IntegerActivation : std::uint8_t {
     Sign
 };
 
-inline std::int64_t apply_integer_activation(IntegerActivation activation, std::int64_t value) noexcept {
+inline void validate_integer_activation(IntegerActivation activation) {
+    switch (activation) {
+        case IntegerActivation::Identity: case IntegerActivation::ReLU: case IntegerActivation::Sign: return;
+    }
+    throw std::invalid_argument("unknown integer activation");
+}
+
+inline std::int64_t apply_integer_activation(IntegerActivation activation, std::int64_t value) {
     switch (activation) {
         case IntegerActivation::Identity: return value;
         case IntegerActivation::ReLU: return value > 0 ? value : 0;
         case IntegerActivation::Sign: return value >= 0 ? 1 : -1;
     }
-    return value;
+    throw std::invalid_argument("unknown integer activation");
 }
 
 class CompiledIntegerRelationalLayer {
@@ -33,10 +40,17 @@ public:
                                    std::int64_t bias = 0,
                                    IntegerActivation activation = IntegerActivation::Identity)
         : complex_(&complex), grade_(grade), channels_(std::move(channels)), gains_(std::move(gains)), bias_(bias), activation_(activation) {
+        validate_integer_activation(activation_);
+        for (const auto channel : channels_) validate_operator_channel(channel);
         if (channels_.size() != gains_.size()) throw std::invalid_argument("compiled relational layer channel/gain mismatch");
         if (grade.value >= complex.grade_count()) throw std::out_of_range("compiled relational layer grade");
     }
 
+    CompiledIntegerRelationalLayer(const core::RelationalComplex&&, core::Grade,
+                                   std::vector<OperatorChannelKind>, std::vector<std::int64_t>,
+                                   std::int64_t = 0, IntegerActivation = IntegerActivation::Identity) = delete;
+    [[nodiscard]] const core::RelationalComplex& complex() const noexcept { return *complex_; }
+    [[nodiscard]] core::Grade grade() const noexcept { return grade_; }
     [[nodiscard]] const std::vector<OperatorChannelKind>& channels() const noexcept { return channels_; }
     [[nodiscard]] const std::vector<std::int64_t>& gains() const noexcept { return gains_; }
     [[nodiscard]] std::int64_t bias() const noexcept { return bias_; }
@@ -77,6 +91,7 @@ inline CompiledIntegerLayerPlan compile_integer_relational_layer(
     const std::vector<std::int64_t>& original_gains,
     std::int64_t bias = 0,
     IntegerActivation activation = IntegerActivation::Identity) {
+    validate_integer_activation(activation);
     auto basis = reduce_operator_channels(complex, grade, candidate_channels);
     auto reduced_gains = reduce_machine_channel_gains(basis, original_gains);
     CompiledIntegerRelationalLayer layer(complex, grade, basis.basis_channels(), reduced_gains, bias, activation);
@@ -90,7 +105,12 @@ public:
         if (grade.value >= complex.grade_count()) throw std::out_of_range("integer relational network grade");
     }
 
-    void add_layer(CompiledIntegerRelationalLayer layer) { layers_.push_back(std::move(layer)); }
+    IntegerRelationalNetwork(const core::RelationalComplex&&, core::Grade) = delete;
+    void add_layer(CompiledIntegerRelationalLayer layer) {
+        if (&layer.complex() != complex_ || layer.grade() != grade_)
+            throw std::invalid_argument("network layer source/grade mismatch");
+        layers_.push_back(std::move(layer));
+    }
     [[nodiscard]] std::size_t size() const noexcept { return layers_.size(); }
 
     [[nodiscard]] field::MachineLatticeField forward(const field::MachineLatticeField& input) const {
@@ -133,6 +153,7 @@ inline TwoLayerIntegerFit fit_small_two_layer_network(
     std::int64_t parameter_min,
     std::int64_t parameter_max,
     IntegerActivation hidden_activation = IntegerActivation::ReLU) {
+    validate_integer_activation(hidden_activation);
     if (basis.complex != &complex || basis.grade != grade) throw std::invalid_argument("network fit basis mismatch");
     if (samples.empty()) throw std::invalid_argument("network fit requires samples");
     if (parameter_min > parameter_max) throw std::invalid_argument("invalid network parameter range");
@@ -181,5 +202,10 @@ inline TwoLayerIntegerFit fit_small_two_layer_network(
     }
     return best;
 }
+
+inline CompiledIntegerLayerPlan compile_integer_relational_layer(
+    const core::RelationalComplex&&, core::Grade, const std::vector<OperatorChannelKind>&,
+    const std::vector<std::int64_t>&, std::int64_t = 0,
+    IntegerActivation = IntegerActivation::Identity) = delete;
 
 } // namespace rfc::learning

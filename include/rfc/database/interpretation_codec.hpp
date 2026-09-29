@@ -102,11 +102,7 @@ inline storage::TemporalReadLimits policy(const InterpretationLimits& limits){
     p.max_records=std::min(p.max_records,limits.max_records);p.declarations=limits.declarations;return p;
 }
 inline void write(const std::filesystem::path& path,std::span<const std::byte> bytes){
-    require(!std::filesystem::exists(path),"interpretation output already exists");
-    interpretation_detail::bound(bytes.size(),static_cast<std::size_t>(std::numeric_limits<std::streamsize>::max()),"interpretation stream size");
-    std::ofstream out(path,std::ios::binary);if(!out)throw std::runtime_error("cannot create interpretation archive");
-    out.write(reinterpret_cast<const char*>(bytes.data()),static_cast<std::streamsize>(bytes.size()));out.close();
-    if(!out)throw std::runtime_error("interpretation archive write failed");
+    storage::write_file_exact(path,bytes,storage::FilePublication::CreateNew);
 }
 } // namespace rfc::database::interpretation_codec_detail
 
@@ -149,7 +145,10 @@ inline InterpretationUpdate decode_interpretation_update(std::span<const std::by
 }
 inline void write_interpreted_snapshot(const InterpretedSnapshot& snapshot,const std::filesystem::path& path){interpretation_codec_detail::write(path,encode_interpreted_snapshot(snapshot));}
 inline InterpretedSnapshot read_interpreted_snapshot(const std::filesystem::path& path,const InterpretationLimits& limits={}){
+    storage::validate_file_path(path);
     interpretation_detail::bound(std::filesystem::file_size(path),limits.max_archive_bytes,"interpretation input byte budget");
-    storage::ReadOnlyMappedFile file(path);return decode_interpreted_snapshot(file.bytes(),limits);
+    storage::ReadOnlyMappedFile file(path);
+    interpretation_detail::bound(file.size(),limits.max_archive_bytes,"opened interpretation input byte budget");
+    return decode_interpreted_snapshot(file.bytes(),limits);
 }
 } // namespace rfc::database
