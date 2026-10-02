@@ -23,3 +23,4 @@ write_basic_package_version_file(${CMAKE_CURRENT_BINARY_DIR}/RFCConfigVersion.cm
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/RFCConfig.cmake
   ${CMAKE_CURRENT_BINARY_DIR}/RFCConfigVersion.cmake
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/RFC)
+install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/rfc)

@@ -10,6 +10,9 @@ branching relations, local stalks and fields, native algebra, metric and Hodge
 operators, typed accessions, and ordered temporal persistence. Structural support,
 activity, zero values, and numerical cancellation remain distinct.
 
+This software is proprietary and available for use only through the author's
+personal distribution. See [LICENSE](LICENSE).
+
 ## Build and test
 
 Requirements: CMake 3.24 or later, a C++20 compiler, pkg-config, GMP/GMPXX,
