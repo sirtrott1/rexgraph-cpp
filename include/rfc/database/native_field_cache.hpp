@@ -13,6 +13,7 @@ struct NativeFieldCacheLimits {
     std::size_t plans{32}, results{128}, descriptor_bytes{64u * 1024u * 1024u}, result_slots{16000000};
     std::size_t in_flight{32}, pending_descriptor_bytes{64u * 1024u * 1024u};
     std::size_t idle_workspaces{8}, idle_workspace_slots{1000000};
+    std::size_t retained_result_bytes{512u*1024u*1024u},idle_workspace_bytes{256u*1024u*1024u};
 };
 struct NativeFieldCacheStats {
     std::size_t plan_hits{}, result_hits{}, in_flight_hits{}, compiled_plans{}, applications{}, failed_jobs{};
@@ -20,13 +21,14 @@ struct NativeFieldCacheStats {
     std::size_t plans{}, results{}, in_flight{}, charged_descriptor_bytes{}, result_slots{}, pending_descriptor_bytes{};
     std::size_t workspace_creations{}, workspace_hits{}, idle_workspaces{}, idle_workspace_slots{};
     std::size_t adopted_plans{}, prepared_input_uses{};
+    std::size_t retained_result_bytes{},idle_workspace_bytes{};
 };
 struct NativeFieldReuse { bool plan{}, result{}, in_flight{}, prepared{}; };
 enum class NativeFieldCacheStage { BeforeCompile, BeforeApply, BeforePublish, BeforeAdopt };
 using NativeFieldCacheHook = std::function<void(NativeFieldCacheStage)>;
 namespace native_field_cache_detail {
 struct Values {
-    numeric::RationalVector data; std::size_t bits{};
+    numeric::RationalVector data; std::size_t bits{},object_bytes{};
     std::string implementation{"PreparedGradeFieldAction/GMP/serial-prepared-v1"};
     std::optional<runtime::CpuTileRunReport> execution;
 };
@@ -138,7 +140,7 @@ class NativeFieldCache {
     struct ResultEntry { std::uint64_t hash, order; NativeFieldAnalysis analysis; std::shared_ptr<const Values> values; };
     struct Published {
         std::vector<PlanEntry> plans; std::vector<ResultEntry> results; std::uint64_t order{};
-        std::size_t bytes{}, slots{};
+        std::size_t bytes{}, slots{},result_bytes{};
     };
     struct Job {
         std::uint64_t hash; NativeFieldAnalysis analysis;
@@ -163,11 +165,12 @@ public:
         auto out = stats_; out.plans = published_->plans.size(); out.results = published_->results.size();
         out.in_flight = jobs_.size(); out.charged_descriptor_bytes = published_->bytes;
         out.result_slots = published_->slots; out.pending_descriptor_bytes = pending_bytes_;
-        out.idle_workspaces = idle_.size(); out.idle_workspace_slots = idle_slots_; return out;
+        out.idle_workspaces = idle_.size(); out.idle_workspace_slots = idle_slots_;
+        out.retained_result_bytes=published_->result_bytes;out.idle_workspace_bytes=idle_bytes_;return out;
     }
     void clear() {
         native_field_cache_detail::Guard guard(this); auto empty = std::make_shared<const Published>();
-        std::lock_guard lock(mutex_); published_ = std::move(empty); idle_.clear(); idle_slots_ = 0;
+        std::lock_guard lock(mutex_); published_ = std::move(empty); idle_.clear(); idle_slots_ = idle_bytes_ = 0;
     }
     CachedNativeField evaluate(const NativeFieldAnalysis& analysis, const runtime::ExecutionLease& lease = runtime::ExecutionLease{},
                                const NativeFieldCacheHook& hook = {}) {
@@ -286,6 +289,7 @@ private:
                 if(compiled->action.statistics().factored)values->implementation="PreparedGradeFieldAction/GMP/serial-fiber-v1";
             }
             for (const auto& q : values->data) values->bits = std::max(values->bits,storage::native_execution_detail::integer_bits(q));
+            values->object_bytes=numeric::rational_vector_object_bytes(values->data);
             auto result = CachedNativeField(analysis,values,lease,{reused_plan,false,false,adopted},report);
             if (hook) hook(NativeFieldCacheStage::BeforePublish);
             lease.check_cancelled();
@@ -322,7 +326,7 @@ private:
                 if ((*it)->compiled == compiled && (*it)->ranges.rows_per_tile() == rows &&
                     (partition ? (*it)->ranges.tiles()==partition->tiles() : uniform((*it)->ranges))) {
                     auto scratch = std::move(*it); idle_.erase(it);
-                    idle_slots_ -= scratch->workspace.scratch_slots(); ++stats_.workspace_hits; return scratch;
+                    idle_slots_ -= scratch->workspace.scratch_slots();idle_bytes_-=scratch->workspace.scratch_object_bytes(); ++stats_.workspace_hits; return scratch;
                 }
         }
         auto scratch = partition?std::make_unique<Scratch>(compiled,*partition):std::make_unique<Scratch>(compiled,rows);
@@ -336,11 +340,12 @@ private:
     }
     void recycle(std::unique_ptr<Scratch> scratch) noexcept {
         if (!scratch) return;
+        std::size_t bytes{};try{bytes=scratch->workspace.scratch_object_bytes();}catch(...){return;}
         const auto slots = scratch->workspace.scratch_slots();
         std::lock_guard lock(mutex_);
         // Active scratch stays private; retain only bounded completed loans.
-        if (idle_.size() < limits_.idle_workspaces && slots <= limits_.idle_workspace_slots-idle_slots_) {
-            idle_slots_ += slots; idle_.push_back(std::move(scratch));
+        if (idle_.size() < limits_.idle_workspaces && slots <= limits_.idle_workspace_slots-idle_slots_ && bytes<=limits_.idle_workspace_bytes-idle_bytes_) {
+            idle_slots_ += slots;idle_bytes_+=bytes; idle_.push_back(std::move(scratch));
         }
     }
     void remove(const std::shared_ptr<Job>& job) noexcept {
@@ -349,18 +354,19 @@ private:
     }
     void trim(Published& p, std::size_t& plans, std::size_t& results) const {
         const auto count = [&] {
-            p.bytes = p.slots = 0;
+            p.bytes = p.slots = p.result_bytes = 0;
             for (const auto& entry : p.plans) p.bytes = machine::checked_size_add(p.bytes,native_field_cache_detail::charge(entry.analysis));
             for (const auto& entry : p.results) {
                 p.bytes = machine::checked_size_add(p.bytes,native_field_cache_detail::charge(entry.analysis));
                 p.slots = machine::checked_size_add(p.slots,entry.values->data.size());
+                p.result_bytes=machine::checked_size_add(p.result_bytes,entry.values->object_bytes);
             }
         };
         while (p.plans.size() > limits_.plans) { p.plans.erase(p.plans.begin()); ++plans; }
         while (p.results.size() > limits_.results) { p.results.erase(p.results.begin()); ++results; }
         count();
-        while (p.bytes > limits_.descriptor_bytes || p.slots > limits_.result_slots) {
-            if (p.slots > limits_.result_slots || p.plans.empty() ||
+        while (p.bytes > limits_.descriptor_bytes || p.slots > limits_.result_slots || p.result_bytes>limits_.retained_result_bytes) {
+            if (p.slots > limits_.result_slots || p.result_bytes>limits_.retained_result_bytes || p.plans.empty() ||
                 (!p.results.empty() && p.results.front().order < p.plans.front().order)) {
                 p.results.erase(p.results.begin()); ++results;
             } else { p.plans.erase(p.plans.begin()); ++plans; }
@@ -371,6 +377,6 @@ private:
     std::shared_ptr<const Published> published_;
     std::vector<std::shared_ptr<Job>> jobs_; std::size_t pending_bytes_{};
     mutable std::mutex mutex_; NativeFieldCacheStats stats_;
-    std::vector<std::unique_ptr<Scratch>> idle_; std::size_t idle_slots_{};
+    std::vector<std::unique_ptr<Scratch>> idle_; std::size_t idle_slots_{},idle_bytes_{};
 };
 } // namespace rfc::database

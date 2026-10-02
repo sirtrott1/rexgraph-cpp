@@ -30,6 +30,16 @@ void formats(const std::filesystem::path& out){
     check(encode_native_series(a.series())==encode_native_series(history),"ordered archive changed");
     write_new_file(out/"sample.rfcxs",encode_native_series(history));d.save_file(out/"repacked.rfcxdb");check(read_file(file)==read_file(out/"repacked.rfcxdb"),"directory roundtrip");
     d.save_directory(out/"copied.db");check(opened_equal(out/"copied.db",db),"directory copy changed bytes");
+    const auto first_publication=Database::save_series_directory(history,out/"components.db");
+    check(first_publication.created_objects>0 && opened_equal(out/"components.db",db),"component publication changed canonical database bytes");
+    const auto shared_publication=Database::save_series_directory(history,out/"shared-components.db",out/"components.db");
+    check(shared_publication.created_objects==0 && shared_publication.reused_objects==first_publication.created_objects &&
+        shared_publication.written_object_bytes==0 && opened_equal(out/"shared-components.db",db),"immutable database components were rewritten");
+    auto prefix=sample::history(8);Database::save_series_directory(prefix,out/"prefix-components.db");
+    for(const auto& object:std::filesystem::directory_iterator(out/"prefix-components.db"/"objects"))
+        check((std::filesystem::status(object.path()).permissions()&std::filesystem::perms::owner_write)==std::filesystem::perms::none,"shared components remain writable");
+    const auto incremental=Database::save_series_directory(history,out/"incremental-components.db",out/"prefix-components.db");
+    check(incremental.reused_objects>0 && incremental.created_objects==1 && opened_equal(out/"incremental-components.db",db),"append did not isolate the new canonical frame");
     auto place=db.placement_tensor();check(place.domain().logical_size()==db.manifest().entries.size()*3,"placement shape");
     check(place.support().count()==place.domain().logical_size(),"zero-offset support lost");
     std::map<Digest,std::size_t> ids;

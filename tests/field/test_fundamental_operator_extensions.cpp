@@ -76,7 +76,9 @@ int main(){
     require(strain.energy({1})==2,"chain strain energy mismatch");
     rfc::field::ExactHodgeOperator L2(c,rfc::core::Grade{2},M);
     const auto composite=rfc::field::exact_composite_stationary_field(L2,strain,Rational{1},Rational{0},Rational{1},RationalVector{6});
-    require(composite.exact && composite.value==RationalVector({1}),"composite strain stationary field mismatch");
+    require(composite.exact && composite.value==RationalVector{Rational{1}},"composite strain stationary field mismatch");
+    require(rfc::numeric::add(composite.value,rfc::numeric::add(L2.apply(composite.value),strain.stiffness_apply(composite.value)))==RationalVector{Rational{6}},
+            "composite stationary equation residual mismatch");
 
 
     const auto U=rfc::field::exact_antidirac_cayley_apply(c,M,Rational{1},x);

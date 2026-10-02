@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
+#include <memory>
 #include <vector>
 
 namespace rfc::geometry {
@@ -82,5 +83,45 @@ inline ChainHomotopyCertificate certify_chain_homotopy(
     }
     return {endpoints,exact,std::move(residuals)};
 }
+
+// Owns the declared coordinate maps and both actual carriers. This is a chain
+// homotopy certificate; it does not manufacture a structural cylinder morphism.
+class PreparedChainHomotopy {
+public:
+    PreparedChainHomotopy(std::shared_ptr<const core::RelationalComplex> source,
+        std::shared_ptr<const core::RelationalComplex> target,
+        std::vector<LinearGradeMap> first,std::vector<LinearGradeMap> second,
+        std::vector<numeric::ExactMatrix> homotopy,std::size_t max_coordinate_slots=16000000) {
+        if(!source || !target)throw std::invalid_argument("homotopy requires both immutable carrier owners");
+        std::size_t slots{};
+        if(source->grade_count()>target->grade_count())throw std::invalid_argument("homotopy target grade mismatch");
+        for(std::size_t k=0;k<source->grade_count();++k){
+            const auto grade=core::Grade{static_cast<std::uint16_t>(k)};
+            slots=machine::checked_size_add(slots,machine::checked_size_mul(source->grade(grade).cell_count(),target->grade(grade).cell_count()));
+        }
+        for(const auto& matrix:homotopy)slots=machine::checked_size_add(slots,machine::checked_size_mul(matrix.rows(),matrix.cols()));
+        for(const auto* maps:{&first,&second})for(const auto& grade:*maps)for(const auto& cell:grade)
+            slots=machine::checked_size_add(slots,cell.size());
+        if(slots>max_coordinate_slots)throw std::length_error("homotopy coordinate budget");
+        state_=std::make_shared<const State>(std::move(source),std::move(target),std::move(first),std::move(second),std::move(homotopy));
+    }
+    ChainHomotopyCertificate certificate() const {return state_->certificate;}
+    const RelationalChainMap& first() const & {return state_->first;}
+    const RelationalChainMap& second() const & {return state_->second;}
+    const RelationalChainMap& first() const &&=delete;
+    const RelationalChainMap& second() const &&=delete;
+private:
+    struct State {
+        std::shared_ptr<const core::RelationalComplex> source,target;
+        RelationalChainMap first,second;
+        std::vector<numeric::ExactMatrix> homotopy;
+        ChainHomotopyCertificate certificate;
+        State(std::shared_ptr<const core::RelationalComplex> c,std::shared_ptr<const core::RelationalComplex> d,
+            std::vector<LinearGradeMap> f,std::vector<LinearGradeMap> g,std::vector<numeric::ExactMatrix> h)
+            :source(std::move(c)),target(std::move(d)),first(*source,*target,std::move(f)),second(*source,*target,std::move(g)),
+             homotopy(std::move(h)),certificate(certify_chain_homotopy(first,second,homotopy)){}
+    };
+    std::shared_ptr<const State> state_;
+};
 
 } // namespace rfc::geometry

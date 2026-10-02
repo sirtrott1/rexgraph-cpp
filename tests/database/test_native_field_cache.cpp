@@ -175,6 +175,13 @@ void policies_and_failure() {
     rejects([&]{(void)stopped.evaluate(a,runtime::ExecutionLease({},cancel),[&](auto stage){if(stage==NativeFieldCacheStage::BeforePublish)cancel->store(true);});},"late phase cancellation ignored");
     check(stopped.stats().results==0 && stopped.stats().plans==0,"cancelled producer cached work");
     NativeFieldCache tiny({1,1,1,1,1,1});rejects([&]{(void)tiny.evaluate(a);},"cache budget ignored");
+    NativeFieldCacheLimits byte_limits;byte_limits.retained_result_bytes=0;byte_limits.idle_workspace_bytes=0;
+    NativeFieldCache byte_bounded(byte_limits);runtime::CpuTileExecutor cpu({2,2,1000});
+    const auto uncached=byte_bounded.evaluate_parallel(a,cpu,1);
+    const auto repeated=byte_bounded.evaluate_parallel(a,cpu,1);
+    check(uncached.values()==retained.values() && repeated.values()==retained.values(),"byte eviction changed the exact field");
+    check(byte_bounded.stats().results==0 && byte_bounded.stats().idle_workspaces==0 && byte_bounded.stats().applications==2,"field limb/container byte limits did not evict retention");
+    check(cache.stats().retained_result_bytes>retained.values().size()*sizeof(Q),"field cache omitted retained GMP limbs");
     NativeFieldCache recursive;bool tested{};
     (void)recursive.evaluate(a,runtime::ExecutionLease{},[&](auto stage){if(stage==NativeFieldCacheStage::BeforeApply) {
         rejects([&]{(void)recursive.evaluate(a);},"recursive evaluation deadlocked");rejects([&]{recursive.clear();},"recursive clear deadlocked");tested=true;}});

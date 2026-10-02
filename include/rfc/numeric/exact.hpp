@@ -1,4 +1,5 @@
 #pragma once
+#include "rfc/machine/checked_size.hpp"
 #include <gmpxx.h>
 #include <cstddef>
 #include <stdexcept>
@@ -10,6 +11,30 @@ namespace rfc::numeric {
 using Integer = mpz_class;
 using Rational = mpq_class;
 using RationalVector = std::vector<Rational>;
+
+// Read-only GNU MP physical accounting. This measures retained limb capacity,
+// including capacity left after cancellation, without changing host allocators.
+// It excludes allocator metadata and GMP's transient internal workspaces.
+inline std::size_t integer_limb_bytes(mpz_srcptr value) {
+    if (value->_mp_alloc < 0) throw std::invalid_argument("invalid GMP limb allocation");
+    return machine::checked_size_mul(static_cast<std::size_t>(value->_mp_alloc), sizeof(mp_limb_t));
+}
+inline std::size_t integer_limb_bytes(const Integer& value) {return integer_limb_bytes(value.get_mpz_t());}
+inline std::size_t rational_limb_bytes(const Rational& value) {
+    return machine::checked_size_add(integer_limb_bytes(mpq_numref(value.get_mpq_t())),
+                                    integer_limb_bytes(mpq_denref(value.get_mpq_t())));
+}
+inline std::size_t rational_limb_envelope(std::size_t integer_bits) {
+    // Guard limbs cover retained capacity beyond the declared arithmetic bound.
+    // Callers check the measured result against this envelope before publication.
+    return machine::checked_size_mul(machine::checked_size_add(machine::ceil_div(integer_bits, GMP_NUMB_BITS),4),
+                                     2*sizeof(mp_limb_t));
+}
+inline std::size_t rational_vector_object_bytes(const RationalVector& values) {
+    auto bytes=machine::checked_size_add(sizeof(RationalVector),machine::checked_size_mul(values.capacity(),sizeof(Rational)));
+    for(const auto& value:values)bytes=machine::checked_size_add(bytes,rational_limb_bytes(value));
+    return bytes;
+}
 
 inline Rational canonical_rational(Rational value) {
     if (mpz_sgn(mpq_denref(value.get_mpq_t())) == 0)

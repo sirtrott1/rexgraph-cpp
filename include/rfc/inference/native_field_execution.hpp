@@ -5,13 +5,15 @@
 
 namespace rfc::inference {
 
-enum class NativeMetricSelection { NamedUnit, DeclaredDiagonal };
+enum class NativeMetricSelection { NamedUnit, DeclaredDiagonal, DeclaredPositive };
 struct NativeExactTowerRequest {
     NativeMetricSelection metrics{NativeMetricSelection::NamedUnit};
     // Ordered by retained grade. These are SourceGrade declarations, not
     // dimension-based identifications with explicit or cell-stalk carriers.
     std::vector<std::uint64_t> grade_carriers;
     std::vector<storage::PinnedNativeAccession> metric_tensors;
+    field::PreparedExactProfile profile{field::PreparedExactProfile::FiniteActions};
+    std::size_t global_grade_dimension_limit{64};
 };
 struct NativeExactProvenance {
     std::string profile{"source-grade-diagonal-finite-v1"};
@@ -40,6 +42,13 @@ inline std::size_t sum_bound(std::size_t bits,std::size_t terms){
 }
 inline std::size_t tensor_bits(const numeric::SparseRationalTensor& tensor){
     std::size_t result=1;for(const auto& x:tensor.values().entries())result=std::max(result,integer_bits(x.value));return result;
+}
+// Clearing denominators row by row bounds determinant minors by integer
+// products. The extra dimension factor covers unreduced elimination products,
+// triangular sums and residual verification; it is not a linear-time claim.
+inline std::size_t solve_bound(std::size_t matrix_bits,std::size_t input_bits,std::size_t dimension){
+    const auto n=add(dimension,1);std::size_t log=0;for(auto k=n;k;k>>=1u)++log;
+    return mul(mul(32,n),add(add(mul(n,matrix_bits),input_bits),add(log,1)));
 }
 inline numeric::RationalVector dense(const numeric::SparseRationalTensor& tensor){
     numeric::RationalVector out(tensor.domain().logical_size(),numeric::Rational{0});
@@ -75,8 +84,14 @@ public:
         (void)runtime::resolve_reference_backend(policy);
         require(policy.allow_allocation,"native exact preparation requires owning allocations");
         const auto endpoint=publication.endpoint();const auto& source=endpoint->source;
-        require(request.metrics==NativeMetricSelection::NamedUnit || request.metrics==NativeMetricSelection::DeclaredDiagonal,
+        require(request.metrics==NativeMetricSelection::NamedUnit || request.metrics==NativeMetricSelection::DeclaredDiagonal ||
+                request.metrics==NativeMetricSelection::DeclaredPositive,
                 "unknown native metric selection");
+        require(request.profile==field::PreparedExactProfile::FiniteActions || request.profile==field::PreparedExactProfile::GlobalActions,
+                "unknown native exact profile");
+        const bool global=request.profile==field::PreparedExactProfile::GlobalActions;
+        require(request.metrics!=NativeMetricSelection::DeclaredPositive || global,"general metrics require the global exact profile");
+        require(!global || request.global_grade_dimension_limit>0,"global exact dimension limit must be positive");
         require(request.grade_carriers.size()==source.grade_count(),"one declared SourceGrade carrier required per grade");
         require(request.metrics==NativeMetricSelection::NamedUnit?request.metric_tensors.empty():request.metric_tensors.size()==source.grade_count(),
                 "native metric selection/count mismatch");
@@ -88,11 +103,12 @@ public:
             require(carriers.contains(key),"selected grade carrier absent");const auto& carrier=*carriers.at(key);
             require(carrier.kind==storage::TemporalCarrierKind::SourceGrade && carrier.grade==grade && arena.cell_count()>0,
                     "finite native tower requires nonempty declared SourceGrade carriers");
+            if(global && arena.cell_count()>request.global_grade_dimension_limit)throw std::length_error("global exact grade dimension limit");
             cells=add(cells,arena.cell_count());occurrences=add(occurrences,arena.incidence_count());
             for(const auto& scale:arena.cell_scales)scale_bits=std::max(scale_bits,integer_bits(scale));
             for(const auto& coefficient:arena.lattice_coefficient)
                 lattice_bits=std::max(lattice_bits,mpz_sgn(coefficient.get_mpz_t())==0?std::size_t{0}:mpz_sizeinbase(coefficient.get_mpz_t(),2));
-            if(request.metrics==NativeMetricSelection::DeclaredDiagonal){
+            if(request.metrics!=NativeMetricSelection::NamedUnit){
                 const auto& pin=request.metric_tensors[k];same_publication(publication,pin);
                 const auto declaration=pin.tensor_declaration();const auto& tensor=declaration->tensor;
                 require(declaration->role==storage::TemporalTensorRole::Metric && declaration->input==key && declaration->output==key,
@@ -102,9 +118,12 @@ public:
                         "native metric requires complete square support");
                 std::size_t diagonal=0;
                 for(const auto& x:tensor.values().entries()){
-                    require(x.index/n==x.index%n && x.value>0,"finite native bridge requires positive diagonal metrics");++diagonal;
+                    if(request.metrics==NativeMetricSelection::DeclaredDiagonal){
+                        require(x.index/n==x.index%n && x.value>0,"finite native bridge requires positive diagonal metrics");++diagonal;
+                    }
                 }
-                require(diagonal==n,"native metric must measure every retained direction");
+                if(request.metrics==NativeMetricSelection::DeclaredDiagonal)
+                    require(diagonal==n,"native metric must measure every retained direction");
                 metric_bits=std::max(metric_bits,tensor_bits(tensor));metric_slots=add(metric_slots,tensor.domain().logical_size());
             }
         }
@@ -115,20 +134,31 @@ public:
         // Includes the all-grade metric checks performed by cached Hodge setup.
         requirements.scalar_work=add(mul(add(cells,occurrences),16),add(metric_slots,mul(source.grade_count(),source.grade_count())));
         requirements.integer_bits=std::max(add(mul(scale_bits,2),lattice_bits),metric_bits);
+        if(global) {
+            const auto square=mul(cells,cells),cube=mul(square,cells);
+            requirements.records=add(requirements.records,mul(square,8));
+            requirements.rational_slots=add(requirements.rational_slots,mul(square,16));
+            requirements.sparse_entries=add(requirements.sparse_entries,mul(square,16));
+            requirements.scalar_work=add(requirements.scalar_work,mul(add(cube,mul(cells,occurrences)),64));
+            const auto coefficient_bits=sum_bound(add(add(mul(scale_bits,2),lattice_bits),metric_bits),add(cells,occurrences));
+            requirements.integer_bits=solve_bound(coefficient_bits,0,mul(cells,2));
+        }
         runtime::admit_execution(requirements,policy);
         if(requirements.scalar_work>publication.limits().max_action_work)throw std::length_error("native exact accession work budget");
         std::vector<field::ExactMetric> metrics;metrics.reserve(source.grade_count());
         for(std::size_t k=0;k<source.grade_count();++k){
             const auto n=source.grade(core::Grade{static_cast<std::uint16_t>(k)}).cell_count();
             if(request.metrics==NativeMetricSelection::NamedUnit)metrics.push_back(field::ExactMetric::identity(n));
-            else{
+            else if(request.metrics==NativeMetricSelection::DeclaredDiagonal){
                 numeric::RationalVector diagonal(n,numeric::Rational{0});
                 for(const auto& x:request.metric_tensors[k].tensor()->values().entries())diagonal[x.index/n]=x.value;
                 metrics.push_back(field::ExactMetric::diagonal(std::move(diagonal)));
-            }
+            } else metrics.emplace_back(storage::temporal_tensor_matrix(*request.metric_tensors[k].tensor_declaration()));
         }
-        return PreparedNativeExactTower(std::make_shared<const State>(publication,std::move(request),policy,requirements,
-            scale_bits,lattice_bits,metric_bits,occurrences,std::move(metrics)));
+        auto state=std::make_shared<const State>(publication,std::move(request),policy,requirements,
+            scale_bits,lattice_bits,metric_bits,occurrences,cells,std::move(metrics));
+        if(state->tower.harmonic_frame_integer_bits()>requirements.integer_bits)throw std::runtime_error("native frame integer envelope violated");
+        return PreparedNativeExactTower(std::move(state));
     }
     PreparedNativeExactTower(const PreparedNativeExactTower&)=default;
     PreparedNativeExactTower& operator=(const PreparedNativeExactTower&)=default;
@@ -138,25 +168,48 @@ public:
     const runtime::ExecutionHostPolicy& preparation_policy() const & {return state_->policy;}
     const runtime::ExecutionHostPolicy& preparation_policy() const && = delete;
     NativeMetricSelection metric_selection() const {return state_->request.metrics;}
+    field::PreparedExactProfile profile() const {return state_->request.profile;}
     std::vector<std::uint64_t> metric_keys() const {
         std::vector<std::uint64_t> out;for(const auto& metric:state_->request.metric_tensors)out.push_back(metric.tensor_declaration()->key);return out;
     }
     const field::PreparedExactExecutionTower& tower() const & {return state_->tower;}
     const field::PreparedExactExecutionTower& tower() const && = delete;
-    runtime::ExecutionRequirements requirements(std::size_t input_bits,field::OperatorKind kind) const {
+    runtime::ExecutionRequirements requirements(std::size_t input_bits,field::OperatorKind kind,const numeric::Rational& lambda=numeric::Rational{0}) const {
         using namespace native_field_detail;
         auto out=state_->requirements;
         // Source actions use S_lower * B_lattice * S_upper^-1 and its
         // transpose. Charge both scales and the retained lattice integers,
         // including intermediate products whose final value may cancel.
         const auto b=[&](auto bits){return add(sum_bound(add(add(bits,state_->scale_bits),state_->lattice_bits),state_->occurrences),state_->scale_bits);};
-        const auto adj=[&](auto bits){return add(b(add(bits,state_->metric_bits)),state_->metric_bits);};
+        const bool global=profile()==field::PreparedExactProfile::GlobalActions;
+        const auto adj=[&](auto bits){
+            if(global)return solve_bound(state_->metric_bits,b(sum_bound(add(bits,state_->metric_bits),state_->cells)),state_->cells);
+            return add(b(add(bits,state_->metric_bits)),state_->metric_bits);
+        };
         switch(kind){
         case field::OperatorKind::Boundary:out.integer_bits=b(input_bits);break;
         case field::OperatorKind::Adjoint:out.integer_bits=adj(input_bits);break;
         case field::OperatorKind::HodgeDown:out.integer_bits=adj(b(input_bits));break;
         case field::OperatorKind::HodgeUp:out.integer_bits=b(adj(input_bits));break;
         case field::OperatorKind::Hodge:out.integer_bits=sum_bound(std::max(adj(b(input_bits)),b(adj(input_bits))),2);break;
+        case field::OperatorKind::Green: {
+            if(!global)throw std::invalid_argument("Green requires the global exact profile");
+            const auto dimension=mul(state_->cells,8),square=mul(dimension,dimension);
+            out.records=add(out.records,mul(square,4));out.rational_slots=add(out.rational_slots,mul(square,4));
+            out.sparse_entries=add(out.sparse_entries,mul(square,4));
+            out.scalar_work=add(out.scalar_work,mul(mul(square,dimension),8));
+            const auto matrix_bits=add(std::max(sum_bound(add(mul(state_->scale_bits,2),state_->lattice_bits),state_->occurrences),state_->metric_bits),integer_bits(lambda));
+            out.integer_bits=solve_bound(matrix_bits,sum_bound(add(input_bits,state_->metric_bits),state_->cells),dimension);
+            break;
+        }
+        case field::OperatorKind::HarmonicProjector: {
+            if(!global)throw std::invalid_argument("projector requires the global exact profile");
+            const auto frame_bits=state_->tower.harmonic_frame_integer_bits();
+            const auto gram_bits=sum_bound(add(mul(frame_bits,2),state_->metric_bits),state_->cells);
+            const auto rhs_bits=sum_bound(add(add(frame_bits,state_->metric_bits),input_bits),mul(state_->cells,state_->cells));
+            out.integer_bits=sum_bound(add(frame_bits,solve_bound(gram_bits,rhs_bits,state_->cells)),state_->cells);
+            break;
+        }
         default:throw std::invalid_argument("operator outside native finite profile");
         }
         out.integer_bits=std::max(out.integer_bits,state_->requirements.integer_bits);return out;
@@ -176,19 +229,24 @@ public:
     }
     DerivedNativeExactField execute(const field::OperatorRequest& operation,const storage::PinnedNativeAccession& input,
                                    const runtime::ExecutionLease& lease=runtime::ExecutionLease{}) const {
-        field::PreparedExactExecutionTower::validate_request(operation);lease.check_cancelled();
+        field::PreparedExactExecutionTower::validate_request(operation,profile());lease.check_cancelled();
         const auto grade=operation.kind==field::OperatorKind::Adjoint
             ?core::Grade{static_cast<std::uint16_t>(operation.grade.value?operation.grade.value-1u:0u)}:operation.grade;
         if((operation.kind==field::OperatorKind::Boundary || operation.kind==field::OperatorKind::Adjoint) && !operation.grade.value)
             throw std::invalid_argument("grade zero has no boundary/adjoint");
         // Validate both the requested operator grade and input carrier before allocation.
         (void)grade_carrier(operation.grade);validate_input(input,grade);
-        const auto required=requirements(native_field_detail::tensor_bits(*input.tensor()),operation.kind);
+        const auto required=requirements(native_field_detail::tensor_bits(*input.tensor()),operation.kind,operation.lambda);
         runtime::admit_execution(required,lease.policy());
+        if(required.scalar_work>state_->publication.limits().max_action_work)throw std::length_error("native exact accession work budget");
         auto values=state_->tower.apply(operation,input_values(input,grade));
         for(const auto& value:values)if(native_field_detail::integer_bits(value)>required.integer_bits)
             throw std::runtime_error("native finite integer envelope violated");
         NativeExactProvenance report;report.source_namespace=state_->publication.source_namespace();report.sequence=state_->publication.sequence();
+        if(profile()==field::PreparedExactProfile::GlobalActions){
+            report.profile="source-grade-global-exact-v1";
+            report.implementation="PreparedExactExecutionTower/GMP/sparse-solves-v1";
+        }
         report.input_field=input.tensor_declaration()->key;report.input_carrier=grade_carrier(grade);
         report.output_carrier=grade_carrier(operation.kind==field::OperatorKind::Boundary
             ?core::Grade{static_cast<std::uint16_t>(operation.grade.value-1u)}:operation.grade);
@@ -203,13 +261,13 @@ private:
         NativeExactTowerRequest request;
         runtime::ExecutionHostPolicy policy;
         runtime::ExecutionRequirements requirements;
-        std::size_t scale_bits,lattice_bits,metric_bits,occurrences;
+        std::size_t scale_bits,lattice_bits,metric_bits,occurrences,cells;
         field::PreparedExactExecutionTower tower;
         State(storage::PinnedNativeAccession p,NativeExactTowerRequest r,runtime::ExecutionHostPolicy policy_value,
-              runtime::ExecutionRequirements limits,std::size_t sb,std::size_t lb,std::size_t mb,std::size_t count,std::vector<field::ExactMetric> metrics)
+              runtime::ExecutionRequirements limits,std::size_t sb,std::size_t lb,std::size_t mb,std::size_t count,std::size_t cell_count,std::vector<field::ExactMetric> metrics)
             :publication(std::move(p)),request(std::move(r)),policy(std::move(policy_value)),requirements(limits),
-             scale_bits(sb),lattice_bits(lb),metric_bits(mb),occurrences(count),
-             tower(std::shared_ptr<const core::RelationalComplex>(publication.endpoint(),&publication.endpoint()->source),std::move(metrics)){}
+             scale_bits(sb),lattice_bits(lb),metric_bits(mb),occurrences(count),cells(cell_count),
+             tower(std::shared_ptr<const core::RelationalComplex>(publication.endpoint(),&publication.endpoint()->source),std::move(metrics),request.profile){}
     };
     explicit PreparedNativeExactTower(std::shared_ptr<const State> state):state_(std::move(state)){}
     std::shared_ptr<const State> state_;

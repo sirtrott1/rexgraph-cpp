@@ -29,6 +29,12 @@ struct NativeSeriesStorageStats {
     std::size_t frame_index_pages{}, last_append_pages{}, last_append_pointer_copies{}, checkpoint_count{};
     unsigned frame_index_levels{};
 };
+enum class NativeSeriesComponentKind {BaseSource,BaseChannels,Segment,CheckpointSource,CheckpointChannels};
+struct NativeSeriesComponent {
+    NativeSeriesComponentKind kind;
+    std::uint64_t source_namespace{},sequence{};
+    std::shared_ptr<const std::vector<std::byte>> bytes;
+};
 
 namespace native_series_detail {
 using Bytes = std::vector<std::byte>;
@@ -407,6 +413,22 @@ public:
     std::size_t segment_count() const { return state().frames.size(); }
     std::size_t archive_bytes() const { return state().archive_bytes; }
     NativeSeriesLimits limits() const { return state().limits; }
+    // Components retain their immutable owner independently of the series and
+    // callback. Their sequence/kind identity is separate from a physical digest.
+    template<class Function> void visit_components(Function&& function) const {
+        (void)state();const auto owner=state_;
+        const auto base=owner->base;
+        function(NativeSeriesComponent{NativeSeriesComponentKind::BaseSource,owner->name_space,base->endpoint->sequence,{base,&base->source}});
+        function(NativeSeriesComponent{NativeSeriesComponentKind::BaseChannels,owner->name_space,base->endpoint->sequence,{base,&base->channels}});
+        auto sequence=base->endpoint->sequence;
+        owner->frames.for_each([&](const auto& frame) {
+            function(NativeSeriesComponent{NativeSeriesComponentKind::Segment,owner->name_space,++sequence,{frame,&frame->bytes}});
+        });
+        for(const auto& [seq,checkpoint]:*owner->checkpoints) {
+            function(NativeSeriesComponent{NativeSeriesComponentKind::CheckpointSource,owner->name_space,seq,{checkpoint,&checkpoint->source}});
+            function(NativeSeriesComponent{NativeSeriesComponentKind::CheckpointChannels,owner->name_space,seq,{checkpoint,&checkpoint->channels}});
+        }
+    }
     NativeSeriesStorageStats storage_stats() const {
         const auto stats = state().frames.stats();
         return {stats.reachable_pages, stats.last_append_pages, stats.last_append_pointer_copies,

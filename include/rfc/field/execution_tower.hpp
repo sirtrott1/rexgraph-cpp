@@ -93,30 +93,41 @@ private:
     std::vector<ExactMetric> metrics_;
 };
 
-// Owning finite-action profile. Unit/diagonal metrics avoid solver fill and
-// keep boundary, coordinate transpose and metric adjoint as distinct actions.
+enum class PreparedExactProfile {FiniteActions, GlobalActions};
+
+// Both profiles own the same source and use the canonical field actions.
+// GlobalActions additionally retains harmonic frames and permits exact solves.
 class PreparedExactExecutionTower {
 public:
     PreparedExactExecutionTower(std::shared_ptr<const core::RelationalComplex> source,
-                                std::vector<ExactMetric> metrics) {
+                                std::vector<ExactMetric> metrics,PreparedExactProfile profile=PreparedExactProfile::FiniteActions) {
         if (!source) throw std::invalid_argument("prepared tower requires an immutable source owner");
+        if(profile!=PreparedExactProfile::FiniteActions && profile!=PreparedExactProfile::GlobalActions)
+            throw std::invalid_argument("unknown prepared exact profile");
         for (const auto& metric:metrics)
-            if (!metric.is_diagonal()) throw std::invalid_argument("prepared finite tower requires unit/diagonal metrics");
-        state_=std::make_shared<const State>(std::move(source),std::move(metrics));
+            if (profile==PreparedExactProfile::FiniteActions && !metric.is_diagonal())
+                throw std::invalid_argument("prepared finite tower requires unit/diagonal metrics");
+        state_=std::make_shared<const State>(std::move(source),std::move(metrics),profile);
     }
     PreparedExactExecutionTower(const PreparedExactExecutionTower&)=default;
     PreparedExactExecutionTower& operator=(const PreparedExactExecutionTower&)=default;
-    static void validate_request(const OperatorRequest& request) {
-        if (request.lambda != 0 || request.lambda.get_den()!=1)
-            throw std::invalid_argument("finite tower has no lambda parameter");
+    static void validate_request(const OperatorRequest& request,PreparedExactProfile profile=PreparedExactProfile::FiniteActions) {
+        if(profile!=PreparedExactProfile::FiniteActions && profile!=PreparedExactProfile::GlobalActions)
+            throw std::invalid_argument("unknown prepared exact profile");
+        if(request.kind==OperatorKind::Green && profile==PreparedExactProfile::GlobalActions)return;
+        if (request.lambda != 0)throw std::invalid_argument("operator has no lambda parameter");
         switch(request.kind) {
         case OperatorKind::Boundary: case OperatorKind::Adjoint:
         case OperatorKind::HodgeDown: case OperatorKind::HodgeUp: case OperatorKind::Hodge: return;
+        case OperatorKind::HarmonicProjector:
+            if(profile==PreparedExactProfile::GlobalActions)return;
+            break;
         default: throw std::invalid_argument("operator outside prepared finite tower profile");
         }
+        throw std::invalid_argument("operator outside prepared finite tower profile");
     }
     numeric::RationalVector apply(const OperatorRequest& request,const numeric::RationalVector& input) const {
-        validate_request(request);
+        validate_request(request,state_->profile);
         const auto pin=state_;
         const auto& source=*pin->source;
         if (request.grade.value>=source.grade_count()) throw std::out_of_range("prepared tower grade");
@@ -134,9 +145,18 @@ public:
         case OperatorKind::HodgeDown: return hodge.apply_down(input);
         case OperatorKind::HodgeUp: return hodge.apply_up(input);
         case OperatorKind::Hodge: return hodge.apply(input);
-        default: throw std::logic_error("validated finite operator");
+        case OperatorKind::Green: {
+            const auto result=augmented_green_apply_reference(source,request.grade,pin->metrics,request.lambda,input);
+            if(!result.exact)throw std::runtime_error("prepared Green residual is nonzero");
+            return result.value;
+        }
+        case OperatorKind::HarmonicProjector:
+            return projector_apply(pin->harmonic_frames.at(request.grade.value),hodge.metric(),input);
+        default: throw std::logic_error("validated exact operator");
         }
     }
+    PreparedExactProfile profile() const noexcept {return state_->profile;}
+    std::size_t harmonic_frame_integer_bits() const noexcept {return state_->frame_bits;}
     const std::vector<ExactMetric>& metrics() const & {return state_->metrics;}
     const std::vector<ExactMetric>& metrics() const && = delete;
 private:
@@ -144,13 +164,27 @@ private:
         std::shared_ptr<const core::RelationalComplex> source;
         std::vector<ExactMetric> metrics;
         std::vector<std::unique_ptr<const ExactHodgeOperator>> hodges;
-        State(std::shared_ptr<const core::RelationalComplex> s,std::vector<ExactMetric> m)
-            :source(std::move(s)),metrics(std::move(m)) {
+        PreparedExactProfile profile;
+        std::vector<numeric::ExactMatrix> harmonic_frames;
+        std::size_t frame_bits{1};
+        State(std::shared_ptr<const core::RelationalComplex> s,std::vector<ExactMetric> m,PreparedExactProfile p)
+            :source(std::move(s)),metrics(std::move(m)),profile(p) {
             if (metrics.size()!=source->grade_count()) throw std::invalid_argument("prepared tower metric count");
             hodges.reserve(metrics.size());
             for(std::size_t k=0;k<metrics.size();++k)
                 hodges.push_back(std::make_unique<const ExactHodgeOperator>(*source,
                     core::Grade{static_cast<std::uint16_t>(k)},metrics));
+            if(profile==PreparedExactProfile::GlobalActions) {
+                harmonic_frames.reserve(metrics.size());
+                for(const auto& hodge:hodges) {
+                    harmonic_frames.push_back(hodge->harmonic_frame());
+                    for(const auto& [position,value]:harmonic_frames.back().entries()) {
+                        (void)position;
+                        frame_bits=std::max({frame_bits,mpz_sizeinbase(mpq_numref(value.get_mpq_t()),2),
+                            mpz_sizeinbase(mpq_denref(value.get_mpq_t()),2)});
+                    }
+                }
+            }
         }
         State(const State&)=delete;
         State& operator=(const State&)=delete;

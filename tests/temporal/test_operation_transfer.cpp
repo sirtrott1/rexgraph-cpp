@@ -37,7 +37,9 @@ try{
     const auto Ap=ExactMatrix::from_rows({{0,1}});
     const auto KA=ExactMatrix::from_rows({{1}});
     const auto obs=rfc::temporal::observation_delta(A,Ap,J,KA,RationalVector{2,0},RationalVector{3,3});
-    require(obs.aggregate==RationalVector({1}),"observation delta mismatch");
+    require(obs.aggregate==RationalVector{Rational{1}},"observation delta mismatch");
+    require(obs.aggregate==rfc::numeric::sub(Ap.apply(RationalVector{3,3}),KA.apply(A.apply(RationalVector{2,0}))),
+            "complete observation equation residual mismatch");
 
     const auto M=rfc::field::ExactMetric::identity(2);
     const auto Mp=rfc::field::ExactMetric::diagonal({2,3});

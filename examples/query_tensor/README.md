@@ -24,6 +24,14 @@ materialize dense values or replace the retained tensor.
 
 `rfc::native_query_execution` is an opt-in exact CPU adapter. Preparation and each
 execution require explicit namespace/publication availability, current limits and
-cancellation admission. This profile has no automatic query cache, SQL parser,
-rational GPU kernel or durable publication. Graph result/container accounting
-excludes shared immutable source, GMP limbs and process memory overhead.
+cancellation admission. `NativeQueryIndex::NumericRanges` builds exact numeric
+indexes without imposing an order on finite categories. `NativeQueryCache` checks
+the ordered request, retained identities and every projected value before reuse.
+Repeated clauses remain in the request. `PreparedNativeRoleJoin` composes declared
+roles by shared participant identity and retains each occurrence pair.
+
+Graph result charges include retained GMP limb capacity and remain attached to
+escaped result/key pins. Shared immutable source, allocator metadata and GMP's
+transient workspaces are separate. Tensor intervals skip excluded axis gaps and
+fall back to a bounded sparse scan for large Cartesian boxes. This profile does
+not supply a SQL parser, rational GPU kernel or durable query publication.

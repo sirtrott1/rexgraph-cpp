@@ -23,20 +23,39 @@ inline TemporalEndpoint decode_snapshot(std::span<const std::byte> source, std::
 }
 } // namespace native_series_codec_detail
 
-// Owning canonical archive: base source once + owning channels + exact ordered
-// RFCXT frames + optional independently validated full checkpoint witnesses.
-// No physical checkpoint is substituted for the retained operation history.
-inline std::vector<std::byte> encode_native_series(const NativeTemporalSeries& series) {
+// The callback consumes bounded canonical chunks. A pinned immutable fork keeps
+// reentrant callers from changing the publication between the integrity pass and
+// emission. No complete archive buffer is needed for streaming hosts.
+template<class Function> void stream_native_series(const NativeTemporalSeries& series,Function&& consume) {
     using namespace native_series_codec_detail;
-    const auto& s = series.state(); temporal_codec_detail::Writer w;
-    w.raw(magic); w.u32(1); w.u32(0); w.u64(s.archive_bytes); w.u64(0);
-    w.u64(s.name_space); blob(w, s.base->source); blob(w, s.base->channels);
-    w.u64(s.frames.size()); s.frames.for_each([&](const auto& f) { blob(w, f->bytes); });
-    w.u64(s.checkpoints->size());
-    for (const auto& [seq, cp] : *s.checkpoints) { w.u64(seq); blob(w, cp->source); blob(w, cp->channels); }
-    native_series_detail::require(w.size() == s.archive_bytes, "series archive accounting invariant");
-    w.patch_u64(24, rfcx_detail::fnv1a64(std::span<const std::byte>(w.bytes()).subspan(32)));
-    return w.bytes();
+    const auto pinned=series;
+    const auto body=[&](auto&& sink) {
+        const auto integer=[&](std::uint64_t value) {temporal_codec_detail::Writer w;w.u64(value);sink(std::span<const std::byte>(w.bytes()));};
+        integer(pinned.source_namespace());bool frame_count=false,checkpoint_count=false;
+        pinned.visit_components([&](const NativeSeriesComponent& part) {
+            const bool checkpoint=part.kind==NativeSeriesComponentKind::CheckpointSource || part.kind==NativeSeriesComponentKind::CheckpointChannels;
+            if((part.kind==NativeSeriesComponentKind::Segment || checkpoint) && !frame_count) {integer(pinned.segment_count());frame_count=true;}
+            if(checkpoint && !checkpoint_count) {integer(pinned.storage_stats().checkpoint_count);checkpoint_count=true;}
+            if(part.kind==NativeSeriesComponentKind::CheckpointSource)integer(part.sequence);
+            integer(part.bytes->size());
+            const auto bytes=std::span<const std::byte>(*part.bytes);
+            for(std::size_t pos=0;pos<bytes.size();) {
+                const auto length=std::min(std::size_t{65536},bytes.size()-pos);sink(bytes.subspan(pos,length));pos+=length;
+            }
+        });
+        if(!frame_count)integer(pinned.segment_count());
+        if(!checkpoint_count)integer(pinned.storage_stats().checkpoint_count);
+    };
+    std::size_t size=32;std::uint64_t hash=1469598103934665603ull;
+    body([&](auto bytes){size=machine::checked_size_add(size,bytes.size());for(const auto b:bytes){hash^=std::to_integer<std::uint8_t>(b);hash*=1099511628211ull;}});
+    native_series_detail::require(size==pinned.archive_bytes(),"series archive accounting invariant");
+    temporal_codec_detail::Writer header;header.raw(magic);header.u32(1);header.u32(0);header.u64(size);header.u64(hash);
+    consume(std::span<const std::byte>(header.bytes()));body(consume);
+}
+// Base source once, exact ordered frames and validated checkpoint witnesses.
+inline std::vector<std::byte> encode_native_series(const NativeTemporalSeries& series) {
+    std::vector<std::byte> bytes;bytes.reserve(series.archive_bytes());
+    stream_native_series(series,[&](auto chunk){bytes.insert(bytes.end(),chunk.begin(),chunk.end());});return bytes;
 }
 inline NativeTemporalSeries decode_native_series(std::span<const std::byte> bytes, const NativeSeriesLimits& limits = {}) {
     using namespace native_series_codec_detail; using native_series_detail::require; using native_series_detail::bound;

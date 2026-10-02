@@ -10,7 +10,8 @@ CORE = ('machine', 'numeric', 'composite', 'core', 'algebra', 'geometry',
         'storage', 'database', 'runtime')
 METRIC = ('numeric/exact_matrix.hpp', 'field/exact_metric.hpp',
           'field/exact_hodge.hpp', 'field/exact_dirac.hpp',
-          'field/augmented_green.hpp', 'learning/exact_metric_channels.hpp')
+          'field/augmented_green.hpp', 'learning/exact_metric_channels.hpp',
+          'learning/native_exact_trainer.hpp', 'inference/native_field_execution.hpp')
 BINARY = ('composite/program.hpp', 'learning/binary_gate.hpp',
           'learning/composite_features.hpp', 'machine/bitsliced_int.hpp',
           'learning/bitsliced_threshold.hpp', 'learning/bitsliced_affine.hpp',

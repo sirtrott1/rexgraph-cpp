@@ -31,10 +31,11 @@ public:
     using Materializer = std::function<numeric::ExactMatrix()>;
 
     explicit ExactMetric(numeric::ExactMatrix form)
-        : storage_(SparseStorage{std::move(form)}) {
+        : storage_(SparseStorage{std::move(form),{}, {}}) {
         const auto& matrix = std::get<SparseStorage>(storage_).form;
         validate_square_symmetric(matrix);
-        certify_positive_definite_sparse(matrix);
+        auto& sparse = std::get<SparseStorage>(storage_);
+        certify_positive_definite_sparse(matrix, sparse.lower, sparse.pivots);
     }
 
     static ExactMetric identity(std::size_t n) {
@@ -66,7 +67,7 @@ public:
         if (blocks.empty()) throw std::invalid_argument("block metric requires at least one block");
         auto shared=std::make_shared<std::vector<ExactMetric>>(std::move(blocks));
         std::size_t total=0;
-        for(const auto& block:*shared) total+=block.size();
+        for(const auto& block:*shared) total=machine::checked_size_add(total,block.size());
         auto apply=[shared,total](const numeric::RationalVector& x){
             if(x.size()!=total) throw std::invalid_argument("block metric apply size mismatch");
             numeric::RationalVector out(total,numeric::Rational{0});
@@ -235,9 +236,20 @@ private:
 
     struct SparseStorage {
         numeric::ExactMatrix form;
+        std::vector<std::map<std::size_t, numeric::Rational>> lower;
+        numeric::RationalVector pivots;
         [[nodiscard]] std::size_t size() const noexcept { return form.rows(); }
         [[nodiscard]] numeric::RationalVector apply(const numeric::RationalVector& x) const { return form.apply(x); }
-        [[nodiscard]] numeric::RationalVector solve(const numeric::RationalVector& x) const { return form.solve(x); }
+        [[nodiscard]] numeric::RationalVector solve(const numeric::RationalVector& x) const {
+            auto out=x;
+            for(std::size_t i=0;i<out.size();++i)
+                for(const auto& [j,value]:lower[i])out[i]-=value*out[j];
+            for(std::size_t i=0;i<out.size();++i)out[i]/=pivots[i];
+            for(std::size_t i=out.size();i-- > 0;)
+                for(const auto& [j,value]:lower[i])out[j]-=value*out[i];
+            if(form.apply(out)!=x)throw std::runtime_error("metric LDL solve residual is nonzero");
+            return out;
+        }
     };
 
     struct ExternalStorage {
@@ -264,12 +276,13 @@ private:
         }
     }
 
-    static void certify_positive_definite_sparse(const numeric::ExactMatrix& form) {
+    static void certify_positive_definite_sparse(const numeric::ExactMatrix& form,
+        std::vector<std::map<std::size_t, numeric::Rational>>& L, numeric::RationalVector& D) {
         // Exact sparse LDL^T without square roots. Only nonzero L entries are
         // retained, so certification does not allocate an n-by-n dense work array.
         const std::size_t n = form.rows();
-        std::vector<std::map<std::size_t, numeric::Rational>> L(n);
-        numeric::RationalVector D(n, numeric::Rational{0});
+        L.resize(n);
+        D.assign(n, numeric::Rational{0});
         for (std::size_t i = 0; i < n; ++i) {
             for (std::size_t j = 0; j < i; ++j) {
                 numeric::Rational sum = form.get(i, j);

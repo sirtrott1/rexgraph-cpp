@@ -1,4 +1,6 @@
 #include "../../examples/query_tensor/sample.hpp"
+#include "rfc/database/native_role_join.hpp"
+#include "interpretation_fixture.hpp"
 #include <iostream>
 #include <thread>
 
@@ -41,12 +43,39 @@ void queries() {
         }
     }
     runtime::CpuTileExecutor executor;
+    const auto indexed=PreparedNativeQuery::prepare(source,10,req,cutoff,runtime::ExecutionLease{},17,NativeQueryIndex::NumericRanges);
+    const auto indexed_result=indexed.execute(cutoff,executor);
+    check(indexed.indexed_projection_count()==1 && indexed.candidate_row_count()<op.row_count(),"numeric range index did not narrow rows");
+    check(indexed_result.keys()==expected && indexed_result.unknown_count()==unknown && indexed_result.sum()==sum,"index dropped unknowns, duplicates or source order");
+    check(indexed_result.predicate_evaluations()<op.execute(cutoff,executor).predicate_evaluations(),"selective index did not reduce predicate work");
+    NativeQueryCache cache(1<<20);
+    const auto fresh=cache.execute(op,cutoff,executor),hit=cache.execute(indexed,cutoff,executor);
+    check(!fresh.cache_hit() && hit.cache_hit() && hit.keys()==expected,"exact dependency cache failed");
+    auto unchanged=input(131);unchanged.revision="measurements/unused-factor";
+    for(auto& a:unchanged.assertions) {
+        auto& outer=std::get<V::Product>(a.payload.data);
+        auto& inner=std::get<V::Product>(outer.elements.front().data);
+        inner.elements.back()=V::integer(777);
+    }
+    const auto later=source.replace(unchanged);
+    const auto later_op=PreparedNativeQuery::prepare(later,10,req,available(later));
+    const auto reused=cache.execute(later_op,available(later),executor);
+    check(reused.cache_hit() && reused.source_publication()==later.endpoint() && reused.availability().max_sequence==later.sequence(),"dependency cache lost new publication provenance");
+    rejects([&]{(void)cache.execute(later_op,cutoff,executor);},"cache admitted future input");
+    auto reordered=req;std::swap(reordered.all_of[0],reordered.all_of[1]);
+    const auto new_order=PreparedNativeQuery::prepare(source,10,reordered,cutoff);
+    check(!cache.execute(new_order,cutoff,executor).cache_hit(),"cache identified distinct ordered operations");
+    auto bounded=runtime::ExecutionHostPolicy{};bounded.limits.records=0;
+    rejects([&]{(void)cache.execute(new_order,cutoff,executor,runtime::ExecutionLease(bounded));},"cache bypassed current host limits");
     for (const auto kind:{ExactPredicateKind::Equal,ExactPredicateKind::NotEqual,ExactPredicateKind::Less,ExactPredicateKind::LessEqual,
                          ExactPredicateKind::Greater,ExactPredicateKind::GreaterEqual,ExactPredicateKind::IsNull,ExactPredicateKind::IsNotNull}) {
         ExactScalarPredicate p{{21,11},kind,V::rational(Q{0})};
         const auto one=PreparedNativeQuery::prepare(source,10,{{p},{},NativeQueryOutput::Keys},cutoff);
         const auto result=one.execute(cutoff,executor);
         check(result.keys()==select_exact(source,10,p),"single predicate differs from original query");
+        const auto range=PreparedNativeQuery::prepare(source,10,{{p},{},NativeQueryOutput::Keys},cutoff,runtime::ExecutionLease{},13,NativeQueryIndex::NumericRanges);
+        const auto ranged=range.execute(cutoff,executor);
+        check(ranged.keys()==result.keys() && ranged.unknown_count()==result.unknown_count(),"indexed range/null comparison differs");
     }
     const auto all=PreparedNativeQuery::prepare(source,10,{{},std::vector<std::uint64_t>{21,11},NativeQueryOutput::Aggregate},cutoff);
     const auto aggregate=all.execute(cutoff,executor);
@@ -154,6 +183,40 @@ void windows() {
         return NativeTensorWindow::prepare(src.payload(1),{0},{1},available(src)).coordinate(0);
     }();
     check(escaped.nonzero_value() && *escaped.nonzero_value()==Q{17,19},"escaped coordinate outlived its sparse value owner");
+    numeric::IndexDomain wide({4,1000});std::vector<numeric::SparseRationalEntry> dense_entries;
+    for(std::size_t i=0;i<wide.logical_size();++i)dense_entries.push_back({i,Q{1}});
+    auto wide_source=tensor_source({wide,numeric::StructuralSupport::full(wide.logical_size()),numeric::SparseRationalVector(wide.logical_size(),std::move(dense_entries))});
+    const auto narrow=NativeTensorWindow::prepare(wide_source.payload(1),{0,999},{4,1000},available(wide_source));
+    const auto scanned=NativeTensorWindow::prepare(wide_source.payload(1),{0,999},{4,1000},available(wide_source),runtime::ExecutionLease{},0);
+    const auto narrow_sum=narrow.summarize(available(wide_source)),scanned_sum=scanned.summarize(available(wide_source));
+    check(narrow.uses_contiguous_intervals() && narrow.interval_count()==4 && narrow_sum.visited_entries()==4,"axis intervals traversed excluded tensor entries");
+    check(narrow_sum.sum()==Q{4} && scanned_sum.sum()==Q{4},"bounded interval fallback changed tensor contraction");
+    check(scanned_sum.visited_entries()>narrow_sum.visited_entries(),"interval traversal did not remove bounding-box gaps");
+}
+void role_joins() {
+    auto source=InterpretedSnapshot::interpret(f5_fixture::schema(),f5_fixture::snapshot());
+    const auto cutoff=available(source);const auto bytes=encode_interpreted_snapshot(source);
+    const auto join=PreparedNativeRoleJoin::prepare(source,{10,11,10,12,NativeRoleActivity::Retained},cutoff);
+    const auto result=join.execute(cutoff);
+    check(result.matches().size()==2,"role join merged repeated/inactive participants");
+    check(result.matches()[0].left_position==0 && result.matches()[1].left_position==1 &&
+        result.matches()[0].left_occurrence!=result.matches()[1].left_occurrence,"role join lost ordered occurrence identities");
+    check(join.missing_fibers()==2 && join.null_fibers()==2,"role join conflated null and missing fibers");
+    const auto active=PreparedNativeRoleJoin::prepare(source,{10,11,10,12,NativeRoleActivity::ActiveOnly},cutoff);
+    const auto active_result=active.execute(cutoff);
+    check(active_result.matches().size()==1,"active-only role join retained inactive witness");
+    const auto self=PreparedNativeRoleJoin::prepare(source,{10,11,10,11,NativeRoleActivity::Retained},cutoff);
+    const auto self_result=self.execute(cutoff);
+    check(self_result.matches().size()==5,"self role join lost occurrence cross terms");
+    rejects([&]{(void)PreparedNativeRoleJoin::prepare(source,{10,99,10,12},cutoff);},"join inferred undeclared role");
+    auto host=runtime::ExecutionHostPolicy{};host.limits.records=1;
+    rejects([&]{(void)self.execute(cutoff,runtime::ExecutionLease(host));},"role join bypassed output admission");
+    auto changed=f5_fixture::snapshot();changed.revision="roles/later";changed.assertions[0].roles[0].occurrences.clear();
+    source=source.replace(changed);
+    const auto old=join.execute(cutoff);
+    check(old.matches()==result.matches(),"role join followed later source");
+    rejects([&]{(void)PreparedNativeRoleJoin::prepare(source,{10,11,10,12},cutoff);},"role join accepted a future source");
+    check(encode_interpreted_snapshot(decode_interpreted_snapshot(bytes))==bytes,"role join mutated canonical source");
 }
 void work() {
     auto source=InterpretedSnapshot::interpret(schema(),input(129));const auto cutoff=available(source);
@@ -170,6 +233,30 @@ void work() {
     check(q->keys()==reference.keys() && t->sum()==Q{0},"owned query/tensor graph changed results");
     check(run.completion({3,1}).result<DerivedNativeQuery>()->keys()==q->keys(),"readiness edge rebound query input");
     check(resources.available_workers()==4,"read graph leaked worker admission");
+    // Detached key views must keep the numerical result's budget alive after
+    // the graph, completion and result wrapper have all gone away.
+    runtime::CpuResourceCoordinator owned(hardware,{4,1<<24,1000});
+    std::shared_ptr<const std::vector<std::uint64_t>> escaped;
+    std::size_t charged{};
+    {
+        auto graph=runtime::WorkGraph({make_query_work({8,1},op,2,cutoff)}).submit(owned);
+        graph.wait();const auto value=graph.completion({8,1}).result<DerivedNativeQuery>();
+        escaped=value->keys_pin();charged=value->retained_object_bytes();
+        check(charged>=sizeof(DerivedNativeQuery)+sizeof(prepared_query_detail::Data),"result omitted its owning containers");
+    }
+    check(owned.available_workers()==4 && owned.available_declared_buffer_bytes()==(1<<24)-charged,"escaped keys dropped their resource charge");
+    check(*escaped==reference.keys(),"escaped charged keys changed");
+    escaped.reset();check(owned.available_declared_buffer_bytes()==1<<24,"escaped query owner leaked admission");
+    std::optional<NativeTensorWindowSummary> retained;
+    {
+        auto graph=runtime::WorkGraph({make_tensor_summary_work({9,1},window,available(ts))}).submit(owned);
+        graph.wait();retained=*graph.completion({9,1}).result<NativeTensorWindowSummary>();charged=retained->retained_object_bytes();
+    }
+    check(retained->sum()==Q{0} && owned.available_declared_buffer_bytes()==(1<<24)-charged,"copied tensor summary dropped its charge");
+    retained.reset();check(owned.available_declared_buffer_bytes()==1<<24,"tensor summary owner leaked admission");
+    runtime::CpuResourceCoordinator tiny(hardware,{4,op.execution_object_bytes()-1,1000});
+    rejects([&]{(void)runtime::WorkGraph({make_query_work({10,1},op,2,cutoff)}).submit(tiny);},"query ignored limb/container admission");
+    check(tiny.available_workers()==4 && tiny.available_declared_buffer_bytes()==op.execution_object_bytes()-1,"failed query admission leaked resources");
 }
 void oracle() {
     std::string tag;
@@ -181,7 +268,8 @@ void oracle() {
                 in.assertions.push_back({{10,token(i)},payload(value=="null"?std::nullopt:std::optional<Q>{Q(value)},flag,category,numeric::Integer(integer)),{}});}
             auto source=InterpretedSnapshot::interpret(schema(),in);auto req=request(output?NativeQueryOutput::Aggregate:NativeQueryOutput::Keys);
             if (sum_integer) req.sum=std::vector<std::uint64_t>{21,14};
-            auto op=PreparedNativeQuery::prepare(source,10,req,available(source),runtime::ExecutionLease{},tile);runtime::CpuTileExecutor executor({workers,4,10000});auto r=op.execute(available(source),executor);
+            auto op=PreparedNativeQuery::prepare(source,10,req,available(source),runtime::ExecutionLease{},tile,
+                workers>1?NativeQueryIndex::NumericRanges:NativeQueryIndex::None);runtime::CpuTileExecutor executor({workers,4,10000});auto r=op.execute(available(source),executor);
             std::cout<<"q "<<r.selected_count()<<' '<<r.unknown_count()<<' '<<r.numeric_contributions()<<' '<<(r.sum()?r.sum()->get_str():"null");
             for(const auto key:r.keys())std::cout<<' '<<key;
             std::cout<<'\n';
@@ -204,5 +292,5 @@ void oracle() {
 }
 int main(int argc,char** argv) {
     if (argc==2 && std::string(argv[1])=="--oracle") {oracle();return 0;}
-    queries();windows();work();std::cout<<checks<<" native query/tensor checks passed\n";
+    queries();windows();role_joins();work();std::cout<<checks<<" native query/tensor checks passed\n";
 }

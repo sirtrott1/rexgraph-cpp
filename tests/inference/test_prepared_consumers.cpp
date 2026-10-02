@@ -1,4 +1,5 @@
 #include "rfc/learning/native_metric_layer.hpp"
+#include "rfc/learning/native_exact_trainer.hpp"
 #include "rfc/storage/prepared_source_program.hpp"
 #include "rfc/runtime/query_mask.hpp"
 #include "../storage/native_accession_fixture.hpp"
@@ -164,6 +165,108 @@ void admission_lifetime(){
     rejects([&]{kept.first.forward(pub);},"model accepted different publication");
     check(kept.first.forward(kept.second).values()==old.values(),"failed model call changed previous output");
 }
+void global_tests(bool emit){
+    const auto emit_matrix=[](const numeric::ExactMatrix& m){
+        std::cout<<'[';for(std::size_t i=0;i<m.rows();++i){if(i)std::cout<<',';numeric::RationalVector row;
+            for(std::size_t j=0;j<m.cols();++j)row.push_back(m.get(i,j));vector_json(row);}std::cout<<']';
+    };
+    for(unsigned seed=0;seed<12;++seed){
+        auto e=endpoint(seed);
+        for(auto& tensor:e.tensors)if(tensor.role==TemporalTensorRole::Metric){
+            const auto n=tensor.tensor.domain().extents()[0];numeric::ExactMatrix metric(n,n);
+            for(std::size_t i=0;i<n;++i){metric.set(i,i,Q{4});if(i){metric.set(i-1,i,Q{-1,3});metric.set(i,i-1,Q{-1,3});}}
+            tensor.tensor=temporal_matrix_tensor(metric);
+        }
+        NativeAccessionDirectory d(e,88);const auto pub=anchor(d);auto req=request(d);
+        req.metrics=inference::NativeMetricSelection::DeclaredPositive;req.profile=field::PreparedExactProfile::GlobalActions;
+        const auto prepared=inference::PreparedNativeExactTower::prepare(pub,req);
+        const auto canonical=encode_temporal_endpoint(*pub.endpoint());
+        const auto reference=field::ExactExecutionTower::weighted(pub.endpoint()->source,prepared.tower().metrics());
+        for(unsigned k=0;k<3;++k)for(auto kind:{K::Hodge,K::Green,K::HarmonicProjector}) {
+            const core::Grade grade{static_cast<std::uint16_t>(k)};
+            const auto input=d.pin(tensor_request(NativeAccessionKind::Field,1000+k));
+            for(const auto& lambda:kind==K::Green?numeric::RationalVector{Q{0},Q{2,7},Q{-1,997}}:numeric::RationalVector{Q{0}}) {
+                const field::OperatorRequest operation{kind,grade,lambda};const auto result=prepared.execute(operation,input);
+                const auto x=prepared.input_values(input,grade);
+                if(kind!=K::Green || lambda>0)check(result.values()==reference.apply(operation,x),"global owning reference mismatch");
+                if(kind==K::Green) {
+                    field::ExactHodgeOperator hodge(pub.endpoint()->source,grade,prepared.tower().metrics());
+                    check(numeric::add(result.values(),numeric::scale(lambda,hodge.apply(result.values())))==x,"global exact Green residual");
+                }
+                check(result.provenance().profile=="source-grade-global-exact-v1","global profile provenance absent");
+                if(emit) {
+                    std::cout<<"{\"kind\":"<<static_cast<unsigned>(kind)<<",\"grade\":"<<k<<",\"lambda\":\""<<lambda<<"\",\"input\":";vector_json(x);
+                    std::cout<<",\"metrics\":[";for(std::size_t j=0;j<3;++j){if(j)std::cout<<',';emit_matrix(prepared.tower().metrics()[j].materialize());}
+                    std::cout<<"],\"boundaries\":[";for(std::uint16_t j=1;j<3;++j){if(j>1)std::cout<<',';emit_matrix(field::materialize_boundary_matrix(pub.endpoint()->source,core::Grade{j}));}
+                    std::cout<<"],\"output\":";vector_json(result.values());std::cout<<"}\n";
+                }
+            }
+        }
+        check(canonical==encode_temporal_endpoint(*pub.endpoint()),"global execution changed retained native bytes");
+        auto limited=req;limited.global_grade_dimension_limit=1;
+        rejects([&]{inference::PreparedNativeExactTower::prepare(pub,limited);},"global dimension cap ignored");
+        runtime::ExecutionHostPolicy policy;policy.limits.scalar_work=1;
+        rejects([&]{prepared.execute({K::Green,core::Grade{1},Q{1}},pub,runtime::ExecutionLease(policy));},"global current work cap ignored");
+    }
+    auto e=endpoint(0);auto m=temporal_tensor_matrix(e.tensors[1]);m.set(0,0,Q{-1});e.tensors[1].tensor=temporal_matrix_tensor(m);
+    rejects([&]{NativeAccessionDirectory invalid(e,88);auto req=request(invalid);
+        req.metrics=inference::NativeMetricSelection::DeclaredPositive;req.profile=field::PreparedExactProfile::GlobalActions;
+        inference::PreparedNativeExactTower::prepare(anchor(invalid),req);},"indefinite native metric accepted");
+    // The negative resolvent parameter must reject an actually singular system.
+    core::RelationSignature s;const auto type=s.add_type("edge",core::BoundaryPolicy::DeclaredExact,2,2);
+    core::RelationalComplexBuilder b(s);b.add_grade_one(type,{{0,true,false,false,1},{1,true,true,false,1}});
+    const auto source=std::make_shared<const core::RelationalComplex>(b.freeze());
+    field::PreparedExactExecutionTower tower(source,{field::ExactMetric::identity(2),field::ExactMetric::identity(1)},field::PreparedExactProfile::GlobalActions);
+    rejects([&]{tower.apply({K::Green,core::Grade{0},Q{-1,2}},{Q{1},Q{0}});},"singular Green system accepted");
+    check(tower.apply({K::Green,core::Grade{0},Q{0}},{Q{1},Q{0}})==numeric::RationalVector({Q{1},Q{0}}),"zero Green is not identity");
+}
+void training_tests(){
+    NativeAccessionDirectory d(endpoint(7),88);const auto input=anchor(d);
+    const auto tower=inference::PreparedNativeExactTower::prepare(input,request(d));
+    const auto gains=d.pin(tensor_request(NativeAccessionKind::Field,3000)),bias=d.pin(tensor_request(NativeAccessionKind::Field,3001));
+    const learning::NativeExactTrainingContract contract{learning::NativeTrainingObjective::HalfMetricSquaredError,
+        {"original-ordered-gradient-test",900,901},700,9900,9901,9902,2,0,9903};
+    std::vector<learning::NativeExactTrainingSample> samples{{input,input,learning::NativeSamplePartition::Training,3,4,5}};
+    const auto initial=learning::NativeExactTrainer::prepare(tower,core::Grade{1},channels(),gains,bias,samples,contract);
+    auto trained=initial;const auto initial_archive=encode_native_series(initial.history());
+    // Differentiate the declared scalar quadrance independently by its exact
+    // central difference; the loss is quadratic, so this derivative is exact.
+    const auto x=tower.input_values(input,core::Grade{1});const auto& metric=tower.tower().metrics()[1];
+    std::vector<numeric::RationalVector> responses;
+    for(const auto& channel:channels()) {
+        const auto kind=channel.kind==C::HodgeDown?K::HodgeDown:channel.kind==C::HodgeUp?K::HodgeUp:K::Hodge;
+        responses.push_back(channel.kind==C::Identity?x:tower.tower().apply({kind,core::Grade{1},0},x));
+    }
+    const auto loss=[&](const numeric::RationalVector& parameters){
+        numeric::RationalVector prediction(x.size(),parameters.back());
+        for(std::size_t c=0;c<responses.size();++c)for(std::size_t i=0;i<x.size();++i)prediction[i]+=parameters[c]*responses[c][i];
+        const auto error=numeric::sub(prediction,x);return Q{metric.inner(error,error)/2};
+    };
+    for(unsigned step=0;step<4;++step){
+        const auto before=trained.parameters();auto expected=before;const Q rate{1,1000000};
+        for(std::size_t p=0;p<before.size();++p){auto plus=before,minus=before;plus[p]+=Q{1,13};minus[p]-=Q{1,13};
+            expected[p]-=rate*(loss(plus)-loss(minus))/Q{2,13};}
+        trained=trained.advance(rate,3,5+step);
+        check(trained.parameters()==expected && *trained.last_loss()==loss(before),"declared exact gradient central difference mismatch");
+    }
+    check(initial_archive==encode_native_series(initial.history()),"training changed a prior checkpoint");
+    const auto archive=encode_native_series(trained.history());
+    const auto resumed=learning::NativeExactTrainer::resume(initial,archive);
+    check(resumed.parameters()==trained.parameters() && resumed.history().same_history(trained.history()),"complete native training resume mismatch");
+    check(resumed.advance(Q{1,1000000},3,9).parameters()==trained.advance(Q{1,1000000},3,9).parameters(),"resumed next update mismatch");
+    rejects([&]{initial.advance(Q{1},2,5);},"future event used for fit");
+    rejects([&]{initial.advance(Q{1},3,4);},"future label used for fit");
+    rejects([&]{trained.advance(Q{1},3,5);},"future fitted parameters used at old cutoff");
+    samples[0].partition=learning::NativeSamplePartition::Evaluation;
+    const auto evaluation=learning::NativeExactTrainer::prepare(tower,core::Grade{1},channels(),gains,bias,samples,contract);
+    rejects([&]{evaluation.advance(Q{1},3,5);},"evaluation label fit allowed");
+    rejects([&]{learning::NativeExactTrainer::resume(evaluation,archive);},"changed data-order/partition accepted on resume");
+    auto broken=archive;broken.back()^=std::byte{1};rejects([&]{learning::NativeExactTrainer::resume(initial,broken);},"corrupt training checkpoint accepted");
+    auto changed=channels();std::swap(changed[0],changed[1]);
+    const auto reordered=learning::NativeExactTrainer::prepare(tower,core::Grade{1},changed,gains,bias,
+        {{input,input,learning::NativeSamplePartition::Training,3,4,5}},contract);
+    rejects([&]{learning::NativeExactTrainer::resume(reordered,archive);},"same-width reordered original channels accepted on resume");
+}
 void packed_tests(){
     for(const auto n:{2u,21u,65u,130u}){
         NativeAccessionDirectory d(native_accession_fixture::endpoint(n),800,{},[](auto){return 0;});
@@ -200,6 +303,7 @@ void packed_tests(){
 }
 }
 int main(int argc,char** argv){try{
+    if(argc>1 && std::string_view(argv[1])=="--global-oracle"){global_tests(true);return 0;}
     const bool emit=argc>1 && std::string_view(argv[1])=="--oracle";
-    exact_tests(emit);if(!emit){admission_lifetime();packed_tests();std::cout<<"checks="<<checks<<"\n";}return 0;
+    exact_tests(emit);if(!emit){admission_lifetime();global_tests(false);training_tests();packed_tests();std::cout<<"checks="<<checks<<"\n";}return 0;
 }catch(const std::exception& e){std::cerr<<"FAIL after "<<checks<<": "<<e.what()<<'\n';return 1;}}

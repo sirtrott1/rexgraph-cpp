@@ -86,7 +86,8 @@ template<class Action>
         direction=numeric::add(residual,numeric::scale(beta,direction));
         residual_norm=next_norm;
     }
-    return {std::move(x),numeric::is_zero(numeric::sub(action(x),source)),source.size()};
+    const bool exact=numeric::is_zero(numeric::sub(action(x),source));
+    return {std::move(x),exact,source.size()};
 }
 
 } // namespace rfc::field

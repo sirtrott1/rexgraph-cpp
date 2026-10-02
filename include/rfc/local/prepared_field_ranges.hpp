@@ -24,6 +24,11 @@ public:
             if (!scratch_) throw std::invalid_argument("moved-from field range workspace");
             return machine::checked_size_add(scratch_->values.size(),scratch_->products.size());
         }
+        std::size_t scratch_object_bytes() const {
+            if(!scratch_)throw std::invalid_argument("moved-from field range workspace");
+            return machine::checked_size_add(numeric::rational_vector_object_bytes(scratch_->values),
+                numeric::rational_vector_object_bytes(scratch_->products));
+        }
     private:
         Workspace(std::shared_ptr<const State> owner, std::shared_ptr<Scratch> scratch)
             : owner_(std::move(owner)),scratch_(std::move(scratch)) {}

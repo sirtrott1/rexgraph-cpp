@@ -104,7 +104,7 @@ endif()
 project(installed LANGUAGES CXX)
 set(CMAKE_DISABLE_FIND_PACKAGE_Vulkan TRUE)
 set(CMAKE_DISABLE_FIND_PACKAGE_SQLite3 TRUE)
-find_package(RFC 0.1 CONFIG REQUIRED)
+find_package(RFC 0.2 CONFIG REQUIRED)
 if(TARGET Vulkan::Vulkan OR TARGET SQLite::SQLite3 OR TARGET SQLite3::SQLite3
    OR TARGET rfc::vulkan_binary OR TARGET rfc::sqlite_interpretation)
   message(FATAL_ERROR "Optional adapter leaked into the base package")

@@ -192,4 +192,41 @@ inline ExactTowerField exact_antidirac_cayley_apply(
                            exact_tower_scale(numeric::Rational{2}*t,day));
 }
 
+// Explicit Q(i) extension over retained real rational positive grade metrics:
+// both rational components retain the full tower.
+// Real tower operations never convert to this domain implicitly.
+struct ExactComplexTowerField {
+    ExactTowerField real,imaginary;
+};
+
+inline ExactComplexTowerField exact_dirac_cayley_apply(
+    const core::RelationalComplex& complex,const std::vector<ExactMetric>& metrics,
+    const numeric::Rational& t,const ExactComplexTowerField& input) {
+    require_exact_tower_shape(complex,input.real);require_exact_tower_shape(complex,input.imaginary);
+    if(metrics.size()!=complex.grade_count())throw std::invalid_argument("complex Cayley metric count mismatch");
+    if(t==0)return input;
+    ExactComplexTowerField green;
+    for(std::size_t k=0;k<complex.grade_count();++k) {
+        const ExactHodgeOperator hodge(complex,core::Grade{static_cast<std::uint16_t>(k)},metrics);
+        const auto solve=[&](const numeric::RationalVector& x){
+            const auto result=exact_green_apply(hodge,t*t,x);
+            if(!result.exact)throw std::runtime_error("complex Cayley Green residual is nonzero");
+            return result.value;
+        };
+        green.real.grades.push_back(solve(input.real.grades[k]));
+        green.imaginary.grades.push_back(solve(input.imaginary.grades[k]));
+    }
+    const auto real_dirac=exact_dirac_apply(complex,metrics,green.real);
+    const auto imaginary_dirac=exact_dirac_apply(complex,metrics,green.imaginary);
+    return {exact_tower_sub(exact_tower_sub(exact_tower_scale(numeric::Rational{2},green.real),input.real),
+                            exact_tower_scale(numeric::Rational{2}*t,imaginary_dirac)),
+            exact_tower_add(exact_tower_sub(exact_tower_scale(numeric::Rational{2},green.imaginary),input.imaginary),
+                            exact_tower_scale(numeric::Rational{2}*t,real_dirac))};
+}
+
+inline numeric::Rational exact_complex_tower_quadrance(const std::vector<ExactMetric>& metrics,
+    const ExactComplexTowerField& input) {
+    return exact_tower_inner(metrics,input.real,input.real)+exact_tower_inner(metrics,input.imaginary,input.imaginary);
+}
+
 } // namespace rfc::field

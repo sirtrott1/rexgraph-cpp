@@ -221,6 +221,10 @@ public:
     }
     const std::string& revision() const noexcept { return data_->revision; }
     const InterpretationSchema& schema() const noexcept { return data_->plan.schema; }
+    bool same_schema(const InterpretedSnapshot& b) const {
+        const auto& a=schema();const auto& c=b.schema();return a.source_namespace==c.source_namespace && a.binding_namespace==c.binding_namespace &&
+            a.version==c.version && a.subjects==c.subjects && a.assertions==c.assertions && a.values.definitions()==c.values.definitions();
+    }
     const InterpretationLineage& lineage() const noexcept { return data_->ledger; }
     const InterpretationLimits& limits() const noexcept { return data_->limits; }
     std::uint64_t sequence() const { return data_->source.sequence(); }
@@ -333,10 +337,6 @@ private:
     std::shared_ptr<const Data> data_;
     InterpretedSnapshot(interpretation_detail::CompiledInterpretation p,InterpretationLineage l,storage::TemporalEndpoint endpoint,std::string revision,InterpretationLimits limits)
         :data_(std::make_shared<const Data>(std::move(p),std::move(l),endpoint,std::move(revision),limits)) {}
-    bool same_schema(const InterpretedSnapshot& b) const {
-        const auto& a=schema();const auto& c=b.schema();return a.source_namespace==c.source_namespace && a.binding_namespace==c.binding_namespace &&
-            a.version==c.version && a.subjects==c.subjects && a.assertions==c.assertions && a.values.definitions()==c.values.definitions();
-    }
     static bool lineage_extends(const InterpretationLineage& a,const InterpretationLineage& b) {
         const auto includes=[](const auto& old,const auto& next) {
             for(const auto& x:old) {

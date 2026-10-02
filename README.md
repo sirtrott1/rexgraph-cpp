@@ -52,7 +52,7 @@ cmake --install build/release --prefix /your/install/prefix
 ```
 
 ```cmake
-find_package(RFC 0.1 CONFIG REQUIRED)
+find_package(RFC 0.2 CONFIG REQUIRED)
 target_link_libraries(your_app PRIVATE rfc::field)
 ```
 
@@ -156,11 +156,33 @@ intersection through the same packed executor.
 
 `inference/native_field_execution.hpp` prepares owning boundary, metric adjoint,
 and down/up/full Hodge actions on complete declared `SourceGrade` carriers. It
-accepts named unit metrics or complete positive diagonal native metrics.
+Its finite profile accepts named unit metrics or complete positive diagonal
+native metrics. The explicitly selected `GlobalActions` profile also accepts
+complete declared positive rational metrics, exact Green solves and harmonic
+projectors. Metric solves reuse their exact LDL factors. Harmonic frames are
+prepared once; Green uses sparse augmented equations and verifies its residual.
+Negative Green parameters require a nonsingular system. Dimension, fill, work
+and integer-growth admission remain explicit. These actions do not require a
+Hodge matrix, inverse matrix or eigensolve.
 `learning/native_metric_layer.hpp` retains original ordered finite channels and
-native gain/bias fields and returns prospective values. General metric solves,
-Green/projector channels and empty grades are outside these prepared profiles;
-the existing exact reference APIs remain available.
+native gain/bias fields and returns prospective values. Its original finite
+channels remain the supported model profile; empty grades reject explicitly.
+
+`learning/native_exact_trainer.hpp` provides a declared serial rational gradient
+profile for half the metric squared error. It retains original ordered channels,
+parameters, fixed sample order, step sizes and complete updates in a separate
+native history. Event, knowledge, label, publication and fitted-parameter cutoffs
+are checked separately; evaluation labels cannot update parameters. Resume
+replays every exact update and checks the complete ordered history. This profile
+uses no random state or momentum and does not assert predictions as source facts.
+
+`field/exact_dirac.hpp` provides an explicit rational-complex Cayley action with
+separate full real and imaginary towers. `numeric/rational_function.hpp` supplies
+bounded univariate arithmetic, differentiation and sparse elimination over
+`Q(t)`; poles and singular systems reject. Original domain restrictions remain
+the caller's declarations. `geometry/chain_homotopy.hpp` owns explicit chain
+homotopy certificates. A linear certificate does not supply an undeclared
+structural cylinder morphism or a universal homotopy solver.
 
 `storage/native_series_prefix.hpp` captures an owning history through one explicit
 publication cutoff. `temporal/chronological_prefix.hpp` evaluates only the declared
@@ -193,14 +215,15 @@ storage across snapshots. See the [concurrent history consumer](examples/concurr
 
 See the [CLI README](docs/local/README.md) for examples and supported imports.
 `cmake --install build/release --prefix /your/install/path` installs the local
-CLI and its READMEs. Library consumers currently use the source CMake targets;
-an installed CMake SDK is not supplied.
+CLI and its READMEs. The installation supplies the relocatable `RFC` CMake package and
+public headers described above.
 
 ## Scope
 
-Version 0.1.0 is a developer preview with a changing C++ API. The current runtime
-is the Lossless Integrity release dated 2026-09-29. Native codecs retain their
-canonical compatibility fixtures. Supported external interpretation is bounded;
+Version 0.2.0 is a developer preview with a changing C++ API. The runtime includes
+the Lossless Integrity baseline and its owning execution, durable history,
+concurrent publication, locality, and prepared query/tensor extensions.
+Native codecs retain their canonical compatibility fixtures. Supported external interpretation is bounded;
 SQLite ingestion admits INTEGER, TEXT, and BLOB under explicit identity and role
 bindings.
 

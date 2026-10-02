@@ -27,6 +27,20 @@ void basics(const std::filesystem::path& out) {
     check(pin.endpoint().tensors[0].tensor.state(0) == Q{1}, "caller alias reached series");
     h.a = endpoint(40, {1, 2});
     const auto initial_bytes = encode_native_series(s);
+    std::vector<std::byte> streamed;bool changed{};auto reentrant=s;
+    stream_native_series(reentrant,[&](auto chunk) {
+        check(chunk.size()<=65536,"stream emitted an unbounded archive chunk");
+        if(!changed){changed=true;reentrant.append(h.first);}
+        streamed.insert(streamed.end(),chunk.begin(),chunk.end());
+    });
+    check(streamed==initial_bytes && reentrant.last_sequence()==41,"stream followed reentrant publication change");
+    const auto detached=[] {
+        PaperHistory paper;NativeTemporalSeries local(paper.a,700);
+        std::optional<NativeSeriesComponent> component;
+        local.visit_components([&](auto part){if(part.kind==NativeSeriesComponentKind::BaseSource)component=std::move(part);});
+        return *component;
+    }();
+    check(detached.sequence==40 && *detached.bytes==encode_rfcx(h.a.source).bytes,"native component lost its immutable owner");
     equal(*decode_native_series(initial_bytes).tail().pin(), h.a);
     save(out / "empty.rfcxs", initial_bytes);
     s.append(h.first); s.append_encoded(encode_temporal_segment(h.second));

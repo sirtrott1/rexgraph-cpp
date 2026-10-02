@@ -8,11 +8,40 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: library-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  bounded-codec-fuzzing:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: sudo apt-get update && sudo apt-get install -y clang ninja-build pkg-config libgmp-dev python3
+      - run: cmake -S . -B build/fuzz -G Ninja -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Release -DRFC_BUILD_FUZZERS=ON -DRFC_BUILD_APPS=OFF -DRFC_BUILD_LOCAL_TOOLS=OFF -DRFC_BUILD_BENCHMARKS=OFF
+      - run: cmake --build build/fuzz --target rfc_native_codecs_fuzz rfc_native_series_tests --parallel 1
+      - run: ./build/fuzz/rfc_native_series_tests build/fuzz/series-seeds
+      - name: Seed canonical codecs and exercise malformed input
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          corpus = Path('build/fuzz/corpus'); corpus.mkdir()
+          for root, suffix, mode in [(Path('tests'), '*.rfcx', 0), (Path('tests'), '*.rfcxv', 1), (Path('build/fuzz/series-seeds'), '*.rfcxs', 2)]:
+              for n, source in enumerate(root.rglob(suffix)):
+                  data = source.read_bytes()
+                  if len(data) <= 65536: (corpus/f'{mode}-{n}').write_bytes(bytes([mode])+data)
+          (corpus/'series-header').write_bytes(b'\x02RFCX-S\x01\x00')
+          PY
+          ./build/fuzz/rfc_native_codecs_fuzz build/fuzz/corpus -max_total_time=60 -max_len=65537 -rss_limit_mb=2048 -timeout=5
   native-execution-sanitizers:
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install execution test dependencies
         run: |
           sudo apt-get update
@@ -23,15 +52,16 @@ jobs:
           UBSAN_OPTIONS: halt_on_error=1
         run: |
           cmake -S . -B build/sanitizers -G Ninja -DCMAKE_CXX_COMPILER=clang++ \
-            -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="-O1 -g0 -fno-omit-frame-pointer -fsanitize=address,undefined" \
+            -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS_DEBUG="-g0" -DCMAKE_CXX_FLAGS="-O1 -g0 -fno-omit-frame-pointer -fsanitize=address,undefined" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
             -DRFC_BUILD_APPS=OFF -DRFC_BUILD_LOCAL_TOOLS=OFF -DRFC_BUILD_BENCHMARKS=OFF
-          cmake --build build/sanitizers --target rfc_native_query_execution_tests rfc_native_locality_tests rfc_native_work_tests rfc_work_graph_tests rfc_native_execution_tests rfc_native_field_cache_tests rfc_parallel_native_field_tests rfc_hardware_resource_tests rfc_resource_native_field_tests rfc_prepared_field_action_tests rfc_prepared_consumer_tests rfc_binary_execution_tests rfc_native_durable_tests rfc_concurrent_history_tests --parallel 1
-          ctest --test-dir build/sanitizers -R 'rfc_native_query_execution|rfc_native_locality|rfc_native_work|rfc_work_graph|rfc_native_execution|rfc_native_field_cache|rfc_parallel_native_field|rfc_hardware_resources|rfc_resource_native_field|rfc_prepared_field_action|rfc_prepared_consumers|rfc_binary_execution|rfc_native_durable|rfc_concurrent_native_history' --output-on-failure -j1
+          cmake --build build/sanitizers --target rfc_native_query_execution_tests rfc_native_locality_tests rfc_native_work_tests rfc_work_graph_tests rfc_native_execution_tests rfc_native_field_cache_tests rfc_parallel_native_field_tests rfc_hardware_resource_tests rfc_resource_native_field_tests rfc_prepared_field_action_tests rfc_prepared_consumer_tests rfc_binary_execution_tests rfc_native_durable_tests rfc_concurrent_history_tests rfc_native_series_tests rfc_declared_extension_tests --parallel 1
+          ctest --test-dir build/sanitizers -R 'rfc_native_query_execution|rfc_native_locality|rfc_native_work|rfc_work_graph|rfc_native_execution|rfc_native_field_cache|rfc_parallel_native_field|rfc_hardware_resources|rfc_resource_native_field|rfc_prepared_field_action|rfc_prepared_consumers|rfc_global_consumers_fraction|rfc_binary_execution|rfc_native_durable|rfc_concurrent_native_history|rfc_native_series|rfc_declared_extensions' --output-on-failure -j1
   concurrent-history-races:
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install concurrent history test dependencies
         run: |
           sudo apt-get update
@@ -41,15 +71,16 @@ jobs:
           TSAN_OPTIONS: halt_on_error=1
         run: |
           cmake -S . -B build/tsan -G Ninja -DCMAKE_CXX_COMPILER=clang++ \
-            -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="-O1 -g0 -fno-omit-frame-pointer -fsanitize=thread" \
+            -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS_DEBUG="-g0" -DCMAKE_CXX_FLAGS="-O1 -g0 -fno-omit-frame-pointer -fsanitize=thread" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread" \
             -DRFC_BUILD_APPS=OFF -DRFC_BUILD_LOCAL_TOOLS=OFF -DRFC_BUILD_BENCHMARKS=OFF
           cmake --build build/tsan --target rfc_native_query_execution_tests rfc_native_locality_tests rfc_native_work_tests rfc_work_graph_tests rfc_concurrent_history_tests rfc_native_field_cache_tests rfc_parallel_native_field_tests rfc_hardware_resource_tests rfc_resource_native_field_tests --parallel 1
           ctest --test-dir build/tsan -R 'rfc_native_query_execution|rfc_native_locality|rfc_native_work|rfc_work_graph|rfc_concurrent_native_history|rfc_native_field_cache|rfc_parallel_native_field|rfc_hardware_resources|rfc_resource_native_field' --output-on-failure -j1
   linux:
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
       - name: Check public repository contents
@@ -115,13 +146,14 @@ jobs:
           ctest --test-dir build/database --output-on-failure
 
   vulkan:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     env:
       VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
       VK_INSTANCE_LAYERS: VK_LAYER_KHRONOS_validation
       VK_LAYER_VALIDATE_SYNC: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install Vulkan build and software qualification dependencies
         run: sudo apt-get update && sudo apt-get install -y ninja-build pkg-config libgmp-dev libvulkan-dev glslang-tools spirv-tools mesa-vulkan-drivers vulkan-validationlayers python3
       - name: Build exact Vulkan profile
