@@ -1,6 +1,7 @@
 #pragma once
 
 #include "rfc/storage/temporal_seed.hpp"
+#include "rfc/storage/persistent_append_index.hpp"
 #include "rfc/temporal/multitime.hpp"
 #include <memory>
 #include <tuple>
@@ -23,6 +24,10 @@ struct NativeSeriesReplayStats {
     std::uint64_t starting_sequence{};
     std::size_t replayed_segments{};
     bool used_checkpoint{};
+};
+struct NativeSeriesStorageStats {
+    std::size_t frame_index_pages{}, last_append_pages{}, last_append_pointer_copies{}, checkpoint_count{};
+    unsigned frame_index_levels{};
 };
 
 namespace native_series_detail {
@@ -63,9 +68,10 @@ struct State {
     NativeSeriesLimits limits;
     std::shared_ptr<const Snapshot> base;
     std::shared_ptr<const TemporalEndpoint> tail;
-    std::vector<std::shared_ptr<const Frame>> frames;
-    std::map<std::uint64_t, std::shared_ptr<const Snapshot>> checkpoints;
-    std::size_t archive_bytes{};
+    AppendIndex<Frame> frames;
+    using Checkpoints = std::map<std::uint64_t, std::shared_ptr<const Snapshot>>;
+    std::shared_ptr<const Checkpoints> checkpoints{std::make_shared<const Checkpoints>()};
+    std::size_t archive_bytes{}, frame_bytes{}, checkpoint_bytes{};
 };
 inline std::size_t add_blob(std::size_t total, std::size_t n) {
     return machine::checked_size_add(total, machine::checked_size_add(8, n));
@@ -73,11 +79,8 @@ inline std::size_t add_blob(std::size_t total, std::size_t n) {
 inline std::size_t archive_size(const State& s) {
     std::size_t n = 32 + 8 + 8 + 8; // envelope, namespace, frame/checkpoint counts
     n = add_blob(n, s.base->source.size()); n = add_blob(n, s.base->channels.size());
-    for (const auto& f : s.frames) n = add_blob(n, f->bytes.size());
-    for (const auto& [sequence, cp] : s.checkpoints) {
-        (void)sequence; n = machine::checked_size_add(n, 8);
-        n = add_blob(n, cp->source.size()); n = add_blob(n, cp->channels.size());
-    }
+    n = machine::checked_size_add(n, s.frame_bytes);
+    n = machine::checked_size_add(n, s.checkpoint_bytes);
     bound(n, s.limits.max_archive_bytes, "series aggregate archive byte budget");
     return n;
 }
@@ -94,8 +97,8 @@ inline std::shared_ptr<const TemporalEndpoint> reconstruct(
     auto current = s.base->endpoint;
     stats = {current->sequence, 0, false};
     if (!from_base) {
-        auto cp = s.checkpoints.upper_bound(sequence);
-        if (cp != s.checkpoints.begin()) {
+        auto cp = s.checkpoints->upper_bound(sequence);
+        if (cp != s.checkpoints->begin()) {
             --cp; current = cp->second->endpoint;
             stats = {current->sequence, 0, true};
         }
@@ -404,11 +407,16 @@ public:
     std::size_t segment_count() const { return state().frames.size(); }
     std::size_t archive_bytes() const { return state().archive_bytes; }
     NativeSeriesLimits limits() const { return state().limits; }
+    NativeSeriesStorageStats storage_stats() const {
+        const auto stats = state().frames.stats();
+        return {stats.reachable_pages, stats.last_append_pages, stats.last_append_pointer_copies,
+                state().checkpoints->size(), stats.levels};
+    }
     bool same_history(const NativeTemporalSeries& other) const {
         const auto& a = state(); const auto& b = other.state();
         if (a.name_space != b.name_space || a.base->source != b.base->source || a.base->channels != b.base->channels ||
             a.frames.size() != b.frames.size()) return false;
-        for (std::size_t i = 0; i < a.frames.size(); ++i) if (a.frames[i]->bytes != b.frames[i]->bytes) return false;
+        for (std::size_t i = 0; i < a.frames.size(); ++i) if (a.frames.at(i)->bytes != b.frames.at(i)->bytes) return false;
         return true; // checkpoint schedules are physical, not temporal identity
     }
     NativeSeriesEndpoint tail() const { return {state().tail, state().name_space, {last_sequence(), 0, false}}; }
@@ -419,7 +427,7 @@ public:
     }
     std::vector<std::uint64_t> checkpoint_sequences() const {
         std::vector<std::uint64_t> out;
-        for (const auto& [seq, cp] : state().checkpoints) { (void)cp; out.push_back(seq); }
+        for (const auto& [seq, cp] : *state().checkpoints) { (void)cp; out.push_back(seq); }
         return out;
     }
     // Canonical frames remain individually addressable after checkpoint repacking.
@@ -440,7 +448,8 @@ public:
         auto next_endpoint = std::make_shared<const TemporalEndpoint>(replay_temporal_segment(
             *old.tail, decoded, old.limits.temporal.source_declarations));
         auto next = std::make_shared<State>(old);
-        next->frames.push_back(std::make_shared<const Frame>(Frame{std::move(decoded), Bytes(frame.begin(), frame.end())}));
+        next->frames = old.frames.appended(std::make_shared<const Frame>(Frame{std::move(decoded), Bytes(frame.begin(), frame.end())}));
+        next->frame_bytes = add_blob(old.frame_bytes, frame.size());
         next->tail = std::move(next_endpoint); next->archive_bytes = archive_size(*next);
         state_ = std::move(next);
     }
@@ -473,15 +482,21 @@ public:
             (void)offset(old, seq); require(seq != first_sequence(), "base is already the initial checkpoint");
             require(selected.insert(seq).second, "duplicate checkpoint sequence");
         }
-        auto next = std::make_shared<State>(old); next->checkpoints.clear();
+        auto next = std::make_shared<State>(old);
+        auto checkpoints = std::make_shared<State::Checkpoints>(); next->checkpoint_bytes = 0;
         for (auto seq : selected) {
-            if (const auto it = old.checkpoints.find(seq); it != old.checkpoints.end()) next->checkpoints.emplace(seq, it->second);
+            if (const auto it = old.checkpoints->find(seq); it != old.checkpoints->end()) checkpoints->emplace(seq, it->second);
             else {
                 auto endpoint = at(seq);
-                next->checkpoints.emplace(seq, snapshot(endpoint.endpoint(), old.limits));
+                checkpoints->emplace(seq, snapshot(endpoint.endpoint(), old.limits));
             }
+            const auto& cp = *checkpoints->at(seq);
+            next->checkpoint_bytes = machine::checked_size_add(next->checkpoint_bytes, 8);
+            next->checkpoint_bytes = add_blob(next->checkpoint_bytes, cp.source.size());
+            next->checkpoint_bytes = add_blob(next->checkpoint_bytes, cp.channels.size());
             next->archive_bytes = archive_size(*next);
         }
+        next->checkpoints = std::move(checkpoints);
         next->archive_bytes = archive_size(*next); state_ = std::move(next);
     }
 private:

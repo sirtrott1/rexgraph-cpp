@@ -164,7 +164,7 @@ private:
     }
     std::unique_ptr<Published> build(const RelationalCodeObservationStore& store,std::vector<NativeAccessionRequest> requests) const {
         native_accession_detail::budget(requests.size(),limits_.max_handles,"accession subscription budget");
-        auto next=std::make_unique<Published>();next->snapshot=std::make_shared<Snapshot>(store,namespace_,limits_);
+        auto next=std::make_unique<Published>();next->snapshot=std::make_shared<Snapshot>(store,namespace_,limits_,authority_);
         next->stats=next->snapshot->stats;
         // All reads/bindings use a pinned immutable endpoint, including when a
         // user selector invokes external code. Reentry into this owner rejects.
@@ -177,6 +177,8 @@ private:
         return next;
     }
     std::uint64_t namespace_{};Selector selector_;NativeAccessionLimits limits_;
+    std::shared_ptr<const native_accession_detail::ExecutionAuthority> authority_{
+        std::make_shared<const native_accession_detail::ExecutionAuthority>()};
     std::unique_ptr<RelationalCodeObservationStore> store_;
     std::unique_ptr<Published> published_;
     mutable bool busy_{};

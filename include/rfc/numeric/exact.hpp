@@ -11,6 +11,19 @@ using Integer = mpz_class;
 using Rational = mpq_class;
 using RationalVector = std::vector<Rational>;
 
+inline Rational canonical_rational(Rational value) {
+    if (mpz_sgn(mpq_denref(value.get_mpq_t())) == 0)
+        throw std::invalid_argument("zero rational denominator");
+    value.canonicalize();
+    return value;
+}
+inline RationalVector canonical_vector(const RationalVector& values) {
+    RationalVector out;
+    out.reserve(values.size());
+    for (const auto& value : values) out.push_back(canonical_rational(value));
+    return out;
+}
+
 inline Rational rational(long numerator) { return Rational(numerator); }
 inline Rational rational(long numerator, long denominator) {
     if (denominator == 0) throw std::invalid_argument("zero denominator");

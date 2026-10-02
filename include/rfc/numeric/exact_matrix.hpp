@@ -73,8 +73,9 @@ public:
 
     [[nodiscard]] RationalVector apply(const RationalVector& x) const {
         if (x.size() != cols_) throw std::invalid_argument("matrix apply size mismatch");
+        const auto input = canonical_vector(x);
         RationalVector out(rows_, Rational{0});
-        for (const auto& [key, value] : entries_) out[key.first] += value * x[key.second];
+        for (const auto& [key, value] : entries_) out[key.first] += value * input[key.second];
         return out;
     }
 
@@ -112,7 +113,8 @@ public:
         if (rows_ != cols_ || rhs.size() != rows_) throw std::invalid_argument("exact solve requires square matrix and matching rhs");
         const std::size_t n = rows_;
         auto rows = sparse_rows();
-        RationalVector b = rhs;
+        const auto input = canonical_vector(rhs);
+        RationalVector b = input;
         for (std::size_t k = 0; k < n; ++k) {
             std::size_t pivot = n;
             std::size_t best_nnz = static_cast<std::size_t>(-1);
@@ -150,7 +152,7 @@ public:
             x[ii] = (b[ii] - sum) / it->second;
             x[ii].canonicalize();
         }
-        if (apply(x) != rhs) throw std::runtime_error("exact solve residual is nonzero");
+        if (apply(x) != input) throw std::runtime_error("exact solve residual is nonzero");
         return x;
     }
 

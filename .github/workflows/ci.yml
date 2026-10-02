@@ -1,0 +1,137 @@
+name: C++ checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-execution-sanitizers:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install execution test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgmp-dev python3
+      - name: Check owning exact execution with Clang and sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1
+        run: |
+          cmake -S . -B build/sanitizers -G Ninja -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="-O1 -g0 -fno-omit-frame-pointer -fsanitize=address,undefined" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
+            -DRFC_BUILD_APPS=OFF -DRFC_BUILD_LOCAL_TOOLS=OFF -DRFC_BUILD_BENCHMARKS=OFF
+          cmake --build build/sanitizers --target rfc_native_query_execution_tests rfc_native_locality_tests rfc_native_work_tests rfc_work_graph_tests rfc_native_execution_tests rfc_native_field_cache_tests rfc_parallel_native_field_tests rfc_hardware_resource_tests rfc_resource_native_field_tests rfc_prepared_field_action_tests rfc_prepared_consumer_tests rfc_binary_execution_tests rfc_native_durable_tests rfc_concurrent_history_tests --parallel 1
+          ctest --test-dir build/sanitizers -R 'rfc_native_query_execution|rfc_native_locality|rfc_native_work|rfc_work_graph|rfc_native_execution|rfc_native_field_cache|rfc_parallel_native_field|rfc_hardware_resources|rfc_resource_native_field|rfc_prepared_field_action|rfc_prepared_consumers|rfc_binary_execution|rfc_native_durable|rfc_concurrent_native_history' --output-on-failure -j1
+  concurrent-history-races:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install concurrent history test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgmp-dev python3
+      - name: Check concurrent history with ThreadSanitizer
+        env:
+          TSAN_OPTIONS: halt_on_error=1
+        run: |
+          cmake -S . -B build/tsan -G Ninja -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="-O1 -g0 -fno-omit-frame-pointer -fsanitize=thread" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread" \
+            -DRFC_BUILD_APPS=OFF -DRFC_BUILD_LOCAL_TOOLS=OFF -DRFC_BUILD_BENCHMARKS=OFF
+          cmake --build build/tsan --target rfc_native_query_execution_tests rfc_native_locality_tests rfc_native_work_tests rfc_work_graph_tests rfc_concurrent_history_tests rfc_native_field_cache_tests rfc_parallel_native_field_tests rfc_hardware_resource_tests rfc_resource_native_field_tests --parallel 1
+          ctest --test-dir build/tsan -R 'rfc_native_query_execution|rfc_native_locality|rfc_native_work|rfc_work_graph|rfc_concurrent_native_history|rfc_native_field_cache|rfc_parallel_native_field|rfc_hardware_resources|rfc_resource_native_field' --output-on-failure -j1
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check public repository contents
+        run: python3 tools/check_public_repository.py --history
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgmp-dev libsqlite3-dev libssl-dev python3
+      - name: Check isolated headers and include order
+        run: |
+          python3 tools/check_headers.py --compiler g++
+          python3 tools/check_headers.py --compiler clang++
+      - name: Build library applications and tests
+        run: |
+          cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DRFC_ENABLE_SQLITE_INTERPRETATION=ON
+          cmake --build build/release --parallel 1
+          ctest --test-dir build/release --output-on-failure -j1
+      - name: Check local CLI installation
+        run: |
+          cmake --install build/release --prefix "$PWD/build/install"
+          ./build/install/bin/rfc_local doctor
+          test -f build/install/share/doc/rfc-local/README.md
+          test -f build/install/share/doc/rfc-local/cli/README.md
+      - name: Build standalone engine consumer
+        run: |
+          cmake -S examples/engine_consumer -B build/engine -G Ninja -DCMAKE_BUILD_TYPE=Release -DRFC_SOURCE_DIR="$PWD"
+          cmake --build build/engine --parallel 1
+          ./build/engine/engine_math_smoke
+      - name: Build standalone durable history consumer
+        run: |
+          cmake -S examples/durable_history -B build/durable -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/durable --parallel 1
+          ./build/durable/durable_history build/example-store
+      - name: Build standalone concurrent history consumer
+        run: |
+          cmake -S examples/concurrent_history -B build/concurrent -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/concurrent --parallel 1
+          ./build/concurrent/concurrent_history build/example-concurrent-store
+      - name: Build standalone native field cache consumer
+        run: |
+          cmake -S examples/field_cache -B build/field-cache -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/field-cache --parallel 1
+          ./build/field-cache/field_cache
+      - name: Build standalone native query and tensor consumer
+        run: |
+          cmake -S examples/query_tensor -B build/query-tensor -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/query-tensor --parallel 1
+          ./build/query-tensor/query_tensor
+      - name: Build standalone parallel field consumer
+        run: |
+          cmake -S examples/parallel_field -B build/parallel-field -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/parallel-field --parallel 1
+          ./build/parallel-field/parallel_field
+      - name: Build standalone hardware field consumer
+        run: |
+          cmake -S examples/hardware_field -B build/hardware-field -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/hardware-field --parallel 1
+          ./build/hardware-field/hardware_field
+      - name: Build and test database preview
+        run: |
+          cmake -S examples/database_preview -B build/database -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/database --parallel 1
+          ctest --test-dir build/database --output-on-failure
+
+  vulkan:
+    runs-on: ubuntu-latest
+    env:
+      VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+      VK_INSTANCE_LAYERS: VK_LAYER_KHRONOS_validation
+      VK_LAYER_VALIDATE_SYNC: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Vulkan build and software qualification dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build pkg-config libgmp-dev libvulkan-dev glslang-tools spirv-tools mesa-vulkan-drivers vulkan-validationlayers python3
+      - name: Build exact Vulkan profile
+        run: |
+          cmake -S . -B build/vulkan -G Ninja -DCMAKE_BUILD_TYPE=Release -DRFC_ENABLE_VULKAN=ON -DRFC_VULKAN_TEST_SOFTWARE=ON -DRFC_BUILD_APPS=OFF -DRFC_BUILD_LOCAL_TOOLS=OFF -DRFC_BUILD_BENCHMARKS=OFF
+          cmake --build build/vulkan --target rfc_packed_binary_tests rfc_vulkan_binary_tests --parallel 1
+          ctest --test-dir build/vulkan -R 'rfc_(packed_binary_owning|vulkan_binary|vulkan_spirv)' --output-on-failure -j1
+          python3 tools/check_vulkan_validation.py build/vulkan/Testing/Temporary/LastTest.log
+      - name: Build standalone Vulkan consumer
+        run: |
+          cmake -S examples/vulkan_binary -B build/vulkan-consumer -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/vulkan-consumer --parallel 1
+          ./build/vulkan-consumer/vulkan_binary --allow-software

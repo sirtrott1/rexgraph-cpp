@@ -181,6 +181,7 @@ struct Binding {
 struct Snapshot;
 struct Entry;
 struct Generation {};
+struct ExecutionAuthority {};
 } // namespace native_accession_detail
 
 class NativeAccessionDirectory;

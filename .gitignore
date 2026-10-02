@@ -33,8 +33,19 @@ __pycache__/
 *.log
 *.html
 *.executed.ipynb
+*.ipynb
+*.pdf
 *.zip
 *.tar.gz
+*.sqlite
+*.sqlite3
+*.db
+
+# Generated native archives; frozen source fixtures remain trackable.
+*.rfcx*
+!/data/fixtures/*.rfcx*
+!/tests/fixtures/**/*.rfcx*
+!/tests/storage/fixtures/**/*.rfcx*
 /.DS_Store
 
 # Internal material belongs in the sibling internal repository
@@ -43,6 +54,7 @@ __pycache__/
 /handoff/
 /evidence/
 /verification/
+/backups/
 /paper/
 /notebooks/
 /AGENTS.md

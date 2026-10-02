@@ -59,7 +59,7 @@ public:
                              core::Grade shared_grade,
                              const std::vector<ExactMetric>& metrics,
                              numeric::ExactMatrix weight)
-        : complex_(&complex), grade_(shared_grade), metrics_(&metrics), weight_(std::move(weight)),
+        : grade_(shared_grade), metrics_(&metrics), weight_(std::move(weight)),
           lower_(complex,shared_grade),
           upper_(complex,core::Grade{static_cast<std::uint16_t>(shared_grade.value+1u)}) {
         if(shared_grade.value==0 || shared_grade.value>=complex.max_grade().value) {
@@ -93,7 +93,6 @@ public:
         return metrics_->at(grade_.value-1u).inner(value,value);
     }
 private:
-    const core::RelationalComplex* complex_{};
     core::Grade grade_{};
     const std::vector<ExactMetric>* metrics_{};
     numeric::ExactMatrix weight_;

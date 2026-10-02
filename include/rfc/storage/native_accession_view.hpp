@@ -27,6 +27,7 @@ struct OccurrenceHash {
 template<class T> using CellContents=std::unordered_map<StableCellKey,std::vector<const T*>,CellHash>;
 template<class T> using OccurrenceContents=std::unordered_map<StableOccurrenceKey,std::vector<const T*>,OccurrenceHash>;
 struct Snapshot {
+    std::shared_ptr<const ExecutionAuthority> authority;
     std::shared_ptr<const TemporalEndpoint> endpoint;
     std::shared_ptr<const Binding> binding;
     std::unique_ptr<StableSourceIndex> source_index;
@@ -52,8 +53,9 @@ struct Snapshot {
     NativeAccessionStats stats;
     NativeAccessionLimits limits;
 
-    Snapshot(const RelationalCodeObservationStore& store,std::uint64_t name_space,NativeAccessionLimits policy)
-        : endpoint(store.pin_snapshot()),limits(policy) {
+    Snapshot(const RelationalCodeObservationStore& store,std::uint64_t name_space,NativeAccessionLimits policy,
+             std::shared_ptr<const ExecutionAuthority> owner)
+        : authority(std::move(owner)),endpoint(store.pin_snapshot()),limits(policy) {
         require(name_space!=0,"accession source namespace required");
         const auto add=[&](std::size_t n) {
             stats.indexed_records=machine::checked_size_add(stats.indexed_records,n);
@@ -346,8 +348,15 @@ public:
     PinnedNativeAccession& operator=(const PinnedNativeAccession&) = default;
     NativeAccessionKind kind() const noexcept { return entry_->request.kind; }
     std::uint64_t sequence() const noexcept { return snapshot_->endpoint->sequence; }
+    std::uint64_t source_namespace() const noexcept { return snapshot_->binding->name_space; }
+    NativeAccessionLimits limits() const noexcept { return snapshot_->limits; }
     NativeAccessionDescriptor descriptor() const { return {snapshot_->binding,entry_->request,entry_->bytes}; }
     std::shared_ptr<const TemporalEndpoint> endpoint() const { return snapshot_->endpoint; }
+    // Execution authority is directory-local and survives publication changes.
+    // Equal bytes or namespaces in independently opened directories do not merge it.
+    bool same_execution_authority(const PinnedNativeAccession& other) const noexcept {
+        return snapshot_->authority == other.snapshot_->authority;
+    }
     // Resolve another declared view against this pinned publication, never the
     // directory's current generation. No new source copy or implicit rebind.
     PinnedNativeAccession access(const NativeAccessionRequest& request) const {

@@ -1,0 +1,40 @@
+#version 450
+layout(local_size_x=64) in;
+layout(set=0,binding=0,std430) readonly buffer Input {uint inputs[];};
+layout(set=0,binding=1,std430) readonly buffer Code {uint code[];};
+layout(set=0,binding=2,std430) buffer Scratch {uint registers[];};
+layout(set=0,binding=3,std430) writeonly buffer Output {uint outputs[];};
+layout(push_constant) uniform Params {
+    uint halfwords;uint count;uint regs;uint instructions;uint results;
+    uint output_offset;uint tail_lo;uint tail_hi;
+} p;
+void main() {
+    uint w=gl_GlobalInvocationID.x;
+    if(w>=p.count)return;
+    uint base=w*p.regs;
+    for(uint r=0;r<p.regs;++r)registers[base+r]=0;
+    for(uint i=0;i<p.instructions;++i) {
+        uint at=i*6;uint op=code[at];uint dst=code[at+1];
+        uint a=registers[base+code[at+2]];
+        uint b=registers[base+code[at+3]];
+        uint c=registers[base+code[at+4]];
+        uint value=0;
+        switch(op) {
+        case 0:value=inputs[code[at+5]*p.halfwords+w];break;
+        case 1:value=0;break;
+        case 2:value=0xffffffff;break;
+        case 3:value=~a;break;
+        case 4:value=a&b;break;
+        case 5:value=a|b;break;
+        case 6:value=a^b;break;
+        case 7:value=a&~b;break;
+        case 8:value=(a&b)|(~a&c);break;
+        }
+        registers[base+dst]=value;
+    }
+    uint mask=0xffffffff;
+    if(w+2==p.halfwords)mask=p.tail_lo;
+    if(w+1==p.halfwords)mask=p.tail_hi;
+    for(uint o=0;o<p.results;++o)
+        outputs[o*p.count+w]=registers[base+code[p.output_offset+o]]&mask;
+}

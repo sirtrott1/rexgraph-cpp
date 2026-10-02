@@ -337,9 +337,11 @@ int main(int argc,char** argv) {
         head_query.append({rfc::composite::BinaryOpcode::LoadAspect,0,0,0,0,mapped->signature().existence_aspect()});
         head_query.append({rfc::composite::BinaryOpcode::LoadAspect,1,0,0,0,head});
         head_query.append({rfc::composite::BinaryOpcode::And,2,0,1,0,0});
+        const rfc::composite::BinaryExecutionPlan head_plan(head_query,{2});
+        rfc::composite::BinaryExecutionWorkspace head_workspace;
         std::uint64_t head_total=0;
         const auto binary_ms=millis([&]{
-            for (std::size_t i=0;i<iterations;++i) head_total+=mapped->binary_count(rfc::core::Grade{1},head_query,2);
+            for (std::size_t i=0;i<iterations;++i) head_total+=mapped->binary_count(rfc::core::Grade{1},head_plan,head_workspace);
         });
 
         const auto [co_b,co_e]=g2.coface_incidence_range(*profile_index);

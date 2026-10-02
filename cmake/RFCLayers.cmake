@@ -1,15 +1,16 @@
 # Ordered software layers. Each target may depend only on targets above it in
 # the mathematical construction unless explicitly documented as an execution
-# adapter. All targets are header-only at this stage.
+# adapter. Mathematical targets are header-only; optional backend leaves may compile.
 
 function(rfc_interface_target name)
   add_library(rfc_${name} INTERFACE)
   add_library(rfc::${name} ALIAS rfc_${name})
-  target_include_directories(rfc_${name} INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_include_directories(rfc_${name} INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
   target_compile_features(rfc_${name} INTERFACE cxx_std_20)
-  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(rfc_${name} INTERFACE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
-  endif()
+  set_target_properties(rfc_${name} PROPERTIES EXPORT_NAME ${name})
+  set(RFC_EXPORT_TARGETS ${RFC_EXPORT_TARGETS} rfc_${name} PARENT_SCOPE)
 endfunction()
 
 # 00 machine representation
@@ -69,10 +70,7 @@ target_link_libraries(rfc_temporal INTERFACE rfc::field rfc::path)
 
 # Fundamental mathematical surface stops before persistence, model orchestration,
 # learning, optional backends, and I/O.
-add_library(rfc_fundamentals INTERFACE)
-add_library(rfc::fundamentals ALIAS rfc_fundamentals)
-target_include_directories(rfc_fundamentals INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_compile_features(rfc_fundamentals INTERFACE cxx_std_20)
+rfc_interface_target(fundamentals)
 target_link_libraries(rfc_fundamentals INTERFACE
   rfc::machine rfc::numeric rfc::composite rfc::core rfc::algebra rfc::geometry
   rfc::local rfc::topology rfc::field rfc::view rfc::path rfc::approximation
@@ -83,6 +81,13 @@ target_link_libraries(rfc_fundamentals INTERFACE
 rfc_interface_target(storage)
 target_link_libraries(rfc_storage INTERFACE rfc::core rfc::composite rfc::numeric rfc::algebra rfc::local rfc::temporal)
 
+# Opt-in Linux concurrent history adapter; the mathematical targets do not link it.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  find_package(Threads REQUIRED)
+  rfc_interface_target(concurrent_history)
+  target_link_libraries(rfc_concurrent_history INTERFACE rfc::storage Threads::Threads)
+endif()
+
 # 12 canonical exact database/accession
 rfc_interface_target(database)
 target_link_libraries(rfc_database INTERFACE rfc::core rfc::field rfc::temporal rfc::storage)
@@ -90,11 +95,44 @@ target_link_libraries(rfc_database INTERFACE rfc::core rfc::field rfc::temporal 
 # Runtime is an execution service. It may accelerate prior layers but owns no
 # mathematical semantics.
 rfc_interface_target(runtime)
-target_link_libraries(rfc_runtime INTERFACE rfc::machine rfc::numeric)
+target_link_libraries(rfc_runtime INTERFACE rfc::machine rfc::numeric rfc::composite)
+
+# Owning execution composes database semantics with lower runtime policy.
+rfc_interface_target(native_execution)
+target_link_libraries(rfc_native_execution INTERFACE rfc::database rfc::runtime)
+
+# Owning scoped field caches are opt-in execution services.
+find_package(Threads REQUIRED)
+rfc_interface_target(native_field_cache)
+target_link_libraries(rfc_native_field_cache INTERFACE rfc::native_execution rfc::parallel_native_field)
+
+# Opt-in pure CPU tile execution; mathematical targets keep their dependencies.
+rfc_interface_target(cpu_tiles)
+target_link_libraries(rfc_cpu_tiles INTERFACE rfc::runtime Threads::Threads)
+rfc_interface_target(parallel_native_field)
+target_link_libraries(rfc_parallel_native_field INTERFACE rfc::native_execution rfc::cpu_tiles)
+
+# Finite owned job graphs compose only lower execution/resource services.
+rfc_interface_target(work_graph)
+target_link_libraries(rfc_work_graph INTERFACE rfc::runtime Threads::Threads)
+rfc_interface_target(binary_work)
+target_link_libraries(rfc_binary_work INTERFACE rfc::work_graph rfc::cpu_tiles)
+rfc_interface_target(field_work)
+target_link_libraries(rfc_field_work INTERFACE rfc::parallel_native_field rfc::native_field_cache rfc::work_graph)
+
+# Hardware facts and cooperating resource budgets are opt-in host services.
+rfc_interface_target(hardware_inventory)
+target_link_libraries(rfc_hardware_inventory INTERFACE rfc::runtime)
+rfc_interface_target(resource_native_field)
+target_link_libraries(rfc_resource_native_field INTERFACE rfc::parallel_native_field rfc::hardware_inventory)
+rfc_interface_target(native_locality)
+target_link_libraries(rfc_native_locality INTERFACE rfc::field_work rfc::hardware_inventory)
+rfc_interface_target(native_query_execution)
+target_link_libraries(rfc_native_query_execution INTERFACE rfc::database rfc::cpu_tiles rfc::work_graph)
 
 # 12 exact -> derived -> prospective routing
 rfc_interface_target(inference)
-target_link_libraries(rfc_inference INTERFACE rfc::database rfc::statistics rfc::approximation)
+target_link_libraries(rfc_inference INTERFACE rfc::database rfc::statistics rfc::approximation rfc::runtime)
 
 # 13 native prospective learning
 rfc_interface_target(learning)
@@ -123,7 +161,9 @@ target_link_libraries(rfc_io INTERFACE rfc::generation)
 # Full umbrella. This is intentionally defined last.
 add_library(rfc INTERFACE)
 add_library(rfc::rfc ALIAS rfc)
+set_target_properties(rfc PROPERTIES EXPORT_NAME rfc)
+list(APPEND RFC_EXPORT_TARGETS rfc)
 target_link_libraries(rfc INTERFACE
-  rfc::fundamentals rfc::storage rfc::database rfc::runtime rfc::inference rfc::learning
+  rfc::fundamentals rfc::storage rfc::database rfc::runtime rfc::native_execution rfc::inference rfc::learning
   rfc::models rfc::llm rfc::multimodal rfc::agent rfc::generation
   rfc::backend rfc::io)

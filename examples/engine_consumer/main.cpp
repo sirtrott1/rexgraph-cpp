@@ -11,11 +11,13 @@ int main() {
             throw std::runtime_error("native exact boundary mismatch");
         bool rejected = false; try { engine.set_amplitude(1, 0); } catch (const std::invalid_argument&) { rejected = true; }
         if (!rejected || engine.boundary()[0].numerator != "-3") throw std::runtime_error("failed update changed state");
+        for (int i=0;i<1000;++i)
+            if (engine.boundary()[1].numerator != "3") throw std::runtime_error("warm execution changed value");
         engine.set_amplitude(0, 1);
         if (engine.retained_relations() != 1 || engine.boundary()[0].numerator != "0") throw std::runtime_error("zero erased assertion");
         auto moved = std::move(engine);
         if (moved.retained_relations() != 1) throw std::runtime_error("move lost source");
-        std::cout << "external_cpp20_consumer=true exact_boundary=true zero_preserves_relation=true\n";
+        std::cout << "external_cpp20_consumer=true owning_field_action=true compiled_workspace=true exact_boundary=true zero_preserves_relation=true\n";
         return 0;
     } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
 }

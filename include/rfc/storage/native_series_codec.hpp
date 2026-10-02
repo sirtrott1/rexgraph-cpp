@@ -31,9 +31,9 @@ inline std::vector<std::byte> encode_native_series(const NativeTemporalSeries& s
     const auto& s = series.state(); temporal_codec_detail::Writer w;
     w.raw(magic); w.u32(1); w.u32(0); w.u64(s.archive_bytes); w.u64(0);
     w.u64(s.name_space); blob(w, s.base->source); blob(w, s.base->channels);
-    w.u64(s.frames.size()); for (const auto& f : s.frames) blob(w, f->bytes);
-    w.u64(s.checkpoints.size());
-    for (const auto& [seq, cp] : s.checkpoints) { w.u64(seq); blob(w, cp->source); blob(w, cp->channels); }
+    w.u64(s.frames.size()); s.frames.for_each([&](const auto& f) { blob(w, f->bytes); });
+    w.u64(s.checkpoints->size());
+    for (const auto& [seq, cp] : *s.checkpoints) { w.u64(seq); blob(w, cp->source); blob(w, cp->channels); }
     native_series_detail::require(w.size() == s.archive_bytes, "series archive accounting invariant");
     w.patch_u64(24, rfcx_detail::fnv1a64(std::span<const std::byte>(w.bytes()).subspan(32)));
     return w.bytes();

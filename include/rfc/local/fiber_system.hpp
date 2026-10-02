@@ -37,6 +37,11 @@ public:
 
     [[nodiscard]] const LinearStalkBundle& stalks() const noexcept { return stalks_; }
     [[nodiscard]] const core::RelationalComplex& complex() const noexcept { return stalks_.complex(); }
+    // A supplied override is an already realized map under this fiber contract.
+    const std::optional<numeric::ExactMatrix>& transport_override(core::Grade grade,std::size_t slot) const & {
+        validate_transport(grade,slot); return overrides_.at(grade.value).at(slot);
+    }
+    const std::optional<numeric::ExactMatrix>& transport_override(core::Grade,std::size_t) const && = delete;
 
     void set_transport(core::Grade grade, std::size_t incidence_slot, numeric::ExactMatrix map) {
         if (grade.value == 0 || grade.value >= complex().grade_count()) throw std::out_of_range("flag transport grade");

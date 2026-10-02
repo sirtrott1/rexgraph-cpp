@@ -1,8 +1,12 @@
 # Engine consumer
 
 This standalone C++20 application calls a pinned RFC library through its own
-`engine_math` adapter. The adapter links `rfc::core`; application lifecycle and
-renderer conversions belong to the consuming engine.
+`engine_math` adapter. The adapter links `rfc::native_execution`, declares a common
+scalar coordinate, and prepares an owning rational field action with reusable
+compiled scratch. Each amplitude update prepares the action and workspace before
+replacing the old state. Calls require exclusive synchronous access. Returned
+values are derived; they do not modify the retained relation. Application lifecycle
+and renderer conversions belong to the consuming engine.
 
 From the library repository root:
 

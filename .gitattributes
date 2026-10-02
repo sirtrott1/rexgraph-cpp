@@ -1,0 +1,4 @@
+* text=auto eol=lf
+
+# Canonical codec fixtures must retain their exact bytes.
+*.rfcx* binary

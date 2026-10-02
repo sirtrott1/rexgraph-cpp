@@ -36,10 +36,13 @@ public:
     }
     [[nodiscard]] ExactPolynomial multiply(const ExactPolynomial& other)const{
         require_ring(other); ExactPolynomial out(variables_);
-        for(const auto& [a,ca]:terms_) for(const auto& [b,cb]:other.terms_){
-            Monomial m(variables_,0); for(std::size_t i=0;i<variables_;++i){ const auto e=static_cast<unsigned>(a[i])+static_cast<unsigned>(b[i]); if(e>65535u)throw std::overflow_error("polynomial exponent overflow"); m[i]=static_cast<std::uint16_t>(e); }
-            numeric::Rational v=out.terms_[m]+ca*cb; v.canonicalize(); if(v==0)out.terms_.erase(m); else out.terms_[std::move(m)]=std::move(v);
-        } return out;
+        for(const auto& [a,ca]:terms_) {
+            for(const auto& [b,cb]:other.terms_){
+                Monomial m(variables_,0); for(std::size_t i=0;i<variables_;++i){ const auto e=static_cast<unsigned>(a[i])+static_cast<unsigned>(b[i]); if(e>65535u)throw std::overflow_error("polynomial exponent overflow"); m[i]=static_cast<std::uint16_t>(e); }
+                numeric::Rational v=out.terms_[m]+ca*cb; v.canonicalize(); if(v==0)out.terms_.erase(m); else out.terms_[std::move(m)]=std::move(v);
+            }
+        }
+        return out;
     }
     [[nodiscard]] numeric::Rational evaluate(const numeric::RationalVector& point)const{
         if(point.size()!=variables_)throw std::invalid_argument("polynomial evaluation dimension mismatch");

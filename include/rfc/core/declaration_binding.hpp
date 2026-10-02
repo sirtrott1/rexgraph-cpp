@@ -186,6 +186,8 @@ public:
             [&](auto factor, auto word) { return planes.plane(aspects_.at(factor)).word(word); }, workspace);
     }
     [[nodiscard]] const composite::CompiledLayout& layout() const noexcept { return layout_; }
+    [[nodiscard]] const std::vector<composite::AspectId>& source_aspects() const & noexcept { return aspects_; }
+    const std::vector<composite::AspectId>& source_aspects() const && = delete;
 private:
     void check(const RelationalComplex& source, Grade grade) const {
         if (!declaration_binding_detail::same_signature(source.signature(), signature_))

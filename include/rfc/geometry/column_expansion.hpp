@@ -56,7 +56,7 @@ public:
     GradeColumnExpansion(const core::RelationalComplex& complex,
                          core::Grade grade,
                          std::vector<std::optional<std::uint32_t>> references = {})
-        : complex_(&complex), grade_(grade) {
+        : grade_(grade) {
         if (grade.value == 0 || grade.value >= complex.grade_count()) {
             throw std::out_of_range("column expansion requires positive grade");
         }
@@ -196,7 +196,6 @@ public:
     }
 
 private:
-    const core::RelationalComplex* complex_{};
     core::Grade grade_{};
     numeric::ExactMatrix boundary_;
     numeric::ExactMatrix dictionary_;
