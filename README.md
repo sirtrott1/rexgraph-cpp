@@ -223,7 +223,7 @@ public headers described above.
 
 ## Scope
 
-Version 0.2.0 is a developer preview with a changing C++ API. The runtime includes
+Version 0.2.1 is a developer preview with a changing C++ API. The runtime includes
 the Lossless Integrity baseline and its owning execution, durable history,
 concurrent publication, locality, and prepared query/tensor extensions.
 Native codecs retain their canonical compatibility fixtures. Supported external interpretation is bounded;
@@ -258,3 +258,10 @@ measures complete warm candidates before choosing a fitting plan. Device queries
 report unique memory heaps and advisory budgets. Enable `RFC_ENABLE_VULKAN`; Vulkan
 1.1 headers/loader and `glslangValidator` are required. Physical GPUs are required
 by default; explicit software admission is available for API/shader tests.
+
+Native query algebra provides explicit nested value paths, three-valued boolean and
+role predicates, and exact grouped aggregates retaining source membership.
+`cross_native_role_join.hpp` composes ordered role occurrences across two immutable
+publications using a declared participant correspondence with both exact cutoffs.
+Equal keys across namespaces never infer identity. Aggregate requests specify
+occurrence or unique assertion multiplicity; unsupported numeric values stay absent.
