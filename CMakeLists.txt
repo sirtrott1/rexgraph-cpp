@@ -493,6 +493,10 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
   target_link_libraries(rfc_exact_metric_hodge_tests PRIVATE rfc::field)
   add_test(NAME rfc_exact_metric_hodge COMMAND rfc_exact_metric_hodge_tests)
 
+  add_executable(rfc_relational_channel_tests tests/field/test_relational_channels.cpp)
+  target_link_libraries(rfc_relational_channel_tests PRIVATE rfc::field Threads::Threads)
+  add_test(NAME rfc_relational_channels COMMAND rfc_relational_channel_tests)
+
   add_executable(rfc_deformation_tower_tests tests/field/test_deformation_towers.cpp)
   target_link_libraries(rfc_deformation_tower_tests PRIVATE rfc::field)
   add_test(NAME rfc_deformation_exact_towers COMMAND rfc_deformation_tower_tests)

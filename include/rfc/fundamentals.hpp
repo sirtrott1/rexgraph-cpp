@@ -91,6 +91,7 @@
 #include "rfc/field/exact_operator.hpp"
 #include "rfc/field/exact_metric.hpp"
 #include "rfc/field/boundary.hpp"
+#include "rfc/field/relational_channels.hpp"
 #include "rfc/field/exact_hodge.hpp"
 #include "rfc/field/hodge_certificate.hpp"
 #include "rfc/field/augmented_green.hpp"
