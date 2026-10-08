@@ -409,6 +409,10 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
     target_link_libraries(rfc_branching_learning_tests PRIVATE rfc::learning)
     add_test(NAME rfc_branching_learning COMMAND rfc_branching_learning_tests)
 
+    add_executable(rfc_transport_observation_tests tests/learning/test_transport_observations.cpp)
+    target_link_libraries(rfc_transport_observation_tests PRIVATE rfc::learning Threads::Threads)
+    add_test(NAME rfc_transport_observations COMMAND rfc_transport_observation_tests)
+
     add_executable(rfc_bitsliced_integer_tests tests/learning/test_bitsliced_integer.cpp)
     target_link_libraries(rfc_bitsliced_integer_tests PRIVATE rfc::learning)
     add_test(NAME rfc_bitsliced_integer_learning COMMAND rfc_bitsliced_integer_tests)
