@@ -179,6 +179,14 @@ and occurrence maps, evidence sample indices and entry equations. Use
 `PreparedTransportParameterRelations` to certify those equations and their joint
 intersections. Acquired comparisons remain prospective and preserve the source.
 
+`learning/context_transport_rules.hpp` provides `acquire_context_transport_rules`
+for independent original map entries. Supply distinct observed training rows,
+separate target rows, the frame atlas and a positive minimum peer count. Complete
+forced peer comparisons support a conditional transfer rule. Compatible
+contradictions or unresolved training comparisons prevent admission. The result
+retains every candidate, its evidence status and the selected original maps;
+unobserved target equality remains a hypothesis.
+
 `learning/transport_evidence.hpp` provides `PreparedTransportEvidence` for
 original whole-field transport observations. Construct it from a prepared
 transport declaration and call `append` with a nonempty ordered observation
