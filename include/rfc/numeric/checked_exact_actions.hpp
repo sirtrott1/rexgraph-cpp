@@ -55,6 +55,13 @@ inline RationalVector checked_apply(const ExactMatrix& a,const RationalVector& x
     for(const auto& [key,q]:a.entries())out[key.first]=guard.add(out[key.first],guard.mul(q,input[key.second]));
     return out;
 }
+// Algebraic transpose action; this is not a metric adjoint.
+inline RationalVector checked_transpose_apply(const ExactMatrix& a,const RationalVector& x,ExactActionGuard& guard) {
+    if(x.size()!=a.rows())throw std::invalid_argument("checked transpose input dimension");
+    guard.matrix(a);const auto input=guard.canonical_input(x);RationalVector out(a.cols());
+    for(const auto& [key,q]:a.entries())out[key.second]=guard.add(out[key.second],guard.mul(q,input[key.first]));
+    return out;
+}
 inline ExactMatrix checked_multiply(const ExactMatrix& a,const ExactMatrix& b,ExactActionGuard& guard) {
     if(a.cols()!=b.rows())throw std::invalid_argument("checked matrix product dimensions");
     guard.matrix(a);guard.matrix(b);ExactMatrix out(a.rows(),b.cols());

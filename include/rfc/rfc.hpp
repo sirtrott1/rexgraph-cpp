@@ -34,6 +34,7 @@
 #include "rfc/learning/exact_metric_channels.hpp"
 #include "rfc/learning/branching_layer.hpp"
 #include "rfc/learning/transport_observations.hpp"
+#include "rfc/learning/transport_field_objective.hpp"
 #include "rfc/learning/composite_features.hpp"
 #include "rfc/learning/field_batch.hpp"
 #include "rfc/learning/model.hpp"
