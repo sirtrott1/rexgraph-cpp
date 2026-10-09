@@ -133,6 +133,10 @@ public:
     std::size_t preparation_steps() const noexcept { return preparation_steps_; }
     const local::OwnedLinearFiberSystem& owner() const & { return owner_; }
     const local::OwnedLinearFiberSystem& owner() const && = delete;
+    const std::vector<TransportCoordinate>& variable_coordinates() const & { return variables_; }
+    const std::vector<TransportCoordinate>& variable_coordinates() const && = delete;
+    const std::optional<M>& parameter_basis() const & { return basis_; }
+    const std::optional<M>& parameter_basis() const && = delete;
 
     M observation_map(const V& input, bool shared, Guard& guard) const {
         field(input,guard); M map(shared ? lower_.back() : occurrences_.back(),parameter_count());
