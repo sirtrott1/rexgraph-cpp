@@ -171,6 +171,14 @@ Hodge matrix, inverse matrix or eigensolve.
 native gain/bias fields and returns prospective values. Its original finite
 channels remain the supported model profile; empty grades reject explicitly.
 
+`learning/context_transport_hypotheses.hpp` provides
+`acquire_context_transport_hypotheses` for owned grade 1 transport observations.
+Supply original target rows and a complete atlas of explicitly declared common
+frame permutations. The result retains complete ordered stars, original cell
+and occurrence maps, evidence sample indices and entry equations. Use
+`PreparedTransportParameterRelations` to certify those equations and their joint
+intersections. Acquired comparisons remain prospective and preserve the source.
+
 `learning/native_exact_trainer.hpp` provides a declared serial rational gradient
 profile for half the metric squared error. It retains original ordered channels,
 parameters, fixed sample order, step sizes and complete updates in a separate

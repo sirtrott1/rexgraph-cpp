@@ -135,6 +135,8 @@ public:
     const local::OwnedLinearFiberSystem& owner() const && = delete;
     const std::vector<TransportCoordinate>& variable_coordinates() const & { return variables_; }
     const std::vector<TransportCoordinate>& variable_coordinates() const && = delete;
+    const std::vector<TransportCoordinate>& fixed_coordinates() const & { return fixed_support_; }
+    const std::vector<TransportCoordinate>& fixed_coordinates() const && = delete;
     const std::optional<M>& parameter_basis() const & { return basis_; }
     const std::optional<M>& parameter_basis() const && = delete;
 

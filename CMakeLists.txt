@@ -421,6 +421,10 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
     target_link_libraries(rfc_transport_parameter_relation_tests PRIVATE rfc::learning Threads::Threads)
     add_test(NAME rfc_transport_parameter_relations COMMAND rfc_transport_parameter_relation_tests)
 
+    add_executable(rfc_context_transport_hypothesis_tests tests/learning/test_context_transport_hypotheses.cpp)
+    target_link_libraries(rfc_context_transport_hypothesis_tests PRIVATE rfc::learning Threads::Threads)
+    add_test(NAME rfc_context_transport_hypotheses COMMAND rfc_context_transport_hypothesis_tests)
+
     add_executable(rfc_bitsliced_integer_tests tests/learning/test_bitsliced_integer.cpp)
     target_link_libraries(rfc_bitsliced_integer_tests PRIVATE rfc::learning)
     add_test(NAME rfc_bitsliced_integer_learning COMMAND rfc_bitsliced_integer_tests)
