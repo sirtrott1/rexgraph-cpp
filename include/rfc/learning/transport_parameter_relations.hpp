@@ -13,6 +13,7 @@ struct TransportParameterRelation {
     numeric::Rational expected;
 };
 enum class TransportParameterRelationStatus { Forced, Excluded, Open };
+enum class TransportParameterSupportPolicy { VariableEntries, IncludeConstants };
 struct TransportParameterCondition {
     bool consistent{};
     numeric::RationalVector origin, coordinate_origin;
@@ -56,7 +57,8 @@ class PreparedTransportParameterRelations {
     }
 public:
     PreparedTransportParameterRelations(PreparedTransportObservations observations,
-        std::vector<TransportObservation> samples,std::vector<TransportParameterRelation> relations,Guard& guard)
+        std::vector<TransportObservation> samples,std::vector<TransportParameterRelation> relations,Guard& guard,
+        TransportParameterSupportPolicy support_policy=TransportParameterSupportPolicy::VariableEntries)
         : observations_(std::move(observations)),samples_(std::move(samples)),relations_(std::move(relations)) {
         const auto start=guard.steps();guard.step();
         guard.dimension(relations_.size());
@@ -91,7 +93,8 @@ public:
         std::set<std::string> names;
         for(std::size_t i=0;i<relations_.size();++i) {
             guard.step();auto& relation=relations_[i];
-            if(relation.name.empty() || relation.name.size()>256 || !names.insert(relation.name).second || relation.terms.empty())
+            if(relation.name.empty() || relation.name.size()>256 || !names.insert(relation.name).second ||
+                (relation.terms.empty() && support_policy!=TransportParameterSupportPolicy::IncludeConstants))
                 throw std::invalid_argument("distinct bounded names and nonempty parameter relation support required");
             relation.expected=numeric::canonical_rational(relation.expected);guard.value(relation.expected);
             retained_=machine::checked_size_add(retained_,machine::checked_size_add(relation.name.size(),2));

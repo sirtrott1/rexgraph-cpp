@@ -24,6 +24,41 @@ struct TransportContextAcquisition {
     std::size_t attempts{}, steps{}, retained{};
 };
 
+namespace context_transport_detail {
+// Validate the full ordered star on original cells and retained occurrences.
+inline std::string star(const core::RelationalComplex& source,TransportContextHypothesis& hypothesis,
+    numeric::ExactActionGuard& guard) {
+    using namespace algebra::owned_gluing_detail;
+    const core::Grade up{1};const auto& arena=source.grade(up);
+    if(hypothesis.origin==hypothesis.target) return "original-row";
+    if(arena.relation_types[hypothesis.origin]!=arena.relation_types[hypothesis.target]) return "primary-type";
+    const auto [ab,ae]=arena.incidence_range(hypothesis.origin);
+    const auto [bb,be]=arena.incidence_range(hypothesis.target);
+    if(ae-ab!=be-bb) return "complete-occurrence-count";
+    std::map<std::size_t,std::size_t> lowers;std::set<std::size_t> images;
+    for(auto p=ab;p<ae;++p) {
+        guard.step();const auto q=bb+p-ab;const auto x=arena.lower_index[p],y=arena.lower_index[q];
+        const auto [it,inserted]=lowers.emplace(x,y);
+        if((!inserted && it->second!=y) || (inserted && !images.insert(y).second)) return "shared-identity-pattern";
+        hypothesis.occurrences.emplace_back(p,q);
+    }
+    algebra::SubcomplexMask a(source),b(source);a.select({up,static_cast<std::uint32_t>(hypothesis.origin)});
+    b.select({up,static_cast<std::uint32_t>(hypothesis.target)});a.close_boundaries(source);b.close_boundaries(source);
+    const auto left=algebra::materialize_subcomplex(source,a),right=algebra::materialize_subcomplex(source,b);
+    guard.entries(add(words(source),add(words(left.complex),words(right.complex))));
+    algebra::RetainedSourceMap retained;retained.cells.resize(left.complex.grade_count());
+    retained.occurrences.resize(left.complex.grade_count());
+    for(const auto cell:left.to_ambient[0]) {guard.step();retained.cells[0].push_back(
+        right.from_ambient[0].at(static_cast<std::uint32_t>(lowers.at(cell))));}
+    retained.cells[1].push_back(0);
+    for(std::size_t i=0;i<ae-ab;++i) {guard.step();retained.occurrences[1].push_back(i);}
+    try {algebra::owned_gluing_detail::map(left.complex,right.complex,retained,true,guard);}
+    catch(const std::invalid_argument&) {return "typed-retained-map";}
+    for(const auto& pair:lowers) hypothesis.cells.push_back(pair);
+    return {};
+}
+} // namespace context_transport_detail
+
 // Discover ordered complete star comparisons from actual acquired observations.
 // Each admitted block has corresponding fixed and variable support throughout.
 // Its equations concern coefficient-independent transports in declared frames.
