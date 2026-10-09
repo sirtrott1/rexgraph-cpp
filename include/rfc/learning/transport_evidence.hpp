@@ -1,0 +1,209 @@
+#pragma once
+#include "rfc/learning/transport_observations.hpp"
+
+namespace rfc::learning {
+struct TransportEvidenceUpdate {
+    std::size_t reused_observations{}, assembled_observations{}, execution_steps{};
+};
+
+// Immutable original observation history and its complete exact affine family.
+// Appends assemble new fields and insert their equations into retained sparse rows.
+class PreparedTransportEvidence {
+    using Q = numeric::Rational;
+    using V = numeric::RationalVector;
+    using M = numeric::ExactMatrix;
+    using Guard = numeric::ExactActionGuard;
+    using Row = std::map<std::size_t,Q>;
+    struct State {
+        std::shared_ptr<const PreparedTransportObservations> model;
+        numeric::ExactActionLimits limits;
+        std::vector<TransportObservation> observations;
+        TransportObservationSystem system;
+        std::map<std::size_t,Row> rows;
+        V particular;
+        M kernel;
+        std::vector<std::size_t> pivots, free_columns;
+        std::size_t input_entries{}, row_entries{}, history_steps{}, family_steps{}, initial_steps{}, copied_entries{};
+        TransportEvidenceUpdate update;
+
+        static std::size_t add(std::size_t a,std::size_t b) {return machine::checked_size_add(a,b);}
+        std::size_t retained() const {
+            auto count=add(model->retained_entries(),input_entries);
+            for(const auto n:{system.design.nonzeros(),system.augmented.nonzeros(),system.target.size(),
+                    machine::checked_size_mul(system.constraints.size(),3),row_entries,rows.size(),
+                    particular.size(),kernel.nonzeros(),pivots.size(),free_columns.size()}) count=add(count,n);
+            return count;
+        }
+        void workspace(Guard& guard,std::size_t scratch=0) const {
+            guard.entries(add(add(retained(),copied_entries),scratch));
+        }
+        void admit(Guard& guard) const {
+            const auto& requested=guard.limits();
+            if(requested.dimension!=limits.dimension || requested.entries!=limits.entries ||
+                    requested.steps!=limits.steps || requested.integer_bits!=limits.integer_bits)
+                throw std::invalid_argument("transport evidence append requires its original action limits");
+            guard.dimension(add(model->parameter_count(),1));guard.dimension(observations.size());
+            guard.matrix(system.design);guard.matrix(system.augmented);guard.vector(system.target);
+            workspace(guard);
+        }
+        State(std::shared_ptr<const PreparedTransportObservations> owner,Guard& guard)
+            :model(std::move(owner)),limits(guard.limits()),
+             system{M(0,model->parameter_count()),M(0,add(model->parameter_count(),1)),{},{}},
+             kernel(model->parameter_count(),0) {
+            const auto start=guard.steps();
+            guard.step();guard.dimension(add(model->parameter_count(),1));workspace(guard);finish(guard);
+            initial_steps=guard.steps()-start;
+        }
+        State(const State& parent,const std::vector<TransportObservation>& suffix,Guard& guard)
+            :model(parent.model),limits(parent.limits),kernel(model->parameter_count(),0) {
+            const auto start=guard.steps();guard.step();parent.admit(guard);
+            if(suffix.empty()) throw std::invalid_argument("nonempty original observation suffix required");
+            guard.dimension(add(parent.observations.size(),suffix.size()));
+            guard.entries(machine::checked_size_mul(parent.retained(),2));
+            observations=parent.observations;system=parent.system;rows=parent.rows;
+            input_entries=parent.input_entries;row_entries=parent.row_entries;history_steps=parent.history_steps;
+            initial_steps=parent.initial_steps;
+            copied_entries=parent.retained();workspace(guard);
+            for(const auto& observation:suffix) append(observation,guard);
+            finish(guard);copied_entries=0;
+            if(replay_steps()>limits.steps)throw std::length_error("complete transport evidence replay exceeds step admission");
+            update={parent.observations.size(),suffix.size(),guard.steps()-start};
+        }
+        void change(Row& row,std::size_t column,Q value,Guard& guard,std::size_t scratch) {
+            const auto found=row.find(column);
+            if(value==0) {
+                if(found!=row.end()){row.erase(found);--row_entries;}
+            } else {
+                if(found==row.end()) {
+                    workspace(guard,add(scratch,1));row_entries=add(row_entries,1);
+                }
+                row[column]=std::move(value);
+            }
+        }
+        void insert(Row row,Guard& guard) {
+            workspace(guard,row.size());
+            for(const auto& [pivot,known]:rows) {
+                guard.step();const auto found=row.find(pivot);
+                if(found==row.end()) continue;
+                const Q scale=found->second;
+                for(const auto& [column,value]:known) {
+                    const auto current=row.find(column);
+                    auto next=guard.sub(current==row.end()?Q{0}:current->second,guard.mul(scale,value));
+                    if(next==0) {if(current!=row.end())row.erase(current);}
+                    else {workspace(guard,add(row.size(),1));row[column]=std::move(next);}
+                }
+            }
+            if(row.empty()) return;
+            const auto pivot=row.begin()->first;
+            if(pivot==model->parameter_count()) throw std::invalid_argument("inconsistent exact transport observations");
+            const Q scale=row.begin()->second;
+            for(auto& [column,value]:row){(void)column;value=guard.div(value,scale);}
+            for(auto& [original,known]:rows) {
+                (void)original;guard.step();const auto found=known.find(pivot);
+                if(found==known.end()) continue;
+                const Q factor=found->second;
+                for(const auto& [column,value]:row) {
+                    const auto current=known.find(column);
+                    auto next=guard.sub(current==known.end()?Q{0}:current->second,guard.mul(factor,value));
+                    change(known,column,std::move(next),guard,row.size());
+                }
+            }
+            workspace(guard,add(row.size(),1));row_entries=add(row_entries,row.size());
+            if(!rows.emplace(pivot,std::move(row)).second) throw std::logic_error("duplicate transport evidence pivot");
+        }
+        void append(const TransportObservation& observation,Guard& guard) {
+            const auto start=guard.steps();
+            auto block=model->assemble({observation},guard);
+            const auto offset=system.design.rows(),count=add(offset,block.design.rows()),n=model->parameter_count();
+            guard.dimension(count);guard.dimension(add(observations.size(),1));
+            input_entries=add(input_entries,add(observation.input.size(),add(observation.target.size(),observation.observed.size())));
+            workspace(guard,add(block.design.nonzeros(),block.augmented.nonzeros()));
+            M design(count,n),augmented(count,add(n,1));
+            for(const auto* original:{&system.design,&system.augmented}) {
+                auto& destination=original==&system.design?design:augmented;
+                for(const auto& [key,value]:original->entries()) {
+                    guard.step();destination.set(key.first,key.second,value);
+                    workspace(guard,add(design.nonzeros(),augmented.nonzeros()));
+                }
+            }
+            system.design=std::move(design);system.augmented=std::move(augmented);
+            for(const auto* original:{&block.design,&block.augmented}) {
+                auto& destination=original==&block.design?system.design:system.augmented;
+                for(const auto& [key,value]:original->entries()) {
+                    guard.step();destination.set(add(offset,key.first),key.second,value);workspace(guard);
+                }
+            }
+            for(const auto& value:block.target){guard.step();system.target.push_back(value);workspace(guard);}
+            for(const auto& constraint:block.constraints) {
+                guard.step();system.constraints.push_back({observations.size(),constraint.cell,constraint.axis});workspace(guard);
+            }
+            auto next=block.augmented.entries().begin();
+            for(std::size_t i=0;i<block.augmented.rows();++i) {
+                guard.step();Row row;
+                while(next!=block.augmented.entries().end() && next->first.first==i) {
+                    guard.step();row.emplace(next->first.second,next->second);++next;workspace(guard,row.size());
+                }
+                insert(std::move(row),guard);
+            }
+            observations.push_back(observation);workspace(guard);
+            history_steps=add(history_steps,guard.steps()-start);
+        }
+        void finish(Guard& guard) {
+            const auto start=guard.steps(),n=model->parameter_count();
+            particular=V(n);pivots.clear();free_columns.clear();
+            std::vector<std::size_t> free_axis(n,n);
+            for(std::size_t j=0;j<n;++j) {
+                guard.step();if(rows.contains(j))pivots.push_back(j);
+                else {free_axis[j]=free_columns.size();free_columns.push_back(j);}
+            }
+            kernel=M(n,free_columns.size());workspace(guard,free_axis.size());
+            for(std::size_t i=0;i<free_columns.size();++i) {
+                guard.step();kernel.set(free_columns[i],i,1);workspace(guard,free_axis.size());
+            }
+            for(const auto& [pivot,row]:rows) for(const auto& [column,value]:row) {
+                guard.step();
+                if(column==n)particular[pivot]=value;
+                else if(column!=pivot) {
+                    if(free_axis[column]==n)throw std::logic_error("transport evidence row is not reduced");
+                    kernel.set(pivot,free_axis[column],guard.sub(0,value));workspace(guard,free_axis.size());
+                }
+            }
+            if(numeric::checked_apply(system.design,particular,guard)!=system.target ||
+                    numeric::checked_multiply(system.design,kernel,guard).nonzeros())
+                throw std::logic_error("complete transport evidence family certificate failed");
+            workspace(guard);family_steps=guard.steps()-start;
+        }
+        std::size_t replay_steps() const {
+            return observations.empty()?initial_steps:add(initial_steps,add(1,add(history_steps,family_steps)));
+        }
+    };
+    explicit PreparedTransportEvidence(std::shared_ptr<const State> state):state_(std::move(state)){}
+    std::shared_ptr<const State> state_;
+public:
+    PreparedTransportEvidence(PreparedTransportObservations owner,Guard& guard)
+        :state_(std::make_shared<const State>(std::make_shared<const PreparedTransportObservations>(std::move(owner)),guard)) {}
+    PreparedTransportEvidence append(const std::vector<TransportObservation>& suffix,Guard& guard) const {
+        return PreparedTransportEvidence(std::make_shared<const State>(*state_,suffix,guard));
+    }
+    const PreparedTransportObservations& model() const & {return *state_->model;}
+    const std::vector<TransportObservation>& observations() const & {return state_->observations;}
+    const TransportObservationSystem& system() const & {return state_->system;}
+    const V& particular() const & {return state_->particular;}
+    const M& kernel() const & {return state_->kernel;}
+    const std::vector<std::size_t>& pivots() const & {return state_->pivots;}
+    const std::vector<std::size_t>& free_columns() const & {return state_->free_columns;}
+    const PreparedTransportObservations& model() const &&=delete;
+    const std::vector<TransportObservation>& observations() const &&=delete;
+    const TransportObservationSystem& system() const &&=delete;
+    const V& particular() const &&=delete;
+    const M& kernel() const &&=delete;
+    const std::vector<std::size_t>& pivots() const &&=delete;
+    const std::vector<std::size_t>& free_columns() const &&=delete;
+    std::size_t rank() const noexcept {return state_->pivots.size();}
+    std::size_t retained_entries() const {return state_->retained();}
+    // Original ordered equation construction and reduction, plus final certification.
+    // Prefix validation and copy work are reported separately by update().
+    std::size_t preparation_steps() const {return state_->replay_steps();}
+    TransportEvidenceUpdate update() const noexcept {return state_->update;}
+};
+} // namespace rfc::learning

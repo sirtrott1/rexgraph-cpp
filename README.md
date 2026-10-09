@@ -179,6 +179,16 @@ and occurrence maps, evidence sample indices and entry equations. Use
 `PreparedTransportParameterRelations` to certify those equations and their joint
 intersections. Acquired comparisons remain prospective and preserve the source.
 
+`learning/transport_evidence.hpp` provides `PreparedTransportEvidence` for
+original whole-field transport observations. Construct it from a prepared
+transport declaration and call `append` with a nonempty ordered observation
+suffix and the original action limits. Each immutable child retains the original
+equations and source owner, assembles the new fields and updates its sparse
+reduced rows. `particular`, `kernel`, `pivots` and `free_columns` return the
+complete original parameter family. Conflicting equations reject the append.
+`preparation_steps` reports the canonical complete replay cost. `update` reports
+reused and newly assembled observation counts and the current guarded work.
+
 `learning/context_transport_views.hpp` accepts rational accession and
 reconstruction maps into declared common carriers. Reconstruction after
 accession must recover every original direction. `acquire_context_transport_views`
