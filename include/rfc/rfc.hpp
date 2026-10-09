@@ -35,6 +35,7 @@
 #include "rfc/learning/branching_layer.hpp"
 #include "rfc/learning/transport_observations.hpp"
 #include "rfc/learning/transport_evidence.hpp"
+#include "rfc/learning/graded_transport_fit.hpp"
 #include "rfc/learning/transport_field_objective.hpp"
 #include "rfc/learning/transport_parameter_relations.hpp"
 #include "rfc/learning/context_transport_hypotheses.hpp"

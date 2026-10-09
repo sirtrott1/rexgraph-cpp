@@ -74,6 +74,7 @@ inline TransportContextViewAcquisition acquire_context_transport_views(
     const std::vector<std::size_t>& targets,const std::vector<std::vector<TransportContextView>>& atlas,
     numeric::ExactActionGuard& guard) {
     using namespace context_view_detail;
+    observations.require_grade_one_profile();
     const auto start=guard.steps();guard.step();
     const auto& fibers=observations.owner().fibers();const auto& source=fibers.complex();
     const core::Grade lo{0},up{1};const auto& arena=source.grade(up);

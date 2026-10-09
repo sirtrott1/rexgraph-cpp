@@ -20,7 +20,7 @@ struct TransportObservationSystem {
 };
 struct TransportFixedResponse { numeric::RationalVector boundary, occurrences; };
 
-// Observation equations on the original grade-one stalks. Fixed transports
+// Observation equations on declared original stalk grades. Fixed transports
 // are already realized. Variable coordinates use the source coefficient once.
 class PreparedTransportObservations {
     using Q = numeric::Rational;
@@ -28,6 +28,7 @@ class PreparedTransportObservations {
     using M = numeric::ExactMatrix;
     using Guard = numeric::ExactActionGuard;
     local::OwnedLinearFiberSystem owner_;
+    core::Grade grade_{1};
     std::vector<TransportCoordinate> fixed_support_, variables_;
     std::optional<M> basis_;
     std::vector<std::size_t> lower_, upper_, occurrences_;
@@ -38,7 +39,7 @@ class PreparedTransportObservations {
         guard.entries(machine::checked_size_add(retained_,entries));
     }
     void coordinate(const TransportCoordinate& s) const {
-        const auto& a = owner_.fibers().complex().grade(core::Grade{1});
+        const auto& a = owner_.fibers().complex().grade(grade_);
         if (s.occurrence >= a.incidence_count() ||
             s.row >= lower_[a.lower_index[s.occurrence]+1]-lower_[a.lower_index[s.occurrence]] ||
             s.column >= upper_[a.upper_index[s.occurrence]+1]-upper_[a.upper_index[s.occurrence]])
@@ -51,19 +52,21 @@ class PreparedTransportObservations {
     }
     PreparedTransportObservations(local::OwnedLinearFiberSystem owner,
         std::vector<TransportCoordinate> fixed_support, std::vector<TransportCoordinate> variables,
-        std::optional<M> basis, Guard& guard)
+        std::optional<M> basis, Guard& guard, core::Grade selected = core::Grade{1}, bool graded = false)
         : owner_(std::move(owner)), fixed_support_(std::move(fixed_support)),
           variables_(std::move(variables)), basis_(std::move(basis)) {
+        grade_=selected;
         const auto start = guard.steps();
         const auto& source = owner_.fibers().complex();
-        if (source.grade_count() < 2) throw std::invalid_argument("grade-one transport source required");
-        for (std::size_t k=2;k<source.grade_count();++k) {
+        if (!grade_.value || grade_.value >= source.grade_count())
+            throw std::invalid_argument("positive original transport grade required");
+        for (std::size_t k=2;!graded && k<source.grade_count();++k) {
             guard.step();
             if (source.grade(core::Grade{static_cast<std::uint16_t>(k)}).cell_count())
                 throw std::invalid_argument("transport observations require empty higher grades");
         }
         for (std::size_t k=0;k<2;++k) {
-            const auto grade = core::Grade{static_cast<std::uint16_t>(k)};
+            const auto grade = core::Grade{static_cast<std::uint16_t>(grade_.value-1+k)};
             auto& offsets = k ? upper_ : lower_; offsets.push_back(0);
             guard.dimension(source.grade(grade).cell_count());
             for (std::size_t i=0;i<source.grade(grade).cell_count();++i) {
@@ -72,7 +75,7 @@ class PreparedTransportObservations {
                 guard.dimension(offsets.back());
             }
         }
-        const auto& a = source.grade(core::Grade{1});
+        const auto& a = source.grade(grade_);
         guard.dimension(machine::checked_size_add(variables_.size(),1));
         guard.dimension(machine::checked_size_add(parameter_count(),1));
         occurrences_.push_back(0);
@@ -80,11 +83,11 @@ class PreparedTransportObservations {
             guard.step(); const auto i = a.lower_index[p], j = a.upper_index[p];
             occurrences_.push_back(machine::checked_size_add(occurrences_.back(),lower_[i+1]-lower_[i]));
             guard.dimension(occurrences_.back());
-            const auto& lo = source.grade(core::Grade{0});
+            const auto& lo = source.grade(core::Grade{static_cast<std::uint16_t>(grade_.value-1)});
             guard.value(lo.cell_scales[i]); guard.value(a.cell_scales[j]); guard.value(a.lattice_coefficient[p]);
             const auto q = guard.div(guard.mul(lo.cell_scales[i],a.lattice_coefficient[p]),a.cell_scales[j]);
             coefficients_.push_back(a.aspects.get(source.signature().existence_aspect(),p) ? q : Q{0});
-            const auto& map = owner_.fibers().transport_override(core::Grade{1},p);
+            const auto& map = owner_.fibers().transport_override(grade_,p);
             if (!map) throw std::invalid_argument("explicit realized map required for every original occurrence");
             guard.matrix(*map);
             if (coefficients_.back()==0 && map->nonzeros())
@@ -106,7 +109,7 @@ class PreparedTransportObservations {
                 throw std::invalid_argument("distinct variable coordinates disjoint from fixed support required");
         }
         for (std::size_t p=0;p<a.incidence_count();++p) {
-            const auto& map = *owner_.fibers().transport_override(core::Grade{1},p);
+            const auto& map = *owner_.fibers().transport_override(grade_,p);
             retained_ = machine::checked_size_add(retained_,map.nonzeros());
             for (const auto& [key,q] : map.entries()) {
                 (void)q; guard.step();
@@ -122,6 +125,21 @@ class PreparedTransportObservations {
         preparation_steps_=guard.steps()-start;
     }
 public:
+    // Assemble observations at a declared original grade. Chain compatibility
+    // is a separate constraint on the complete transport parameter family.
+    static PreparedTransportObservations at_grade(local::OwnedLinearFiberSystem owner,core::Grade grade,
+        std::vector<TransportCoordinate> fixed,std::vector<TransportCoordinate> variables,Guard& guard,
+        std::optional<M> basis = std::nullopt) {
+        return {std::move(owner),std::move(fixed),std::move(variables),std::move(basis),guard,grade,true};
+    }
+    core::Grade grade() const noexcept { return grade_; }
+    void require_grade_one_profile() const {
+        if(grade_.value!=1)throw std::invalid_argument("grade-one transport profile required");
+        const auto& source=owner_.fibers().complex();
+        for(std::size_t k=2;k<source.grade_count();++k)
+            if(source.grade(core::Grade{static_cast<std::uint16_t>(k)}).cell_count())
+                throw std::invalid_argument("grade-one transport profile requires empty higher grades");
+    }
     PreparedTransportObservations(local::OwnedLinearFiberSystem owner,
         std::vector<TransportCoordinate> fixed_support, std::vector<TransportCoordinate> variables, Guard& guard)
         : PreparedTransportObservations(std::move(owner),std::move(fixed_support),std::move(variables),std::nullopt,guard) {}
@@ -142,7 +160,7 @@ public:
 
     M observation_map(const V& input, bool shared, Guard& guard) const {
         field(input,guard); M map(shared ? lower_.back() : occurrences_.back(),parameter_count());
-        const auto& a=owner_.fibers().complex().grade(core::Grade{1});
+        const auto& a=owner_.fibers().complex().grade(grade_);
         const auto add=[&](std::size_t slot,std::size_t parameter,const Q& weight) {
             guard.step(); const auto& s=variables_[slot];
             const auto row=(shared ? lower_[a.lower_index[s.occurrence]] : occurrences_[s.occurrence])+s.row;
@@ -159,9 +177,9 @@ public:
     TransportFixedResponse fixed_response(const V& input, Guard& guard) const {
         field(input,guard); workspace(machine::checked_size_add(lower_.back(),occurrences_.back()),guard);
         TransportFixedResponse out{V(lower_.back()),V(occurrences_.back())};
-        const auto& a=owner_.fibers().complex().grade(core::Grade{1});
+        const auto& a=owner_.fibers().complex().grade(grade_);
         for(std::size_t p=0;p<a.incidence_count();++p) {
-            guard.step(); const auto& map=*owner_.fibers().transport_override(core::Grade{1},p);
+            guard.step(); const auto& map=*owner_.fibers().transport_override(grade_,p);
             for(const auto& [key,q]:map.entries()) {
                 const auto value=guard.mul(q,input[upper_[a.upper_index[p]]+key.second]);
                 auto& local=out.occurrences[occurrences_[p]+key.first]; local=guard.add(local,value);

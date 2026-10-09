@@ -417,6 +417,10 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
     target_link_libraries(rfc_transport_evidence_tests PRIVATE rfc::learning Threads::Threads)
     add_test(NAME rfc_transport_evidence COMMAND rfc_transport_evidence_tests)
 
+    add_executable(rfc_graded_transport_fit_tests tests/learning/test_graded_transport_fit.cpp)
+    target_link_libraries(rfc_graded_transport_fit_tests PRIVATE rfc::learning Threads::Threads)
+    add_test(NAME rfc_graded_transport_fit COMMAND rfc_graded_transport_fit_tests)
+
     add_executable(rfc_transport_field_objective_tests tests/learning/test_transport_field_objective.cpp)
     target_link_libraries(rfc_transport_field_objective_tests PRIVATE rfc::learning Threads::Threads)
     add_test(NAME rfc_transport_field_objective COMMAND rfc_transport_field_objective_tests)

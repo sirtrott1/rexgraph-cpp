@@ -60,6 +60,7 @@ public:
         std::vector<TransportObservation> samples,std::vector<TransportParameterRelation> relations,Guard& guard,
         TransportParameterSupportPolicy support_policy=TransportParameterSupportPolicy::VariableEntries)
         : observations_(std::move(observations)),samples_(std::move(samples)),relations_(std::move(relations)) {
+        observations_.require_grade_one_profile();
         const auto start=guard.steps();guard.step();
         guard.dimension(relations_.size());
         if(relations_.empty()) throw std::invalid_argument("named parameter relations required");

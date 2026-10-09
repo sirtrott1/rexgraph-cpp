@@ -75,6 +75,7 @@ public:
         : observations_(std::move(observations)),evidence_origin_(guard.canonical_input(evidence_origin)),
           evidence_kernel_(std::move(evidence_kernel)),views_(std::move(views)),
           specification_(std::move(specification)) {
+        observations_.require_grade_one_profile();
         const auto start=guard.steps();guard.matrix(evidence_kernel_);
         const auto n=observations_.parameter_count(),d=evidence_kernel_.cols();
         if(evidence_origin_.size()!=n || evidence_kernel_.rows()!=n)

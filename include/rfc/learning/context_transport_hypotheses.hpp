@@ -69,6 +69,7 @@ inline TransportContextAcquisition acquire_context_transport_hypotheses(
     const std::vector<std::vector<TransportContextFrame>>& atlas,
     numeric::ExactActionGuard& guard) {
     using namespace algebra::owned_gluing_detail;
+    observations.require_grade_one_profile();
     const auto start=guard.steps();guard.step();
     const auto& fibers=observations.owner().fibers();const auto& source=fibers.complex();
     const core::Grade lo{0},up{1};const auto& arena=source.grade(up);

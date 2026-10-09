@@ -189,6 +189,15 @@ complete original parameter family. Conflicting equations reject the append.
 `preparation_steps` reports the canonical complete replay cost. `update` reports
 reused and newly assembled observation counts and the current guarded work.
 
+`learning/graded_transport_fit.hpp` provides `PreparedGradedTransportFit` for
+learning one original boundary grade with all adjacent transport families fixed.
+Use `PreparedTransportObservations::at_grade` with complete original stalks,
+explicit fixed occurrence maps and independent or named parameter coordinates.
+The fit retains whole field observations and enforces every applicable chain
+equation. `chain_rank`, `observation_rank` and `rank` describe the separate and
+combined constraints. `particular` and `kernel` retain the complete parameter
+family. `materialize` requires all free values and checks the full resulting tower.
+
 `learning/context_transport_views.hpp` accepts rational accession and
 reconstruction maps into declared common carriers. Reconstruction after
 accession must recover every original direction. `acquire_context_transport_views`
