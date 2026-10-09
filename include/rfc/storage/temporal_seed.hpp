@@ -7,36 +7,45 @@ namespace rfc::storage {
 namespace temporal_seed_detail {
 inline constexpr std::array<std::byte,8> magic{
     std::byte{'R'},std::byte{'F'},std::byte{'C'},std::byte{'X'},std::byte{'E'},std::byte{1},std::byte{0},std::byte{0}};
-}
 
-// Initial endpoint channels are a sidecar bound to the canonical RFCX source.
-// It is not a duplicate source snapshot or a Phase-05 checkpoint manager.
-inline std::vector<std::byte> encode_temporal_endpoint(const TemporalEndpoint& endpoint) {
+struct Encoding {
+    RfcxImage source;
+    std::vector<std::byte> channels;
+    std::uint64_t source_hash{}, channel_hash{};
+};
+inline Encoding encode(const TemporalEndpoint& endpoint, const StableSourceIndex& source_index,
+                        RfcxImage source, std::size_t capacity = 0) {
     using namespace temporal_codec_detail;
-    validate_temporal_endpoint(endpoint);
-    Writer w; w.raw(temporal_seed_detail::magic); w.u32(1);
-    w.u32((endpoint.finite_systems.empty() ? 0u : finite_systems_flag) | (endpoint.codes ? relational_codes_flag : 0u) | (endpoint.declarations ? declarations_flag : 0u)); w.u64(0); w.u64(0);
-    const auto source=encode_rfcx(endpoint.source);
-    w.u64(endpoint.sequence); w.u64(source.stats.payload_hash); w.u64(rfcx_detail::fnv1a64(source.bytes));
-    w.u64(temporal_endpoint_hash(endpoint));
-    const StableSourceIndex local_index(endpoint.source);
-    const auto blocks=index(endpoint.local_blocks,[](const auto& b){return b.block_key;});
-    w.u64(blocks.size());
-    for(const auto& [key,b]:blocks){(void)key;local(w,temporal_endpoint_detail::normalize_local(endpoint.source,local_index,*b));}
-    const auto cs=temporal_endpoint_detail::carriers(endpoint);
-    w.u64(cs.size());for(const auto& [key,c]:cs){(void)key;carrier(w,*c);}
-    const auto ts=temporal_endpoint_detail::tensors(endpoint);
-    w.u64(ts.size());for(const auto& [key,t]:ts){(void)key;tensor_record(w,*t);}
-    if (!endpoint.finite_systems.empty()) finite_systems(w, endpoint.finite_systems);
-    if (endpoint.codes) code_state(w,*endpoint.codes);
-    if (endpoint.declarations) declaration_state(w,*endpoint.declarations);
-    w.patch_u64(16,w.size());
-    w.patch_u64(24,rfcx_detail::fnv1a64(std::span<const std::byte>(w.bytes()).subspan(32)));
-    return w.bytes();
+    temporal_endpoint_detail::validate(endpoint, source_index);
+    const auto source_hash = rfcx_detail::fnv1a64(source.bytes);
+    Writer w(capacity); w.raw(magic); w.u32(1);
+    w.u32((endpoint.finite_systems.empty() ? 0u : finite_systems_flag) |
+          (endpoint.codes ? relational_codes_flag : 0u) | (endpoint.declarations ? declarations_flag : 0u));
+    w.u64(0); w.u64(0);
+    w.u64(endpoint.sequence); w.u64(source.stats.payload_hash); w.u64(source_hash); w.u64(0);
+    const auto hash = endpoint_body(w, endpoint, source_index, source_hash);
+    w.patch_u64(56, hash);
+    w.patch_u64(16, w.size());
+    w.patch_u64(24, rfcx_detail::fnv1a64(std::span<const std::byte>(w.bytes()).subspan(32)));
+    return {std::move(source), std::move(w).take_bytes(), source_hash, hash};
 }
-inline TemporalEndpoint decode_temporal_endpoint(core::RelationalComplex source,
-                                                 std::span<const std::byte> bytes,
-                                                 const TemporalReadLimits& limits={}) {
+struct Decoded {
+    TemporalEndpoint endpoint;
+    Encoding encoding;
+};
+} // namespace temporal_seed_detail
+
+// Initial endpoint channels are bound to the canonical RFCX source.
+inline std::vector<std::byte> encode_temporal_endpoint(const TemporalEndpoint& endpoint) {
+    const StableSourceIndex source_index(endpoint.source);
+    auto encoded = temporal_seed_detail::encode(endpoint, source_index, encode_rfcx(endpoint.source));
+    encoded.channels.shrink_to_fit();
+    return std::move(encoded.channels);
+}
+namespace temporal_seed_detail {
+inline Decoded decode(core::RelationalComplex source,
+                      std::span<const std::byte> bytes,
+                      const TemporalReadLimits& limits) {
     using namespace temporal_codec_detail;
     require(bytes.size()>=32 && bytes.size()<=limits.max_file_bytes,"invalid endpoint sidecar size");
     rfcx_detail::Reader header(bytes);
@@ -48,9 +57,9 @@ inline TemporalEndpoint decode_temporal_endpoint(core::RelationalComplex source,
     require(header.u64()==rfcx_detail::fnv1a64(bytes.subspan(32)),"endpoint sidecar integrity mismatch");
     Reader r(bytes.subspan(32),limits);
     TemporalEndpoint endpoint(std::move(source),r.u64());
-    const auto image=encode_rfcx(endpoint.source);
-    require(r.u64()==image.stats.payload_hash,"endpoint sidecar base RFCX payload mismatch");
-    require(r.u64()==rfcx_detail::fnv1a64(image.bytes),"endpoint sidecar source header/layout mismatch");
+    auto image = encode_rfcx(endpoint.source);
+    require(r.u64() == image.stats.payload_hash,"endpoint sidecar base RFCX payload mismatch");
+    require(r.u64() == rfcx_detail::fnv1a64(image.bytes),"endpoint sidecar source header/layout mismatch");
     const auto hash=r.u64();
     auto n=r.count();for(std::size_t i=0;i<n;++i)endpoint.local_blocks.push_back(local(r));
     n=r.count();for(std::size_t i=0;i<n;++i)endpoint.carriers.push_back(carrier(r));
@@ -64,13 +73,21 @@ inline TemporalEndpoint decode_temporal_endpoint(core::RelationalComplex source,
     require(r.remaining()==0,"trailing endpoint sidecar data");
     const StableSourceIndex local_index(endpoint.source);
     for(auto& b:endpoint.local_blocks)b=temporal_endpoint_detail::normalize_local(endpoint.source,local_index,std::move(b));
-    require(temporal_endpoint_hash(endpoint)==hash,"endpoint sidecar channel hash mismatch");
+    auto canonical = encode(endpoint, local_index, std::move(image), bytes.size());
+    require(hash == canonical.channel_hash,"endpoint sidecar channel hash mismatch");
     if (limits.require_canonical) {
-        const auto canonical = encode_temporal_endpoint(endpoint);
-        require(canonical.size() == bytes.size() && std::equal(canonical.begin(),canonical.end(),bytes.begin()),
+        require(canonical.channels.size() == bytes.size() &&
+                std::equal(canonical.channels.begin(),canonical.channels.end(),bytes.begin()),
                 "noncanonical endpoint sidecar encoding");
     }
-    return endpoint;
+    return {std::move(endpoint), std::move(canonical)};
+}
+} // namespace temporal_seed_detail
+
+inline TemporalEndpoint decode_temporal_endpoint(core::RelationalComplex source,
+                                                 std::span<const std::byte> bytes,
+                                                 const TemporalReadLimits& limits = {}) {
+    return temporal_seed_detail::decode(std::move(source), bytes, limits).endpoint;
 }
 inline std::uint64_t write_temporal_endpoint(const TemporalEndpoint& endpoint,const std::filesystem::path& path) {
     const auto bytes=encode_temporal_endpoint(endpoint);

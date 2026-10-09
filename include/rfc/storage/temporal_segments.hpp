@@ -79,10 +79,15 @@ inline TemporalEndpoint replay_temporal_segment(const TemporalEndpoint &base,
                 base.sequence != std::numeric_limits<std::uint64_t>::max() &&
                 segment.target_sequence == base.sequence + 1u,
             "temporal sequence/predecessor mismatch");
-    require(encode_rfcx(base.source).stats.payload_hash == segment.base_source_hash,
-            "temporal base RFCX hash mismatch");
-    require(temporal_endpoint_hash(base) == segment.base_endpoint_hash,
-            "temporal base endpoint/channel hash mismatch");
+    {
+        const auto source = encode_rfcx(base.source);
+        require(source.stats.payload_hash == segment.base_source_hash,
+                "temporal base RFCX hash mismatch");
+        const StableSourceIndex source_index(base.source);
+        temporal_endpoint_detail::validate(base, source_index);
+        require(temporal_codec_detail::endpoint_hash(base, source_index, rfcx_detail::fnv1a64(source.bytes)) ==
+                    segment.base_endpoint_hash, "temporal base endpoint/channel hash mismatch");
+    }
     // All mutations below are on an owning candidate. A failure cannot publish
     // a partly changed complex or modify the caller's endpoint.
     std::optional<TemporalEndpoint> aligned_base;
@@ -92,8 +97,12 @@ inline TemporalEndpoint replay_temporal_segment(const TemporalEndpoint &base,
     }
     const auto& carrier_base = aligned_base ? *aligned_base : base;
     TemporalEndpoint next(replay_temporal_source(carrier_base.source, segment.source), segment.target_sequence);
-    require(encode_rfcx(next.source).stats.payload_hash == segment.target_source_hash,
-            "replayed target RFCX hash mismatch");
+    const auto target_source_hash = [&] {
+        const auto source = encode_rfcx(next.source);
+        require(source.stats.payload_hash == segment.target_source_hash,
+                "replayed target RFCX hash mismatch");
+        return rfcx_detail::fnv1a64(source.bytes);
+    }();
     next.local_blocks = base.local_blocks;
     next.carriers = base.carriers;
     apply_replacements(next.local_blocks, segment.removed_blocks, segment.blocks,
@@ -174,8 +183,8 @@ inline TemporalEndpoint replay_temporal_segment(const TemporalEndpoint &base,
                                                       : std::vector<RelationalCodeTransport>{});
     if (segment.declarations) validate_temporal_declaration_transition(base.declarations, *segment.declarations);
     next.declarations = segment.declarations ? segment.declarations->target : base.declarations;
-    validate_temporal_endpoint(next);
-    require(temporal_endpoint_hash(next) == segment.target_endpoint_hash,
+    temporal_endpoint_detail::validate(next, next_local_index);
+    require(temporal_codec_detail::endpoint_hash(next, next_local_index, target_source_hash) == segment.target_endpoint_hash,
             "replayed target endpoint/channel hash mismatch");
     return next;
 }

@@ -237,6 +237,8 @@ inline core::RelationalComplex replay_temporal_source(const core::RelationalComp
                                                        const TemporalSourcePatch& patch) {
     using namespace temporal_source_detail;
     require(patch.target_grade_count > 0 && patch.target_grade_count <= 65536u, "invalid temporal grade count");
+    // No source edits on the same graded domain give identity evolution.
+    if (patch.grades.empty() && patch.target_grade_count == source.grade_count()) return source;
     const auto count = std::max(source.grade_count(), static_cast<std::size_t>(patch.target_grade_count));
     std::vector<GradeImage> images;
     for (std::size_t k = 0; k < count; ++k) images.push_back(capture(source, k));

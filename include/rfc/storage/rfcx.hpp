@@ -39,8 +39,7 @@ inline constexpr std::size_t header_size = 96;
 inline constexpr std::size_t grade_descriptor_size = 184;
 inline constexpr std::int64_t overflow_sentinel = std::numeric_limits<std::int64_t>::min();
 
-inline std::uint64_t fnv1a64(std::span<const std::byte> bytes) noexcept {
-    std::uint64_t hash = 1469598103934665603ull;
+inline std::uint64_t fnv1a64_update(std::uint64_t hash, std::span<const std::byte> bytes) noexcept {
     for (const auto b : bytes) {
         hash ^= static_cast<std::uint8_t>(b);
         hash *= 1099511628211ull;
@@ -48,8 +47,15 @@ inline std::uint64_t fnv1a64(std::span<const std::byte> bytes) noexcept {
     return hash;
 }
 
+inline std::uint64_t fnv1a64(std::span<const std::byte> bytes) noexcept {
+    return fnv1a64_update(1469598103934665603ull, bytes);
+}
+
 class Writer {
 public:
+    Writer() = default;
+    explicit Writer(std::size_t capacity) { bytes_.reserve(capacity); }
+    [[nodiscard]] std::vector<std::byte> take_bytes() && noexcept { return std::move(bytes_); }
     [[nodiscard]] std::size_t size() const noexcept { return bytes_.size(); }
     [[nodiscard]] const std::vector<std::byte>& bytes() const noexcept { return bytes_; }
 

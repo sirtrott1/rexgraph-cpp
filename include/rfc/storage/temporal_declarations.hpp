@@ -115,13 +115,14 @@ inline std::pair<std::size_t,std::size_t> update_usage(const TemporalDeclaration
 
 } // namespace temporal_declaration_detail
 
-inline void validate_temporal_declarations(const core::RelationalComplex& source,
+namespace temporal_declaration_detail {
+inline void validate_against_source(const core::RelationalComplex& source,
+                                           const StableSourceIndex& source_index,
                                            const std::vector<LocalBlockDefinition>& blocks,
                                            const TemporalDeclarationState& state,
                                            const composite::DeclarationLimits& limits = {}) {
     using namespace temporal_declaration_detail;
     validate_definitions(state, limits);
-    const StableSourceIndex source_index(source);
     std::map<std::uint64_t,const LocalBlockDefinition*> block_index;
     for (const auto& b : blocks) require(block_index.emplace(b.block_key,&b).second, "duplicate declaration owner block");
     std::map<std::uint64_t, core::BranchDeclarationBinding> branches;
@@ -168,6 +169,16 @@ inline void validate_temporal_declarations(const core::RelationalComplex& source
             (void)binding.validate(source,core::RelationId{owner.grade,owner.index},v.value,limits.max_value_nodes);
         }
     }
+}
+
+} // namespace temporal_declaration_detail
+
+inline void validate_temporal_declarations(const core::RelationalComplex& source,
+                                           const std::vector<LocalBlockDefinition>& blocks,
+                                           const TemporalDeclarationState& state,
+                                           const composite::DeclarationLimits& limits = {}) {
+    const StableSourceIndex source_index(source);
+    temporal_declaration_detail::validate_against_source(source, source_index, blocks, state, limits);
 }
 
 inline composite::DeclaredValue materialize_declared_source_aspects(const core::RelationalComplex& source,

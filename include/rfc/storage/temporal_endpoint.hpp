@@ -174,9 +174,9 @@ inline numeric::SparseRationalTensor temporal_matrix_tensor(const numeric::Exact
                                         numeric::SparseRationalVector(size, std::move(entries)));
 }
 
-inline void validate_temporal_endpoint(const TemporalEndpoint& endpoint) {
+namespace temporal_endpoint_detail {
+inline void validate(const TemporalEndpoint& endpoint, const StableSourceIndex& source_index) {
     using namespace temporal_endpoint_detail;
-    const StableSourceIndex source_index(endpoint.source);
     std::set<std::uint64_t> blocks;
     for (const auto& b : endpoint.local_blocks) {
         unique(blocks, b.block_key);
@@ -277,7 +277,8 @@ inline void validate_temporal_endpoint(const TemporalEndpoint& endpoint) {
         }
     }
     if (endpoint.declarations) {
-        validate_temporal_declarations(endpoint.source, endpoint.local_blocks, *endpoint.declarations);
+        temporal_declaration_detail::validate_against_source(
+            endpoint.source, source_index, endpoint.local_blocks, *endpoint.declarations);
         validate_declared_code_bindings(endpoint.codes, *endpoint.declarations);
     }
     std::set<std::uint64_t> finite_keys;
@@ -285,6 +286,13 @@ inline void validate_temporal_endpoint(const TemporalEndpoint& endpoint) {
         unique(finite_keys, system.key);
         validate_temporal_finite_system(endpoint.source, source_index, system);
     }
+}
+
+} // namespace temporal_endpoint_detail
+
+inline void validate_temporal_endpoint(const TemporalEndpoint& endpoint) {
+    const StableSourceIndex source_index(endpoint.source);
+    temporal_endpoint_detail::validate(endpoint, source_index);
 }
 
 namespace temporal_endpoint_detail {

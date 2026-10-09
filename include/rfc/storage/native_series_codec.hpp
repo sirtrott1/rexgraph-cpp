@@ -9,17 +9,17 @@ inline constexpr std::array<std::byte, 8> magic{std::byte{'R'}, std::byte{'F'}, 
 inline void blob(temporal_codec_detail::Writer& w, std::span<const std::byte> bytes) {
     w.u64(bytes.size()); w.raw(bytes);
 }
-inline TemporalEndpoint decode_snapshot(std::span<const std::byte> source, std::span<const std::byte> channels,
+inline temporal_seed_detail::Decoded decode_snapshot(std::span<const std::byte> source, std::span<const std::byte> channels,
                                         const NativeSeriesLimits& limits) {
     const auto p = native_series_detail::policy(limits);
     native_series_detail::bound(source.size(), p.max_file_bytes, "series source byte budget");
     native_series_detail::bound(channels.size(), p.max_file_bytes, "series channel byte budget");
     MappedRfcx image(source);
-    auto endpoint = decode_temporal_endpoint(image.materialize(), channels, native_series_detail::policy(limits));
-    const auto canonical = encode_rfcx(endpoint.source).bytes;
+    auto decoded = temporal_seed_detail::decode(image.materialize(), channels, p);
+    const auto& canonical = decoded.encoding.source.bytes;
     native_series_detail::require(canonical.size() == source.size() &&
         std::equal(canonical.begin(), canonical.end(), source.begin()), "noncanonical series source snapshot");
-    return endpoint;
+    return decoded;
 }
 } // namespace native_series_codec_detail
 
@@ -68,7 +68,7 @@ inline NativeTemporalSeries decode_native_series(std::span<const std::byte> byte
     auto policy = native_series_detail::policy(limits); policy.max_file_bytes = limits.max_archive_bytes;
     temporal_codec_detail::Reader r(bytes.subspan(32), policy);
     const auto ns = r.u64(); const auto source = r.blob(); const auto channels = r.blob();
-    NativeTemporalSeries out(decode_snapshot(source, channels, limits), ns, limits);
+    NativeTemporalSeries out(decode_snapshot(source, channels, limits).endpoint, ns, limits);
     const auto n = r.count(8); bound(n, limits.max_segments, "series frame count budget");
     for (std::size_t i = 0; i < n; ++i) out.append_encoded(r.blob());
     const auto cps = r.count(24); bound(cps, limits.max_checkpoints, "series checkpoint count budget");
@@ -78,7 +78,8 @@ inline NativeTemporalSeries decode_native_series(std::span<const std::byte> byte
     for (std::size_t i = 0; i < cps; ++i) {
         const auto seq = r.u64(); require(!previous || seq > *previous, "unordered series checkpoints"); previous = seq;
         const auto cp_source = r.blob(); const auto cp_channels = r.blob();
-        auto cp = decode_snapshot(cp_source, cp_channels, limits);
+        auto decoded_checkpoint = decode_snapshot(cp_source, cp_channels, limits);
+        const auto& cp = decoded_checkpoint.endpoint;
         require(cp.sequence == seq, "checkpoint sequence mismatch");
         auto expected = out.at(seq);
         require(encode_rfcx(expected.endpoint().source).bytes == encode_rfcx(cp.source).bytes &&
