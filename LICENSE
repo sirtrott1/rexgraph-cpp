@@ -1,8 +1,60 @@
-Copyright (c) 2026 the author of RexGraphCPP. All rights reserved.
+RexGraphCpp Author-Distributed Proprietary License
+Version 2026-10-08
 
-This software is proprietary. It may be used only by recipients to whom the
-author personally distributes it. Redistribution requires the author's express
-permission. No open-source license is granted, including
-under the Apache License 2.0.
+Copyright (c) 2026 Andrew Trotter. All rights reserved.
 
-Third-party components retain their own copyright notices and license terms.
+1. Scope and ownership
+
+RexGraphCpp, also named RexGraphCPP, rexgraphcpp or rexgraph-cpp, is proprietary
+software owned by Andrew Trotter (the Author). These terms apply to the Author's
+RexGraphCpp source code, object code, libraries, executables, documentation and
+other software materials supplied with this distribution, including copies
+embedded in research and reproduction packages. No ownership is transferred.
+No open-source license is granted for these materials.
+
+2. Personal distribution and permitted local use
+
+Only the Author may distribute the Software. A recipient to whom the Author
+directly supplies a copy may retain private copies, inspect, compile and use
+the Software, and modify it solely for that recipient's local use. This
+permission is personal, nonexclusive, nontransferable and nonsublicensable.
+
+3. No redistribution or republication
+
+Recipients must not redistribute, publish, upload, sublicense, transfer or
+otherwise share the Software, in original or modified form, with any other
+person or organization. This restriction includes source files and excerpts,
+patches, forks, modified versions, compiled copies, libraries and other
+packages containing the Software. A recipient must not republish modifications
+under another name or license. Only the Author may make a further distribution.
+
+4. Modifications sent to the Author
+
+Local modifications, patches and related Software material may be shared
+privately and directly with Andrew Trotter. This is the sole permitted recipient
+sharing exception. Sending material to the Author does not authorize sharing
+it with anyone else and does not, by itself, transfer copyright ownership.
+
+5. Separate software and research outputs
+
+GADGET remains subject to its own Apache License 2.0. These terms do not change
+the license of GADGET-only source. A distribution or executable that also
+contains RexGraphCpp remains subject to the restrictions on the RexGraphCpp
+material. Third-party components retain their own copyrights and licenses;
+these terms do not claim rights over those components. Independent input data,
+analysis results and research findings are not relicensed by these terms.
+
+6. Notices and previously granted rights
+
+Retain this license and the Author's notices in all permitted private copies.
+This author-distributed copy is offered under these terms. These terms do not
+revoke rights validly granted under a separate prior license or rights that
+applicable law does not permit a license to restrict. A separate written
+agreement signed by the Author controls any different permission it grants.
+
+7. Disclaimer
+
+To the extent permitted by applicable law, the Software is provided "AS IS",
+without warranties of any kind, express or implied, including merchantability,
+fitness for a particular purpose and noninfringement. The Author is not liable
+for claims, damages or other liability arising from the Software or its use.
