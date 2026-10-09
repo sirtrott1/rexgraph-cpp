@@ -15,14 +15,17 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <climits>
 #include <optional>
+#include <queue>
 #include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -971,6 +974,114 @@ public:
     }
 
     [[nodiscard]] core::RelationalComplex materialize() const {
+        validate_occurrence_identities();
+        auto arenas = decode_retained_arenas();
+        if (!canonical_retained_lanes(arenas)) {
+            arenas.clear();
+            return materialize_from_assertions();
+        }
+        return core::RelationalComplexBuilder(signature_, semantic_scale_).freeze_retained(std::move(arenas));
+    }
+
+private:
+    [[nodiscard]] std::vector<core::GradeArena> decode_retained_arenas() const {
+        std::vector<core::GradeArena> arenas;
+        arenas.reserve(grade_count());
+        for (const auto& view : grades_) {
+            const auto& d = view.desc;
+            core::GradeArena arena;
+            arena.grade = view.grade();
+            arena.relation_types.reserve(view.cell_count());
+            arena.cell_scales.reserve(view.cell_count());
+            if (d.grade == 0) arena.identities.reserve(view.cell_count());
+            else arena.relation_identities.reserve(view.cell_count());
+            for (std::size_t cell = 0; cell < view.cell_count(); ++cell) {
+                arena.relation_types.push_back(u32_array_value(d.relation_types, cell));
+                arena.cell_scales.push_back(lane_rational(d.cell_scales, d.cell_scale_overflow, cell));
+                if (d.grade == 0) arena.identities.push_back(u64_array_value(d.identities, cell));
+                else arena.relation_identities.push_back(core::RelationKey{u64_array_value(d.relation_keys, cell)});
+            }
+            const auto words = machine::checked_size_mul(signature_.aspects().size(), static_cast<std::size_t>(d.aspect_words));
+            arena.aspects = composite::AspectPlanes(signature_.aspects(), view.incidence_count(), words);
+            if (d.grade == 0) {
+                arena.offsets.push_back(0);
+            } else {
+                arena.offsets.reserve(view.cell_count() + 1u);
+                for (std::size_t i = 0; i <= view.cell_count(); ++i)
+                    arena.offsets.push_back(static_cast<std::size_t>(u64_array_value(d.offsets, i)));
+                arena.lower_index.reserve(view.incidence_count());
+                arena.upper_index.reserve(view.incidence_count());
+                arena.occurrence_identities.reserve(view.incidence_count());
+                arena.lattice_coefficient.reserve(view.incidence_count());
+                arena.incidence_by_lower.reserve(view.incidence_count());
+                for (std::size_t slot = 0; slot < view.incidence_count(); ++slot) {
+                    arena.lower_index.push_back(u32_array_value(d.lower_index, slot));
+                    arena.upper_index.push_back(u32_array_value(d.upper_index, slot));
+                    arena.occurrence_identities.push_back(core::OccurrenceKey{u64_array_value(d.occurrence_keys, slot)});
+                    arena.lattice_coefficient.push_back(integer_lane_value(d.lattice, d.lattice_overflow, slot));
+                    arena.incidence_by_lower.push_back(static_cast<std::size_t>(u64_array_value(d.incidence_by_lower, slot)));
+                }
+                const auto lower_count = arenas.back().cell_count();
+                arena.lower_offsets.reserve(lower_count + 1u);
+                for (std::size_t i = 0; i <= lower_count; ++i)
+                    arena.lower_offsets.push_back(static_cast<std::size_t>(u64_array_value(d.lower_offsets, i)));
+                for (std::size_t a = 0; a < signature_.aspects().size(); ++a) {
+                    auto& plane = arena.aspects.plane(static_cast<composite::AspectId>(a));
+                    for (std::size_t word = 0; word < plane.word_count(); ++word)
+                        plane.assign_word(word, u64_array_value(d.aspect_words_offset, a * plane.word_count() + word));
+                }
+            }
+            arenas.push_back(std::move(arena));
+        }
+        return arenas;
+    }
+
+    [[nodiscard]] bool canonical_retained_lanes(const std::vector<core::GradeArena>& arenas) const {
+        for (std::size_t k = 1; k < arenas.size(); ++k) {
+            const auto& arena = arenas[k];
+            for (std::size_t cell = 0; cell < arena.cell_count(); ++cell) {
+                const auto& scale = arena.cell_scales[cell];
+                if (scale == 1) continue;
+                numeric::Integer expected = 1;
+                const auto [begin, end] = arena.incidence_range(cell);
+                for (auto slot = begin; slot < end; ++slot) {
+                    numeric::Rational ratio(arena.lattice_coefficient[slot], scale.get_num());
+                    ratio.canonicalize();
+                    expected = numeric::lcm_positive(expected, numeric::denominator(ratio));
+                }
+                if (scale.get_num() != expected) return false;
+            }
+            for (std::size_t cell = 0; cell < arenas[k - 1u].cell_count(); ++cell) {
+                const auto [begin, end] = arena.coface_incidence_range(cell);
+                for (auto slot = begin + (begin != end); slot < end; ++slot)
+                    if (arena.incidence_by_lower[slot - 1u] >= arena.incidence_by_lower[slot]) return false;
+            }
+        }
+        return true;
+    }
+
+    void validate_occurrence_identities() const {
+        if (grade_count() < 3) return; // One incidence grade is already checked by parse().
+        using Cursor = std::tuple<std::uint64_t, std::size_t, std::size_t>;
+        std::priority_queue<Cursor, std::vector<Cursor>, std::greater<Cursor>> cursors;
+        const auto key = [&](std::size_t grade, std::size_t slot) {
+            const auto& d = grades_[grade].desc;
+            return u64_array_value(d.occurrence_key_index ? d.occurrence_key_index : d.occurrence_keys,
+                                   d.occurrence_key_index ? 2u * slot : slot);
+        };
+        for (std::size_t grade = 1; grade < grade_count(); ++grade)
+            if (grades_[grade].incidence_count()) cursors.emplace(key(grade, 0), grade, 0);
+        std::optional<std::uint64_t> previous;
+        while (!cursors.empty()) {
+            const auto [current, grade, slot] = cursors.top();
+            cursors.pop();
+            if (previous && *previous == current) throw std::invalid_argument("duplicate boundary occurrence identity");
+            previous = current;
+            if (slot + 1u < grades_[grade].incidence_count()) cursors.emplace(key(grade, slot + 1u), grade, slot + 1u);
+        }
+    }
+
+    [[nodiscard]] core::RelationalComplex materialize_from_assertions() const {
         core::RelationalComplexBuilder builder(signature_, semantic_scale_);
         builder.declare_grade(core::Grade{static_cast<std::uint16_t>(grade_count() - 1u)});
         const auto g0 = grade(core::Grade{0});

@@ -4,6 +4,7 @@
 #include <limits>
 #include "rfc/core/occurrence.hpp"
 #include "rfc/core/relational_complex.hpp"
+#include "rfc/core/axioms.hpp"
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -12,6 +13,8 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+namespace rfc::storage { class MappedRfcx; }
 
 namespace rfc::core {
 
@@ -272,6 +275,41 @@ public:
     }
 
 private:
+    friend class storage::MappedRfcx;
+
+    // The codec supplies fresh arenas after checking all structural sections.
+    RelationalComplex freeze_retained(std::vector<GradeArena> grades) const {
+        RelationalComplex source(signature_, semantic_scale_, std::move(grades));
+        for (std::size_t k = 1; k < source.grade_count(); ++k) {
+            const auto grade = Grade{static_cast<std::uint16_t>(k)};
+            const auto& arena = source.grade(grade);
+            for (std::size_t cell = 0; cell < arena.cell_count(); ++cell) {
+                const auto type = arena.relation_types[cell];
+                const auto [begin, end] = arena.incidence_range(cell);
+                validate_type_arity(type, end - begin);
+                if (signature_.type(type).constraints.rules.empty()) continue;
+                std::vector<PendingIncidence> incidences;
+                incidences.reserve(end - begin);
+                for (auto slot = begin; slot < end; ++slot) {
+                    std::vector<AspectValue> aspects;
+                    for (std::size_t a = 0; a < signature_.aspects().size(); ++a) {
+                        const auto aspect = static_cast<composite::AspectId>(a);
+                        if (aspect != signature_.existence_aspect() && aspect != signature_.orientation_aspect())
+                            aspects.push_back({aspect, arena.aspects.get(aspect, slot)});
+                    }
+                    incidences.push_back({arena.lower_index[slot], arena.occurrence_identities[slot],
+                        source.incidence_coefficient(grade, slot),
+                        arena.aspects.get(signature_.existence_aspect(), slot),
+                        arena.aspects.get(signature_.orientation_aspect(), slot), std::move(aspects)});
+                }
+                validate_relation_semantics(type, incidences);
+            }
+        }
+        if (!bianchi_through(source, source.max_grade()).satisfied())
+            throw std::invalid_argument("higher relation boundary is not closed: adjacent chain axiom violated");
+        return source;
+    }
+
     struct PendingIncidence {
         std::uint32_t lower_index{};
         OccurrenceKey identity{};
