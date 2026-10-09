@@ -188,6 +188,15 @@ original reconstructions and response shapes. Unshared inputs remain in the
 original parameter family. Constant response equations require explicit
 `TransportParameterSupportPolicy::IncludeConstants` when preparing certificates.
 
+`learning/context_transport_diagrams.hpp` compares explicitly selected connected
+groups of original relation rows. `acquire_context_transport_diagrams` joins
+observed star correspondences only when their shared boundary maps agree in
+both directions. It retains the complete row, cell and occurrence maps and the
+union of entry equations for each group. Certify that union jointly with
+`PreparedTransportParameterRelations`; separately feasible stars can form an
+inconsistent group. Shared boundary contributions retain their own flag signs
+and roles.
+
 `learning/native_exact_trainer.hpp` provides a declared serial rational gradient
 profile for half the metric squared error. It retains original ordered channels,
 parameters, fixed sample order, step sizes and complete updates in a separate
