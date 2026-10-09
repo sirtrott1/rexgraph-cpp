@@ -195,6 +195,15 @@ outside that overlap remain unidentified. The result owns its exact parameter
 relation proof for reuse. `condition_status` checks a selected joint intersection
 without constructing the complete conditional parameter family.
 
+`learning/context_transport_pattern.hpp` exports an admitted training star with
+`PreparedTransportPattern::learn`. Supply declared domain, weight and parameter
+coordinate identities and external SHA256 provenance references. The pattern
+owns its source and complete affine weight family on the shared input image of
+its agreeing peers. `response` returns exact field families and rejects inputs
+outside that domain. `context_transport_pattern_codec.hpp` stores the pattern
+in the native series format without its training observations. Full training
+provenance remains in the referenced external archives.
+
 `learning/transport_evidence.hpp` provides `PreparedTransportEvidence` for
 original whole-field transport observations. Construct it from a prepared
 transport declaration and call `append` with a nonempty ordered observation
