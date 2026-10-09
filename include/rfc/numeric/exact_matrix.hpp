@@ -20,6 +20,13 @@ public:
         normalize();
     }
 
+    [[nodiscard]] bool is_identity() const {
+        if (rows_ != cols_ || entries_.size() != rows_) return false;
+        for (const auto& [ij, value] : entries_)
+            if (ij.first != ij.second || value != 1) return false;
+        return true;
+    }
+
     static ExactMatrix identity(std::size_t n) {
         ExactMatrix out(n, n);
         for (std::size_t i = 0; i < n; ++i) out.set(i, i, Rational{1});

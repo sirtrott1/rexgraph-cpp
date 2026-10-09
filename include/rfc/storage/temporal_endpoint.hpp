@@ -310,7 +310,7 @@ public:
         }
     }
     [[nodiscard]] const numeric::ExactMatrix& get(std::uint64_t key) {
-        if (const auto it = cache_.find(key); it != cache_.end()) return it->second;
+        if (const auto it = cache_.find(key); it != cache_.end()) return it->second.map;
         require(next_index_.contains(key), "correspondence target carrier absent");
         const auto& next = *next_index_.at(key);
         const auto rows = next.domain.logical_size();
@@ -348,7 +348,11 @@ public:
                 result = numeric::ExactMatrix::identity(rows);
             }
         }
-        return cache_.emplace(key, std::move(result)).first->second;
+        const auto identity = result.is_identity();
+        return cache_.emplace(key, CachedMap{std::move(result), identity}).first->second.map;
+    }
+    [[nodiscard]] bool is_identity(std::uint64_t key) {
+        (void)get(key); return cache_.at(key).identity;
     }
     void validate_all() {
         for (const auto& [key, carrier] : next_index_) { (void)carrier; (void)get(key); }
@@ -359,7 +363,8 @@ private:
     std::map<std::uint64_t, const TemporalCarrier*> old_index_, next_index_;
     std::map<std::uint64_t, const numeric::ExactMatrix*> explicit_maps_;
     std::optional<StableSourceIndex> old_source_index_;
-    std::map<std::uint64_t, numeric::ExactMatrix> cache_;
+    struct CachedMap { numeric::ExactMatrix map; bool identity; };
+    std::map<std::uint64_t, CachedMap> cache_;
 };
 } // namespace temporal_endpoint_detail
 

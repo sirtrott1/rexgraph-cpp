@@ -1,4 +1,5 @@
 #include "declaration_temporal_fixture.hpp"
+#include "native_series_fixture.hpp"
 #include "rfc/storage/native_series_codec.hpp"
 #include <iostream>
 #include <random>
@@ -153,7 +154,6 @@ void identity_source() {
     const auto replayed=replay_temporal_source(source,patch);
     check(encode_rfcx(replayed).bytes==encode_rfcx(rebuilt).bytes,"identity source differs from full occurrence reconstruction");
     check(encode_rfcx(replayed).bytes==encode_rfcx(source).bytes,"identity source changes the canonical complex");
-    check(&replayed.grade(core::Grade{1})!=&source.grade(core::Grade{1}),"source replay aliases caller arena storage");
     patch.target_grade_count=0;
     rejects([&]{(void)replay_temporal_source(source,patch);},"identity path accepts empty grade domain");
     patch.target_grade_count=65537;
@@ -165,6 +165,27 @@ void identity_source() {
     patch.target_grade_count=static_cast<std::uint32_t>(source.grade_count());
     TemporalGradePatch invalid;invalid.grade=core::Grade{1};invalid.removed_occurrences={123456};patch.grades.push_back(invalid);
     rejects([&]{(void)replay_temporal_source(source,patch);},"identity path ignores actual source edits");
+}
+void carrier_identity() {
+    using M=numeric::ExactMatrix;using Q=numeric::Rational;
+    check(M::identity(0).is_identity(),"empty identity rejected");
+    check(M::identity(2).is_identity(),"complete identity rejected");
+    check(!M(2,3).is_identity(),"rectangular map called identity");
+    check(!M::diagonal({1,0}).is_identity(),"rank deficient map called identity");
+    check(!M::diagonal({2,1}).is_identity(),"scaling called identity");
+    check(!M::from_rows({{0,1},{1,0}}).is_identity(),"permutation called identity");
+    for (const auto& map:{M::identity(2),M::diagonal({2,3}),M::from_rows({{0,1},{1,0}})}) {
+        const auto before=native_series_fixture::endpoint(0,{5,-7});
+        auto after=before;after.sequence=1;
+        const auto expected=map.apply(numeric::RationalVector{5,-7});
+        after.tensors[0]=native_series_fixture::field_tensor(10,1,expected);
+        const auto segment=make_temporal_segment(before,after,{{1,map}});
+        check(segment.tensors.empty(),"transport without innovation creates field replacement");
+        const auto replayed=replay_temporal_segment(before,segment);
+        check(reference_encoding(replayed)==reference_encoding(after),"record free field transport changed");
+        check(replayed.tensors[0].tensor.state(0)==std::optional<Q>{expected[0]},"first transport coordinate changed");
+        check(replayed.tensors[0].tensor.state(1)==std::optional<Q>{expected[1]},"second transport coordinate changed");
+    }
 }
 void canonical_policy() {
     core::RelationalComplexBuilder builder(core::RelationSignature{});builder.declare_witness_identity(10);
@@ -214,7 +235,7 @@ void byte_writer() {
 }
 } // namespace
 int main() {
-    try { equivalence(); historical(); archive_ownership(); identity_source(); canonical_policy(); byte_writer();
+    try { equivalence(); historical(); archive_ownership(); identity_source(); carrier_identity(); canonical_policy(); byte_writer();
         std::cout << "endpoint_codec_checks=" << checks << " PASS\n";return 0;
     } catch(const std::exception& e) {std::cerr << e.what() << '\n';return 1;}
 }

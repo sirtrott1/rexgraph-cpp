@@ -159,6 +159,7 @@ inline TemporalEndpoint replay_temporal_segment(const TemporalEndpoint &base,
         if (target.role != TemporalTensorRole::Field || seen.contains(key))
             continue;
         require(target.output.has_value(), "field has no target carrier");
+        if (comparison.is_identity(*target.output)) continue;
         const auto &J = comparison.get(*target.output);
         target.tensor = numeric::SparseRationalTensor(target.tensor.domain(), target.tensor.support(),
                                                       sparse_apply(J, target.tensor.values()));
