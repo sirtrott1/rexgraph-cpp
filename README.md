@@ -204,6 +204,16 @@ outside that domain. `context_transport_pattern_codec.hpp` stores the pattern
 in the native series format without its training observations. Full training
 provenance remains in the referenced external archives.
 
+`PreparedTransportPatternBank::learn` retains selected stars in one source and
+one joint affine weight family. Shared boundary identities occur once. Supply
+one domain coordinate identity per selected star, along with distinct weight
+and parameter identities. `response` assembles the selected boundary fields.
+`glue` compares readings on shared boundaries and any declared restriction maps.
+It returns the compatible section, its separate boundary response and the
+remaining parameter family. Inconsistent readings return an exact contradiction
+witness. `context_transport_pattern_bank_codec.hpp` stores the bank without its
+training observations.
+
 `learning/transport_evidence.hpp` provides `PreparedTransportEvidence` for
 original whole-field transport observations. Construct it from a prepared
 transport declaration and call `append` with a nonempty ordered observation

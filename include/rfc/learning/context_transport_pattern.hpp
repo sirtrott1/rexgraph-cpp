@@ -27,6 +27,7 @@ struct TransportPatternResponse {
 // The complete projected affine parameter family survives without observations.
 // Provenance digests refer to external source and evidence archives.
 class PreparedTransportPattern {
+    friend class PreparedTransportPatternBank;
     using Q=numeric::Rational;
     using V=numeric::RationalVector;
     using M=numeric::ExactMatrix;
@@ -204,6 +205,15 @@ public:
             (provenance.peers && provenance.peers!=rule->forced.size()))
             throw std::invalid_argument("pattern provenance population differs from training proof");
         provenance.observations=samples.size();provenance.peers=rule->forced.size();
+        return compile(observations,acquired,origin,atlas,input_domain(acquired,origin,atlas,guard),coordinates,provenance,guard);
+    }
+private:
+    static M input_domain(const TransportContextViewRuleAcquisition& acquired,std::size_t origin,
+        const std::vector<std::vector<TransportContextView>>& atlas,G& guard) {
+        using namespace context_view_detail;
+        const auto rule=std::find_if(acquired.rules.begin(),acquired.rules.end(),[&](const auto& r){return r.origin==origin;});
+        if(rule==acquired.rules.end() || !rule->admitted || !acquired.proof)
+            throw std::invalid_argument("independently admitted training origin required");
         M domain=atlas.at(1).at(origin).accession;
         for(const auto peer:rule->forced) {
             guard.step();const auto& other=acquired.comparisons.witnesses.at(peer).common_input;
@@ -214,13 +224,13 @@ public:
             };
             domain=intersection(chart(left.image()),chart(right.image()),guard,acquired.retained).common_input;
         }
-        return compile(observations,acquired,origin,atlas,std::move(domain),coordinates,provenance,guard);
+        return domain;
     }
-private:
     static PreparedTransportPattern compile(const PreparedTransportObservations& observations,
         const TransportContextViewRuleAcquisition& acquired,std::size_t origin,
         const std::vector<std::vector<TransportContextView>>& atlas,M domain,
-        TransportPatternCoordinates coordinates,TransportPatternProvenance provenance,G& guard) {
+        TransportPatternCoordinates coordinates,TransportPatternProvenance provenance,G& guard,
+        M* unreduced_directions=nullptr) {
         using namespace context_view_detail;
         const numeric::PreparedExactFrames input_frame(domain,guard);domain=input_frame.image();
         if(!domain.cols()) throw std::invalid_argument("agreeing peers have no common pattern input");
@@ -265,7 +275,9 @@ private:
         }
         auto weights=numeric::checked_apply(readout,acquired.proof->evidence_origin(),guard);
         for(std::size_t i=0;i<weights.size();++i) weights[i]=guard.add(weights[i],fixed[i]);
-        const numeric::PreparedExactFrames directions(product(readout,acquired.proof->evidence_kernel(),guard,acquired.retained),guard);
+        auto projected=product(readout,acquired.proof->evidence_kernel(),guard,acquired.retained);
+        if(unreduced_directions) *unreduced_directions=projected;
+        const numeric::PreparedExactFrames directions(std::move(projected),guard);
         add_carrier(3,coordinates.weights,weights.size());add_carrier(4,coordinates.parameters,directions.rank());
         for(std::size_t i=0;i<selected.to_ambient[0].size();++i) {
             const auto& lower=atlas[0][selected.to_ambient[0][i]];
