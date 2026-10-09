@@ -1,5 +1,6 @@
 #include "rfc/core/builder.hpp"
 #include "rfc/learning/graded_transport_fit.hpp"
+#include "rfc/numeric/prepared_exact_frames.hpp"
 #include <future>
 #include <iostream>
 
@@ -67,16 +68,34 @@ void learning_cases() {
         const auto cells=model.owner().fibers().complex().grade(lo).cell_count();
         const auto truth=empty.parameters(V(empty.free_columns().size(),Q{2,3}),guard);
         std::vector<learning::TransportObservation> all;
+        Fit incremental=empty;
         for(std::size_t j=0;j<n;++j) {
             V input(n);input[j]=Q{3,2};auto target=numeric::checked_apply(model.observation_map(input,true,guard),truth,guard);
             all.push_back({input,target,std::vector<std::size_t>(cells,1)});
             Fit fit(model,all,guard);oracle(fit);
+            Guard update_guard;incremental=incremental.append({all.back()},update_guard);oracle(incremental);
+            check(incremental.design()==fit.design() && incremental.target()==fit.target(),"incremental original equations differ from replay");
+            check(incremental.particular()==fit.particular() && incremental.kernel()==fit.kernel(),"incremental complete family differs from replay");
+            check(incremental.pivots()==fit.pivots() && incremental.free_columns()==fit.free_columns(),"incremental original axes differ");
+            check(incremental.chain_rank()==fit.chain_rank() && incremental.observation_rank()==fit.observation_rank(),"separate incremental ranks differ");
+            check(incremental.preparation_steps()==fit.preparation_steps() && incremental.retained_entries()==fit.retained_entries(),"canonical replay receipt depends on append grouping");
+            check(&incremental.chain()==&empty.chain() && &incremental.model()==&empty.model(),"fixed chain or original source owner copied");
+            const auto stats=incremental.update();
+            check(stats.chain_reused && stats.reused_observations==j && stats.assembled_observations==1,"incremental suffix accounting differs");
+            check(stats.execution_steps==update_guard.steps() && stats.execution_steps<fit.update().execution_steps,"append repeats full graded preparation");
             check(fit.observations().size()==j+1 && fit.kernel().rows()==model.parameter_count(),"original evidence or parameter carrier lost");
         }
         check(empty.observations().empty(),"parent mutated");
         if(named)check(empty.free_columns().size()==3,"dependent or unused named parameters discarded");
         auto contradictory=all;contradictory.push_back(all.front());contradictory.back().target[0]+=1;
         rejects([&]{Guard g;Fit fit(model,contradictory,g);},"inconsistent observed suffix accepted");
+        const auto before=incremental.particular();
+        rejects([&]{Guard g;(void)incremental.append({contradictory.back()},g);},"inconsistent incremental suffix accepted");
+        check(before==incremental.particular() && incremental.observations().size()==all.size(),"refused append changes parent");
+        rejects([&]{Guard g;(void)incremental.append({},g);},"empty incremental suffix accepted");
+        Guard grouped_guard;const auto grouped=empty.append(all,grouped_guard);
+        check(grouped.design()==incremental.design() && grouped.kernel()==incremental.kernel() &&
+            grouped.preparation_steps()==incremental.preparation_steps(),"grouped append changes full canonical family");
         rejects([&]{Guard g;(void)empty.materialize(V(empty.free_columns().size()+1),g);},"incomplete free parameter carrier accepted");
     }
 }
@@ -90,8 +109,16 @@ void refusals() {
     rejects([&]{Guard guard;(void)learning::PreparedTransportObservations::at_grade(model.owner(),core::Grade{0},{},{},guard);},"grade zero learned as a boundary");
     rejects([&]{Guard guard;learning::PreparedTransportObservations legacy(model.owner(),{},{},guard);},"legacy grade-one profile accepts higher grades");
     rejects([&]{model.require_grade_one_profile();},"graded assembler enters an incompatible grade-one consumer");
+    const learning::TransportObservation sample{V(model.owner().fibers().stalks().total_dimension(core::Grade{2})),V(model.owner().fibers().stalks().total_dimension(core::Grade{1})),
+        std::vector<std::size_t>(model.owner().fibers().complex().grade(core::Grade{1}).cell_count(),1)};
+    auto altered=numeric::ExactActionLimits{};altered.integer_bits=32;
+    rejects([&]{Guard guard(altered);(void)empty.append({sample},guard);},"append changes declared limits");
+    rejects([&]{Guard guard({},[]{throw std::runtime_error("cancelled");});(void)empty.append({sample},guard);},"append ignores cancellation");
+    Guard narrow_guard(altered);const Fit narrow(model,{},narrow_guard);
+    auto oversized=sample;oversized.input[0]=Q{mpz_class{1}<<64};
+    rejects([&]{Guard guard(altered);(void)narrow.append({oversized},guard);},"append ignores bit admission");
     std::vector<std::future<bool>> jobs;
-    for(int i=0;i<4;++i)jobs.push_back(std::async(std::launch::async,[&]{Guard guard;const Fit fit(model,{},guard);return fit.kernel()==empty.kernel();}));
+    for(int i=0;i<4;++i)jobs.push_back(std::async(std::launch::async,[&]{Guard guard;const auto fit=empty.append({sample},guard);return fit.kernel()==empty.kernel() && &fit.chain()==&empty.chain();}));
     for(auto& job:jobs)check(job.get(),"concurrent immutable fits differ");
 }
 }

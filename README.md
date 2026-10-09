@@ -197,6 +197,9 @@ The fit retains whole field observations and enforces every applicable chain
 equation. `chain_rank`, `observation_rank` and `rank` describe the separate and
 combined constraints. `particular` and `kernel` retain the complete parameter
 family. `materialize` requires all free values and checks the full resulting tower.
+`append` shares the fixed chain and inserts only new whole field equations.
+`update` reports reused observations and actual guarded work separately from the
+canonical complete preparation cost.
 
 `learning/context_transport_views.hpp` accepts rational accession and
 reconstruction maps into declared common carriers. Reconstruction after
