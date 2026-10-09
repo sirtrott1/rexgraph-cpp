@@ -36,6 +36,7 @@ public:
     std::uint64_t u64() { return r_.u64(); }
     bool flag() { const auto b = u8(); require(b <= 1, "invalid temporal boolean"); return b != 0; }
     std::size_t remaining() const { return size_ - r_.position(); }
+    std::size_t position() const noexcept { return r_.position(); }
     const TemporalReadLimits& limits() const noexcept { return limits_; }
     std::span<const std::byte> blob() {
         const auto n = u64();
@@ -60,12 +61,17 @@ public:
         const auto bytes = r_.slice(static_cast<std::size_t>(n));
         return std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
     }
-    numeric::Integer integer() {
+    struct IntegerBytes { bool negative; std::span<const std::byte> magnitude; };
+    IntegerBytes integer_bytes() {
         const bool negative = flag();
         const auto n = u32(); require(n <= limits_.max_integer_bytes, "temporal integer exceeds configured limit");
         const auto bytes = r_.slice(n);
         require(bytes.empty() || bytes.front() != std::byte{0}, "noncanonical temporal integer");
         require(!bytes.empty() || !negative, "negative zero integer");
+        return {negative, bytes};
+    }
+    numeric::Integer integer() {
+        const auto [negative, bytes] = integer_bytes();
         numeric::Integer out = 0;
         if (!bytes.empty()) mpz_import(out.get_mpz_t(), bytes.size(), 1, 1, 1, 0, bytes.data());
         if (negative) out = -out;
@@ -139,10 +145,16 @@ inline void tensor(Writer& w, const numeric::SparseRationalTensor& value) {
     }
     values(w, value.values());
 }
-inline numeric::SparseRationalTensor tensor(Reader& r) {
+struct TensorHeader {
+    numeric::IndexDomain domain;
+    numeric::StructuralSupport support;
+    bool encoded_full;
+};
+inline TensorHeader tensor_header(Reader& r) {
     auto d = r.domain(); const auto size = d.logical_size();
     auto support = numeric::StructuralSupport::full(size);
-    if (!r.flag()) {
+    const auto full = r.flag();
+    if (!full) {
         const auto n = r.count(8);
         std::vector<std::size_t> active; active.reserve(n);
         std::optional<std::size_t> last;
@@ -152,8 +164,12 @@ inline numeric::SparseRationalTensor tensor(Reader& r) {
         }
         support = numeric::StructuralSupport::sparse(size, std::move(active));
     }
-    auto v = values(r, size);
-    return numeric::SparseRationalTensor(std::move(d), std::move(support), std::move(v));
+    return {std::move(d), std::move(support), full};
+}
+inline numeric::SparseRationalTensor tensor(Reader& r) {
+    auto h = tensor_header(r);
+    auto v = values(r, h.domain.logical_size());
+    return numeric::SparseRationalTensor(std::move(h.domain), std::move(h.support), std::move(v));
 }
 inline void matrix(Writer& w, const numeric::ExactMatrix& value) {
     w.u64(value.rows()); w.u64(value.cols()); w.u64(value.nonzeros());
@@ -187,12 +203,15 @@ inline void tensor_record(Writer& w, const TemporalTensor& t) {
     w.u64(t.owner.block); cell(w, t.owner.cell); occurrence(w, t.owner.occurrence);
     optional_key(w, t.input); optional_key(w, t.output); string(w, t.interpretation); tensor(w, t.tensor);
 }
-inline TemporalTensor tensor_record(Reader& r) {
+inline TemporalTensor tensor_record_header(Reader& r) {
     TemporalTensor t; t.key = r.u64(); t.role = static_cast<TemporalTensorRole>(r.u8());
     t.owner.kind = static_cast<TemporalOwnerKind>(r.u8());
     require(t.role <= TemporalTensorRole::OpaqueExact && t.owner.kind <= TemporalOwnerKind::Occurrence, "unsupported tensor tag");
     t.owner.block = r.u64(); t.owner.cell = cell(r); t.owner.occurrence = occurrence(r);
-    t.input = optional_key(r); t.output = optional_key(r); t.interpretation = r.string(); t.tensor = tensor(r); return t;
+    t.input = optional_key(r); t.output = optional_key(r); t.interpretation = r.string(); return t;
+}
+inline TemporalTensor tensor_record(Reader& r) {
+    auto t = tensor_record_header(r); t.tensor = tensor(r); return t;
 }
 inline void local(Writer& w, const LocalBlockDefinition& b) {
     w.u64(b.block_key); w.u8(static_cast<std::uint8_t>(b.kind));
