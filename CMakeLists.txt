@@ -441,6 +441,10 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
     target_link_libraries(rfc_context_transport_view_tests PRIVATE rfc::learning Threads::Threads)
     add_test(NAME rfc_context_transport_views COMMAND rfc_context_transport_view_tests)
 
+    add_executable(rfc_context_transport_view_rule_tests tests/learning/test_context_transport_view_rules.cpp)
+    target_link_libraries(rfc_context_transport_view_rule_tests PRIVATE rfc::learning Threads::Threads)
+    add_test(NAME rfc_context_transport_view_rules COMMAND rfc_context_transport_view_rule_tests)
+
     add_executable(rfc_context_transport_diagram_tests tests/learning/test_context_transport_diagrams.cpp)
     target_link_libraries(rfc_context_transport_diagram_tests PRIVATE rfc::learning Threads::Threads)
     add_test(NAME rfc_context_transport_diagrams COMMAND rfc_context_transport_diagram_tests)

@@ -187,6 +187,14 @@ contradictions or unresolved training comparisons prevent admission. The result
 retains every candidate, its evidence status and the selected original maps;
 unobserved target equality remains a hypothesis.
 
+`learning/context_transport_view_rules.hpp` provides
+`acquire_context_transport_view_rules` with faithful rational views. Each
+selected target comparison requires enough agreeing independent peers whose
+shared input images contain its complete compared input image. Directions
+outside that overlap remain unidentified. The result owns its exact parameter
+relation proof for reuse. `condition_status` checks a selected joint intersection
+without constructing the complete conditional parameter family.
+
 `learning/transport_evidence.hpp` provides `PreparedTransportEvidence` for
 original whole-field transport observations. Construct it from a prepared
 transport declaration and call `append` with a nonempty ordered observation

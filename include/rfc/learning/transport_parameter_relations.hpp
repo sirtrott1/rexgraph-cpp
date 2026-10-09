@@ -21,6 +21,10 @@ struct TransportParameterCondition {
     std::vector<std::size_t> free_columns;
     std::size_t rank{}, steps{};
 };
+struct TransportParameterConditionStatus {
+    bool consistent{};
+    std::size_t rank{}, steps{};
+};
 
 // Evaluate declared linear relations on supported map entries throughout the
 // complete observation family. A declared parameter basis remains an assumption.
@@ -53,6 +57,35 @@ class PreparedTransportParameterRelations {
             out.set(key.first,j,guard.add(out.get(key.first,j),guard.mul(q,v)));
             workspace(machine::checked_size_add(scratch,out.nonzeros()),guard);
         }
+        return out;
+    }
+    struct ConditionFrames {
+        M map;
+        numeric::PreparedExactFrames frames, target;
+        ConditionFrames(M a,M b,Guard& guard):map(std::move(a)),frames(map,guard),target(std::move(b),guard) {}
+    };
+    ConditionFrames condition_frames(const std::vector<std::size_t>& selected,Guard& guard) const {
+        guard.step();guard.dimension(selected.size());
+        guard.vector(origin_);guard.matrix(kernel_);guard.vector(residual_origin_);guard.matrix(residual_directions_);
+        const auto d=kernel_.cols();guard.dimension(machine::checked_size_add(d,1));
+        workspace(machine::checked_size_add(selected.size(),relations_.size()),guard);
+        M map(selected.size(),d),augmented(selected.size(),machine::checked_size_add(d,1));
+        std::vector<std::size_t> rows(relations_.size(),selected.size());
+        for(std::size_t i=0;i<selected.size();++i) {
+            guard.step();const auto row=selected[i];
+            if(row>=relations_.size() || rows[row]!=selected.size())
+                throw std::invalid_argument("distinct selected original parameter relation indices required");
+            rows[row]=i;augmented.set(i,d,guard.sub(Q{0},residual_origin_[row]));
+        }
+        for(const auto& [key,q]:residual_directions_.entries()) {
+            guard.step();if(rows[key.first]==selected.size()) continue;
+            map.set(rows[key.first],key.second,q);augmented.set(rows[key.first],key.second,q);
+            workspace(machine::checked_size_add(relations_.size(),machine::checked_size_add(map.nonzeros(),augmented.nonzeros())),guard);
+        }
+        ConditionFrames out(std::move(map),std::move(augmented),guard);
+        workspace(machine::checked_size_add(relations_.size(),machine::checked_size_add(out.map.nonzeros(),
+            machine::checked_size_add(out.target.original().nonzeros(),
+                machine::checked_size_add(out.frames.stored_entries(),out.target.stored_entries())))),guard);
         return out;
     }
 public:
@@ -143,29 +176,18 @@ public:
     std::size_t retained_entries() const noexcept {return retained_;}
     std::size_t preparation_steps() const noexcept {return preparation_steps_;}
 
+    // Classify a joint intersection without materializing its parameter family.
+    TransportParameterConditionStatus condition_status(const std::vector<std::size_t>& selected,Guard& guard) const {
+        const auto start=guard.steps();const auto system=condition_frames(selected,guard);
+        return {system.frames.rank()==system.target.rank(),system.frames.rank(),guard.steps()-start};
+    }
+
     // Intersect explicitly selected equations with the original evidence family.
     // Individual feasibility does not imply that a selected set is consistent.
     TransportParameterCondition condition(const std::vector<std::size_t>& selected,Guard& guard) const {
-        const auto start=guard.steps();guard.step();guard.dimension(selected.size());
-        guard.vector(origin_);guard.matrix(kernel_);guard.vector(residual_origin_);guard.matrix(residual_directions_);
-        const auto d=kernel_.cols();guard.dimension(machine::checked_size_add(d,1));
-        workspace(machine::checked_size_add(selected.size(),relations_.size()),guard);
-        M map(selected.size(),d),augmented(selected.size(),machine::checked_size_add(d,1));
-        std::vector<std::size_t> rows(relations_.size(),selected.size());
-        for(std::size_t i=0;i<selected.size();++i) {
-            guard.step();const auto row=selected[i];
-            if(row>=relations_.size() || rows[row]!=selected.size())
-                throw std::invalid_argument("distinct selected original parameter relation indices required");
-            rows[row]=i;augmented.set(i,d,guard.sub(Q{0},residual_origin_[row]));
-        }
-        for(const auto& [key,q]:residual_directions_.entries()) {
-            guard.step();if(rows[key.first]==selected.size()) continue;
-            map.set(rows[key.first],key.second,q);augmented.set(rows[key.first],key.second,q);
-            workspace(machine::checked_size_add(relations_.size(),machine::checked_size_add(map.nonzeros(),augmented.nonzeros())),guard);
-        }
-        const numeric::PreparedExactFrames frames(map,guard),target(augmented,guard);
-        workspace(machine::checked_size_add(relations_.size(),machine::checked_size_add(map.nonzeros(),
-            machine::checked_size_add(augmented.nonzeros(),machine::checked_size_add(frames.stored_entries(),target.stored_entries())))),guard);
+        const auto start=guard.steps();const auto system=condition_frames(selected,guard);
+        const auto& map=system.map;const auto& frames=system.frames;const auto& target=system.target;
+        const auto d=kernel_.cols();
         TransportParameterCondition out;out.rank=frames.rank();out.consistent=frames.rank()==target.rank();
         out.kernel=M(origin_.size(),0);out.coordinate_kernel=M(d,0);
         if(out.consistent) {
