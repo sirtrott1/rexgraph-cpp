@@ -1,5 +1,6 @@
 #include "rfc/storage/declaration_codec.hpp"
 #include "rfc/composite/declaration_evolution.hpp"
+#include "rfc/storage/temporal_declarations.hpp"
 #include <future>
 #include <iostream>
 
@@ -83,10 +84,43 @@ void shared_views() {
     const DeclarationRegistry redefined({Declaration::boolean(id(1)), Declaration::integer(id(9))});
     rejects([&] { (void)DeclarationRecoding(base, redefined, {{id(1), id(9), DeclarationMapKind::Recode, {}}}); }, "unmapped retained identity was redefined");
 }
+void alternating_roots() {
+    storage::TemporalDeclarationUpdate empty;
+    empty.target.emplace();
+    check(storage::temporal_declaration_detail::update_usage(empty) == std::pair<std::size_t,std::size_t>{0,0},
+          "unused update target acquired a new validation requirement");
+    storage::TemporalDeclarationState state;
+    state.namespace_key = 701;
+    state.registry = definitions();
+    const auto product = V::product({V::repeated({V::integer(0),V::integer(-31)}),V::symbol(3)});
+    for (std::uint64_t i=0;i<100;++i)
+        state.values.push_back({i+1,i%2 ? id(4) : id(1),0,0,{},{},i%2 ? product : V::integer(-31)});
+    storage::TemporalDeclarationUpdate update;
+    update.target = state;
+    const auto use = storage::temporal_declaration_detail::update_usage(update);
+    auto exact = composite::DeclarationLimits{};
+    exact.max_value_nodes = use.first;
+    exact.max_materialized_bytes = use.second;
+    storage::temporal_declaration_detail::validate_definitions(state,exact);
+    check(storage::temporal_declaration_detail::update_usage(update,exact)==use,
+          "alternating roots changed aggregate resource accounting");
+    --exact.max_value_nodes;
+    rejects([&]{storage::temporal_declaration_detail::validate_definitions(state,exact);},
+            "alternating roots lost the aggregate node budget");
+    rejects([&]{(void)storage::temporal_declaration_detail::update_usage(update,exact);},
+            "update roots lost the aggregate node budget");
+    ++exact.max_value_nodes;
+    --exact.max_materialized_bytes;
+    rejects([&]{storage::temporal_declaration_detail::validate_definitions(state,exact);},
+            "alternating roots lost the aggregate byte budget");
+    rejects([&]{(void)storage::temporal_declaration_detail::update_usage(update,exact);},
+            "update roots lost the aggregate byte budget");
+}
 }
 int main() {
     try {
         shared_views();
+        alternating_roots();
         std::cout << checks << " prepared registry checks passed\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

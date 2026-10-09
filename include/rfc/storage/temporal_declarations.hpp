@@ -64,7 +64,7 @@ inline bool owner_equal(const TemporalDeclaredValue& a, const TemporalDeclaredVa
 }
 inline void validate_definitions(const TemporalDeclarationState& s, const composite::DeclarationLimits& limits = {}) {
     require(s.namespace_key && !s.registry.definitions().empty(), "empty/unnamespaced declaration endpoint");
-    (void)composite::DeclarationRegistry(s.registry.definitions(), limits);
+    const composite::PreparedLayoutRegistry registry(s.registry, limits);
     composite::validate_layout_profile(s.profile);
     (void)keyed(s.values); (void)keyed(s.branches); (void)keyed(s.source_layouts); (void)keyed(s.code_types); (void)keyed(s.programs);
     for (const auto& binding : s.code_types) (void)s.registry.at(binding.type);
@@ -72,7 +72,7 @@ inline void validate_definitions(const TemporalDeclarationState& s, const compos
     composite::declaration_detail::budget(bytes, limits.max_materialized_bytes, "declared root-value buffer budget");
     for (const auto& v : s.values) {
         require(!(v.cell && v.occurrence), "declared value has multiple source owners");
-        const composite::CompiledLayout layout(s.registry, v.type, s.profile, limits);
+        const composite::CompiledLayout layout(registry, v.type, s.profile);
         const auto allocation = layout.allocation(v.value);
         nodes = machine::checked_size_add(nodes, allocation.value_nodes);
         bytes = machine::checked_size_add(bytes, allocation.materialized_bytes);
@@ -83,6 +83,11 @@ inline void validate_definitions(const TemporalDeclarationState& s, const compos
 inline std::pair<std::size_t,std::size_t> update_usage(const TemporalDeclarationUpdate& u,
                                                      const composite::DeclarationLimits& limits = {}) {
     std::size_t nodes=0,bytes=0;
+    std::optional<composite::PreparedLayoutRegistry> registry;
+    const auto allocation=[&](composite::DeclarationId type,const composite::DeclaredValue& value) {
+        if(!registry)registry.emplace(u.target->registry,limits);
+        return composite::CompiledLayout(*registry,type,u.target->profile).allocation(value);
+    };
     const auto account=[&](const composite::LayoutAllocation& use){
         nodes=machine::checked_size_add(nodes,use.value_nodes);bytes=machine::checked_size_add(bytes,use.materialized_bytes);
         composite::declaration_detail::budget(nodes,limits.max_value_nodes,"declaration update aggregate work budget");
@@ -91,7 +96,7 @@ inline std::pair<std::size_t,std::size_t> update_usage(const TemporalDeclaration
     if (u.target) {
         bytes=machine::checked_size_mul(u.target->values.size(),sizeof(TemporalDeclaredValue));
         composite::declaration_detail::budget(bytes,limits.max_materialized_bytes,"declaration update root buffer budget");
-        for(const auto& v:u.target->values)account(composite::CompiledLayout(u.target->registry,v.type,u.target->profile,limits).allocation(v.value));
+        for(const auto& v:u.target->values)account(allocation(v.type,v.value));
     }
     composite::declaration_detail::budget(u.maps.size(),limits.max_definitions,"declaration map population budget");
     for(const auto& m:u.maps) {
@@ -102,7 +107,7 @@ inline std::pair<std::size_t,std::size_t> update_usage(const TemporalDeclaration
         for(const auto& f:m.fills) {
             const auto it=std::find_if(type.factors.begin(),type.factors.end(),[&](const auto& x){return x.key==f.factor;});
             require(it!=type.factors.end(),"unknown initialized declaration factor");
-            account(composite::CompiledLayout(u.target->registry,it->type,u.target->profile,limits).allocation(f.value));
+            account(allocation(it->type,f.value));
         }
     }
     return {nodes,bytes};

@@ -42,14 +42,15 @@ inline TemporalBranchDeclaration branch_declaration(Reader& r) {
 inline void declaration_state(Writer& w, const TemporalDeclarationState& s) {
     temporal_declaration_detail::validate_definitions(s);
     w.u64(s.namespace_key);
-    const composite::CompiledLayout root(s.registry,s.registry.definitions().front().id,s.profile);
+    const composite::PreparedLayoutRegistry registry(s.registry);
+    const composite::CompiledLayout root(registry,s.registry.definitions().front().id,s.profile);
     declaration_blob(w,encode_declarations(root));
     const auto values=temporal_declaration_detail::keyed(s.values); w.u64(values.size());
     for(const auto& [key,p]:values) {
         w.u64(key); declaration_id(w,p->type); w.u64(p->block); w.u64(p->branch);
         w.u8(p->cell.has_value()); if(p->cell) cell(w,*p->cell);
         w.u8(p->occurrence.has_value()); if(p->occurrence) occurrence(w,*p->occurrence);
-        declared_payload(w,composite::CompiledLayout(s.registry,p->type,s.profile),p->value);
+        declared_payload(w,composite::CompiledLayout(registry,p->type,s.profile),p->value);
     }
     const auto branches=temporal_declaration_detail::keyed(s.branches); w.u64(branches.size());
     for(const auto& [key,b]:branches) { (void)key; branch_declaration(w,*b); }
@@ -77,11 +78,12 @@ inline TemporalDeclarationState declaration_state(Reader& r) {
     auto n=r.count(58); std::size_t nodes=0,allocated=machine::checked_size_mul(n,sizeof(TemporalDeclaredValue));
     require(allocated<=r.limits().declarations.max_materialized_bytes,"declared root-value decode budget");
     s.values.reserve(n);
+    const composite::PreparedLayoutRegistry registry(s.registry,r.limits().declarations);
     for(std::size_t i=0;i<n;++i) {
         TemporalDeclaredValue v; v.key=r.u64(); v.type=declaration_id(r); v.block=r.u64(); v.branch=r.u64();
         if(r.flag()) v.cell=cell(r);
         if(r.flag()) v.occurrence=occurrence(r);
-        const composite::CompiledLayout value_layout(s.registry,v.type,s.profile,r.limits().declarations);
+        const composite::CompiledLayout value_layout(registry,v.type,s.profile);
         // Limit each subsequent allocation by the remaining aggregate allowance.
         auto policy=r.limits().declarations;
         require(nodes<policy.max_value_nodes && allocated<=policy.max_materialized_bytes,"aggregate declaration decode budget");
