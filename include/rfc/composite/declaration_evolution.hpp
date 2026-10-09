@@ -23,39 +23,39 @@ class DeclarationRecoding {
 public:
     DeclarationRecoding(DeclarationRegistry base, DeclarationRegistry target,
                         std::vector<DeclarationMap> maps, DeclarationLimits limits = {})
-        : base_(std::move(base)), target_(std::move(target)), maps_(std::move(maps)), limits_(limits) {
+        : base_(std::move(base), limits), target_(std::move(target), limits), maps_(std::move(maps)), limits_(limits) {
         using namespace declaration_detail;
         limits_.validate();
-        // Revalidate under this operation's policy, including user-supplied registries.
-        (void)DeclarationRegistry(base_.definitions(), limits_);
-        (void)DeclarationRegistry(target_.definitions(), limits_);
-        require(maps_.size() == base_.definitions().size(), "declaration recoding must cover the entire base DAG");
+        require(maps_.size() == base_.declarations().definitions().size(), "declaration recoding must cover the entire base DAG");
         std::set<DeclarationId> targets;
         for (std::size_t i = 0; i < maps_.size(); ++i) {
             const auto& m = maps_[i];
             require(m.kind <= DeclarationMapKind::Embedding && by_id_.emplace(m.from, i).second &&
                     targets.insert(m.to).second, "invalid/noninjective declaration recoding");
-            (void)base_.at(m.from); (void)target_.at(m.to);
+            (void)base_.declarations().at(m.from); (void)target_.declarations().at(m.to);
         }
-        for (const auto& d : base_.definitions()) {
-            for (const auto& t : target_.definitions())
-                if (t.id == d.id) require(t == d, "immutable declaration identity redefined across endpoints");
+        const auto& target_definitions = target_.declarations().definitions();
+        auto retained = target_definitions.begin();
+        for (const auto& d : base_.declarations().definitions()) {
+            while (retained != target_definitions.end() && retained->id < d.id) ++retained;
+            if (retained != target_definitions.end() && retained->id == d.id)
+                require(*retained == d, "immutable declaration identity redefined across endpoints");
             validate_map(by_id_.at(d.id));
         }
     }
     [[nodiscard]] DeclarationId target_id(DeclarationId id) const { return maps_.at(by_id_.at(id)).to; }
     [[nodiscard]] DeclaredValue apply(DeclarationId id, const DeclaredValue& value) const {
-        CompiledLayout(base_, id, BooleanLayoutProfile::Lsb0OctetsV1, limits_).validate(value);
+        CompiledLayout(base_, id, BooleanLayoutProfile::Lsb0OctetsV1).validate(value);
         std::size_t nodes=0, materialized=0;
         (void)preflight(id,value,nodes,materialized);
         auto result = recode(id, value);
-        CompiledLayout(target_, target_id(id), BooleanLayoutProfile::Lsb0OctetsV1, limits_).validate(result);
+        CompiledLayout(target_, target_id(id), BooleanLayoutProfile::Lsb0OctetsV1).validate(result);
         return result;
     }
 private:
     void validate_map(std::size_t slot) const {
         using namespace declaration_detail;
-        const auto& m = maps_[slot]; const auto& a = base_.at(m.from); const auto& b = target_.at(m.to);
+        const auto& m = maps_[slot]; const auto& a = base_.declarations().at(m.from); const auto& b = target_.declarations().at(m.to);
         const bool grow = m.kind == DeclarationMapKind::Embedding;
         if (!grow) {
             for (const auto& f : a.factors)
@@ -85,7 +85,7 @@ private:
                 require(!old.contains(fill.factor) && initialized.insert(fill.factor).second, "invalid added-factor initialization");
                 const auto it = std::find_if(b.factors.begin(), b.factors.end(), [&](const auto& f){return f.key == fill.factor;});
                 require(it != b.factors.end(), "initialization of nonexistent factor");
-                CompiledLayout(target_, it->type, BooleanLayoutProfile::Lsb0OctetsV1, limits_).validate(fill.value);
+                CompiledLayout(target_, it->type, BooleanLayoutProfile::Lsb0OctetsV1).validate(fill.value);
             }
             if (a.kind == DeclarationKind::Product)
                 require(old.size() + initialized.size() == b.factors.size(), "added product factor lacks explicit value");
@@ -113,7 +113,7 @@ private:
     std::size_t preflight(DeclarationId id,const DeclaredValue& value,
                           std::size_t& nodes,std::size_t& materialized) const {
         using namespace declaration_detail;
-        const auto& m=maps_.at(by_id_.at(id));const auto& a=base_.at(id);const auto& b=target_.at(m.to);
+        const auto& m=maps_.at(by_id_.at(id));const auto& a=base_.declarations().at(id);const auto& b=target_.declarations().at(m.to);
         const auto work=[&](std::size_t n){nodes=machine::checked_size_add(nodes,n);budget(nodes,limits_.max_value_nodes,"recoding aggregate work budget");};
         const auto allocate=[&](std::size_t n,std::size_t size){materialized=machine::checked_size_add(materialized,machine::checked_size_mul(n,size));budget(materialized,limits_.max_materialized_bytes,"recoding aggregate buffer budget");};
         const auto charge=[&](const LayoutAllocation& x){work(x.value_nodes);allocate(x.materialized_bytes,1);};
@@ -121,7 +121,7 @@ private:
         const auto add=[&](std::size_t n){bits=machine::checked_size_add(bits,n);budget(machine::ceil_div(bits,8),limits_.max_encoded_bytes,"recoding encoded size budget");};
         switch(a.kind) {
         case DeclarationKind::Boolean:case DeclarationKind::Finite:case DeclarationKind::Integer:case DeclarationKind::Rational: {
-            const auto x=CompiledLayout(target_,m.to,BooleanLayoutProfile::Lsb0OctetsV1,limits_).allocation(value);charge(x);add(x.bits);break;
+            const auto x=CompiledLayout(target_,m.to,BooleanLayoutProfile::Lsb0OctetsV1).allocation(value);charge(x);add(x.bits);break;
         }
         case DeclarationKind::Product: {
             work(1);allocate(b.factors.size(),sizeof(DeclaredValue));
@@ -130,7 +130,7 @@ private:
                 if(it!=a.factors.end())add(preflight(it->type,std::get<DeclaredValue::Product>(value.data).elements.at(static_cast<std::size_t>(it-a.factors.begin())),nodes,materialized));
                 else {
                     const auto fill=std::find_if(m.fills.begin(),m.fills.end(),[&](const auto& x){return x.factor==f.key;});
-                    const auto x=CompiledLayout(target_,f.type,BooleanLayoutProfile::Lsb0OctetsV1,limits_).allocation(fill->value);charge(x);add(x.bits);
+                    const auto x=CompiledLayout(target_,f.type,BooleanLayoutProfile::Lsb0OctetsV1).allocation(fill->value);charge(x);add(x.bits);
                 }
             }break;
         }
@@ -180,7 +180,7 @@ private:
         return target.flatten(mapped);
     }
     DeclaredValue recode(DeclarationId id, const DeclaredValue& v) const {
-        const auto& m = maps_.at(by_id_.at(id)); const auto& a = base_.at(id); const auto& b = target_.at(m.to);
+        const auto& m = maps_.at(by_id_.at(id)); const auto& a = base_.declarations().at(id); const auto& b = target_.declarations().at(m.to);
         switch (a.kind) {
         case DeclarationKind::Boolean: case DeclarationKind::Finite:
         case DeclarationKind::Integer: case DeclarationKind::Rational: return v;
@@ -228,7 +228,7 @@ private:
         default: throw std::invalid_argument("unknown declaration recoding constructor");
         }
     }
-    DeclarationRegistry base_, target_;
+    PreparedLayoutRegistry base_, target_;
     std::vector<DeclarationMap> maps_;
     DeclarationLimits limits_;
     std::map<DeclarationId, std::size_t> by_id_;

@@ -3,6 +3,7 @@
 #include "rfc/composite/declaration.hpp"
 #include "rfc/numeric/sparse_tensor.hpp"
 #include <climits>
+#include <memory>
 #include <optional>
 #include <variant>
 
@@ -105,6 +106,20 @@ inline std::size_t rational_bits(const numeric::Rational& x, const DeclarationLi
 }
 } // namespace declaration_detail
 
+// Layout views share this registry after validation under one resource policy.
+class PreparedLayoutRegistry {
+public:
+    explicit PreparedLayoutRegistry(DeclarationRegistry declarations, DeclarationLimits limits = {})
+        : limits_(limits), declarations_(std::make_shared<const DeclarationRegistry>(declarations.definitions(), limits_)) {}
+    PreparedLayoutRegistry(const PreparedLayoutRegistry&) = default;
+    PreparedLayoutRegistry& operator=(const PreparedLayoutRegistry&) = default;
+    [[nodiscard]] const DeclarationRegistry& declarations() const noexcept { return *declarations_; }
+    [[nodiscard]] const DeclarationLimits& limits() const noexcept { return limits_; }
+private:
+    DeclarationLimits limits_;
+    std::shared_ptr<const DeclarationRegistry> declarations_;
+};
+
 // Owning compilation: no borrowed registry that can change under an executing
 // codec. Meaningful factor/symbol order is retained; no Cartesian product is formed.
 class CompiledLayout {
@@ -112,12 +127,15 @@ public:
     CompiledLayout(DeclarationRegistry declarations, DeclarationId root,
                    BooleanLayoutProfile profile = BooleanLayoutProfile::Lsb0OctetsV1,
                    DeclarationLimits limits = {})
-        : declarations_(declarations.definitions(), limits), root_(root), profile_(profile), limits_(limits) {
+        : CompiledLayout(PreparedLayoutRegistry(std::move(declarations), limits), root, profile) {}
+    CompiledLayout(PreparedLayoutRegistry declarations, DeclarationId root,
+                   BooleanLayoutProfile profile = BooleanLayoutProfile::Lsb0OctetsV1)
+        : declarations_(std::move(declarations)), root_(root), profile_(profile), limits_(declarations_.limits()) {
         validate_layout_profile(profile_); limits_.validate();
-        (void)declarations_.at(root_);
+        (void)declarations_.declarations().at(root_);
         bounds_ = compute_bounds(root_);
     }
-    [[nodiscard]] const DeclarationRegistry& declarations() const noexcept { return declarations_; }
+    [[nodiscard]] const DeclarationRegistry& declarations() const noexcept { return declarations_.declarations(); }
     [[nodiscard]] DeclarationId root() const noexcept { return root_; }
     [[nodiscard]] BooleanLayoutProfile profile() const noexcept { return profile_; }
     [[nodiscard]] const DeclarationLimits& limits() const noexcept { return limits_; }
@@ -135,7 +153,7 @@ public:
     // schema/layout migration and a general operation compiler belong to later batches.
     [[nodiscard]] DeclaredValue add_exact(const DeclaredValue& a, const DeclaredValue& b) const {
         validate(a); validate(b); DeclaredValue result;
-        switch (declarations_.at(root_).kind) {
+        switch (declarations_.declarations().at(root_).kind) {
             case DeclarationKind::Integer:
                 result = DeclaredValue::integer(numeric::Integer(std::get<numeric::Integer>(a.data) +
                                                                  std::get<numeric::Integer>(b.data))); break;
@@ -150,7 +168,7 @@ private:
     LayoutBounds compute_bounds(DeclarationId id) {
         using namespace declaration_detail;
         if (const auto it = bound_cache_.find(id); it != bound_cache_.end()) return it->second;
-        const auto& d = declarations_.at(id); LayoutBounds b;
+        const auto& d = declarations_.declarations().at(id); LayoutBounds b;
         auto add = machine::checked_size_add; auto mul = machine::checked_size_mul;
         switch (d.kind) {
             case DeclarationKind::Boolean: b = {1, 1}; break;
@@ -200,7 +218,7 @@ private:
         using namespace declaration_detail;
         budget(depth, limits_.max_depth, "value nesting budget");
         nodes = machine::checked_size_add(nodes, 1); budget(nodes, limits_.max_value_nodes, "value work budget");
-        const auto& d = declarations_.at(id); std::size_t bits = 0;
+        const auto& d = declarations_.declarations().at(id); std::size_t bits = 0;
         auto accumulate = [&](std::size_t n) {
             bits = machine::checked_size_add(bits, n);
             budget(machine::ceil_div(bits, 8), limits_.max_encoded_bytes, "encoded value budget");
@@ -218,7 +236,7 @@ private:
             case DeclarationKind::Finite: {
                 const auto* p = std::get_if<DeclaredValue::Symbol>(&value.data);
                 require(p, "expected finite symbol");
-                (void)declarations_.symbol_ordinal(d.id, p->key);
+                (void)declarations_.declarations().symbol_ordinal(d.id, p->key);
                 bits = tag_bits(d.symbols.size()); break;
             }
             case DeclarationKind::Integer: {
@@ -239,7 +257,7 @@ private:
             case DeclarationKind::Alternative: {
                 const auto* p = std::get_if<DeclaredValue::Alternative>(&value.data);
                 require(p && p->element.size() == 1, "alternative payload count/type");
-                const auto& factor = d.factors.at(declarations_.alternative_ordinal(d.id, p->key));
+                const auto& factor = d.factors.at(declarations_.declarations().alternative_ordinal(d.id, p->key));
                 bits = tag_bits(d.factors.size());
                 allocate(1, sizeof(DeclaredValue)); child(factor.type, p->element.front()); break;
             }
@@ -279,7 +297,7 @@ private:
         budget(machine::ceil_div(bits, 8), limits_.max_encoded_bytes, "encoded value budget");
         return bits;
     }
-    DeclarationRegistry declarations_;
+    PreparedLayoutRegistry declarations_;
     DeclarationId root_;
     BooleanLayoutProfile profile_;
     DeclarationLimits limits_;
