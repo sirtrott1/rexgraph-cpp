@@ -30,6 +30,8 @@ class EncodedRationalTensor {
               header(read_header()) {
             using namespace temporal_codec_detail;
             Reader r(bytes.subspan(values_offset), limits);
+            r.consume_records(header.domain.rank());
+            if (!header.encoded_full) r.consume_records(header.support.count());
             nonzeros = r.count(18);
             values_offset += r.position();
             // The native factory inherits immutable component admission and

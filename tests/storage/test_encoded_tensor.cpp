@@ -100,6 +100,8 @@ void malformed() {
     rejects([&] { (void)EncodedRationalTensor(bytes, limits); });
     limits = {}; limits.max_records = 1;
     rejects([&] { (void)EncodedRationalTensor(bytes, limits); });
+    limits.max_records = 3;
+    rejects([&] { (void)EncodedRationalTensor(bytes, limits); });
     const auto custom = [](std::uint64_t index, bool sign, std::uint8_t numerator,
                            std::uint8_t denominator, bool explicit_full = false) {
         temporal_codec_detail::Writer w;
