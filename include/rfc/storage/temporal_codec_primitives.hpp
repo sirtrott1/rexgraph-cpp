@@ -120,6 +120,7 @@ inline void values(Writer& w, const numeric::SparseRationalVector& value) {
 inline numeric::SparseRationalVector values(Reader& r, std::size_t size) {
     const auto n = r.count(18);
     std::vector<numeric::SparseRationalEntry> entries;
+    entries.reserve(n);
     std::optional<std::size_t> last;
     for (std::size_t i = 0; i < n; ++i) {
         const auto idx = r.u64(); require(idx < size && (!last || idx > *last), "unordered/out-of-domain sparse coordinate");
@@ -143,7 +144,8 @@ inline numeric::SparseRationalTensor tensor(Reader& r) {
     auto support = numeric::StructuralSupport::full(size);
     if (!r.flag()) {
         const auto n = r.count(8);
-        std::vector<std::size_t> active; std::optional<std::size_t> last;
+        std::vector<std::size_t> active; active.reserve(n);
+        std::optional<std::size_t> last;
         for (std::size_t i = 0; i < n; ++i) {
             const auto idx = r.u64(); require(idx < size && (!last || idx > *last), "unordered/out-of-domain structural support");
             active.push_back(static_cast<std::size_t>(idx)); last = static_cast<std::size_t>(idx);

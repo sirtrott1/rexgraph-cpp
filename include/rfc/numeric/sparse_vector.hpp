@@ -79,10 +79,15 @@ public:
 private:
     static std::vector<SparseRationalEntry> canonicalize(std::size_t logical_size,
                                                           std::vector<SparseRationalEntry> entries) {
-        for (auto& entry : entries) {
+        bool canonical_order = true;
+        for (std::size_t i = 0; i < entries.size(); ++i) {
+            auto& entry = entries[i];
             if (entry.index >= logical_size) throw std::out_of_range("sparse rational index");
             entry.value.canonicalize();
+            canonical_order = canonical_order && entry.value != 0 &&
+                              (i == 0 || entry.index > entries[i - 1].index);
         }
+        if (canonical_order && entries.capacity() == entries.size()) return entries;
         std::sort(entries.begin(), entries.end(), [](const auto& lhs, const auto& rhs) {
             return lhs.index < rhs.index;
         });
