@@ -191,14 +191,14 @@ public:
         return PreparedTransportPattern(std::move(endpoint),guard);
     }
 
-    static PreparedTransportPattern learn(const PreparedTransportObservations& observations,
-        const std::vector<TransportObservation>& samples,const std::vector<std::size_t>& training,
+    static PreparedTransportPattern learn(const TransportContextSamples& samples,const std::vector<std::size_t>& training,
         std::size_t origin,const std::vector<std::vector<TransportContextView>>& atlas,
         std::size_t minimum_peers,TransportPatternCoordinates coordinates,
         TransportPatternProvenance provenance,G& guard,
         TransportContextInputScope scope=TransportContextInputScope::FullCarrier) {
         using namespace context_view_detail;
-        const auto acquired=acquire_context_transport_view_rules(observations,samples,training,{},atlas,minimum_peers,guard,scope);
+        const auto& observations=samples.model();
+        const auto acquired=acquire_context_transport_view_rules(samples,training,{},atlas,minimum_peers,guard,scope);
         const auto rule=std::find_if(acquired.rules.begin(),acquired.rules.end(),[&](const auto& r){return r.origin==origin;});
         if(rule==acquired.rules.end() || !rule->admitted || !acquired.proof)
             throw std::invalid_argument("independently admitted training origin required");
@@ -207,6 +207,19 @@ public:
             throw std::invalid_argument("pattern provenance population differs from training proof");
         provenance.observations=samples.size();provenance.peers=rule->forced.size();
         return compile(observations,acquired,origin,atlas,input_domain(acquired,origin,atlas,guard),coordinates,provenance,guard);
+    }
+    static PreparedTransportPattern learn(const PreparedTransportObservations& observations,
+        const std::vector<TransportObservation>& samples,const std::vector<std::size_t>& training,
+        std::size_t origin,const std::vector<std::vector<TransportContextView>>& atlas,
+        std::size_t minimum_peers,TransportPatternCoordinates coordinates,TransportPatternProvenance provenance,G& guard,
+        TransportContextInputScope scope=TransportContextInputScope::FullCarrier) {
+        return learn(TransportContextSamples(observations,samples,guard),training,origin,atlas,minimum_peers,coordinates,provenance,guard,scope);
+    }
+    static PreparedTransportPattern learn(const PreparedTransportEvidence& evidence,const std::vector<std::size_t>& training,
+        std::size_t origin,const std::vector<std::vector<TransportContextView>>& atlas,
+        std::size_t minimum_peers,TransportPatternCoordinates coordinates,TransportPatternProvenance provenance,G& guard,
+        TransportContextInputScope scope=TransportContextInputScope::FullCarrier) {
+        return learn(TransportContextSamples(evidence),training,origin,atlas,minimum_peers,coordinates,provenance,guard,scope);
     }
 private:
     static M input_domain(const TransportContextViewRuleAcquisition& acquired,std::size_t origin,

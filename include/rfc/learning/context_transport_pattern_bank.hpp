@@ -302,16 +302,16 @@ public:
     static PreparedTransportPatternBank from_endpoint(storage::TemporalEndpoint endpoint,G& guard) {
         return PreparedTransportPatternBank(std::move(endpoint),guard);
     }
-    static PreparedTransportPatternBank learn(const PreparedTransportObservations& observations,
-        const std::vector<TransportObservation>& samples,const std::vector<std::size_t>& training,
+    static PreparedTransportPatternBank learn(const TransportContextSamples& samples,const std::vector<std::size_t>& training,
         const std::vector<std::size_t>& origins,const std::vector<std::vector<TransportContextView>>& atlas,
         std::size_t minimum_peers,TransportPatternBankCoordinates coordinates,TransportPatternProvenance provenance,G& guard,
         TransportContextInputScope scope=TransportContextInputScope::FullCarrier) {
         using namespace context_view_detail;
+        const auto& observations=samples.model();
         if(origins.empty() || origins.size()!=coordinates.domains.size() ||
             !std::is_sorted(origins.begin(),origins.end()) || std::adjacent_find(origins.begin(),origins.end())!=origins.end())
             throw std::invalid_argument("ordered distinct bank origins and domain identities required");
-        const auto acquired=acquire_context_transport_view_rules(observations,samples,training,{},atlas,minimum_peers,guard,scope);
+        const auto acquired=acquire_context_transport_view_rules(samples,training,{},atlas,minimum_peers,guard,scope);
         if(!acquired.proof) throw std::invalid_argument("independently admitted bank training required");
         const auto& source=observations.owner().fibers().complex();algebra::SubcomplexMask patch(source);
         for(const auto origin:origins) patch.select({core::Grade{1},static_cast<std::uint32_t>(origin)});
@@ -374,6 +374,19 @@ public:
         std::sort(endpoint.carriers.begin(),endpoint.carriers.end(),[](const auto& a,const auto& b){return a.key<b.key;});
         std::sort(endpoint.tensors.begin(),endpoint.tensors.end(),[](const auto& a,const auto& b){return a.key<b.key;});
         return PreparedTransportPatternBank(std::move(endpoint),guard);
+    }
+    static PreparedTransportPatternBank learn(const PreparedTransportObservations& observations,
+        const std::vector<TransportObservation>& samples,const std::vector<std::size_t>& training,
+        const std::vector<std::size_t>& origins,const std::vector<std::vector<TransportContextView>>& atlas,
+        std::size_t minimum_peers,TransportPatternBankCoordinates coordinates,TransportPatternProvenance provenance,G& guard,
+        TransportContextInputScope scope=TransportContextInputScope::FullCarrier) {
+        return learn(TransportContextSamples(observations,samples,guard),training,origins,atlas,minimum_peers,std::move(coordinates),provenance,guard,scope);
+    }
+    static PreparedTransportPatternBank learn(const PreparedTransportEvidence& evidence,const std::vector<std::size_t>& training,
+        const std::vector<std::size_t>& origins,const std::vector<std::vector<TransportContextView>>& atlas,
+        std::size_t minimum_peers,TransportPatternBankCoordinates coordinates,TransportPatternProvenance provenance,G& guard,
+        TransportContextInputScope scope=TransportContextInputScope::FullCarrier) {
+        return learn(TransportContextSamples(evidence),training,origins,atlas,minimum_peers,std::move(coordinates),provenance,guard,scope);
     }
     const storage::TemporalEndpoint& endpoint() const & {return state_->endpoint;}
     const V& weights() const & {return state_->weights;}

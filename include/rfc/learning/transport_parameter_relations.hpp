@@ -1,5 +1,5 @@
 #pragma once
-#include "rfc/learning/transport_observations.hpp"
+#include "rfc/learning/transport_evidence.hpp"
 #include "rfc/numeric/prepared_exact_frames.hpp"
 
 namespace rfc::learning {
@@ -35,6 +35,7 @@ class PreparedTransportParameterRelations {
     using Guard=numeric::ExactActionGuard;
     PreparedTransportObservations observations_;
     std::vector<TransportObservation> samples_;
+    std::optional<PreparedTransportEvidence> evidence_;
     std::vector<TransportParameterRelation> relations_;
     V origin_, residual_origin_;
     M kernel_, residual_directions_;
@@ -88,6 +89,40 @@ class PreparedTransportParameterRelations {
                 machine::checked_size_add(out.frames.stored_entries(),out.target.stored_entries())))),guard);
         return out;
     }
+    void evaluate_relations(Guard& guard,TransportParameterSupportPolicy support_policy) {
+        const std::size_t live{};
+        const auto count=observations_.variable_coordinates().size();M entry_map(relations_.size(),count);
+        std::set<std::string> names;
+        for(std::size_t i=0;i<relations_.size();++i) {
+            guard.step();auto& relation=relations_[i];
+            if(relation.name.empty() || relation.name.size()>256 || !names.insert(relation.name).second ||
+                (relation.terms.empty() && support_policy!=TransportParameterSupportPolicy::IncludeConstants))
+                throw std::invalid_argument("distinct bounded names and nonempty parameter relation support required");
+            relation.expected=numeric::canonical_rational(relation.expected);guard.value(relation.expected);
+            retained_=machine::checked_size_add(retained_,machine::checked_size_add(relation.name.size(),2));
+            std::set<std::size_t> support;
+            for(auto& term:relation.terms) {
+                guard.step();term.coefficient=numeric::canonical_rational(term.coefficient);guard.value(term.coefficient);
+                if(term.entry>=count || !support.insert(term.entry).second)
+                    throw std::invalid_argument("distinct original supported variable map entries required");
+                retained_=machine::checked_size_add(retained_,2);entry_map.set(i,term.entry,term.coefficient);
+                workspace(machine::checked_size_add(live,entry_map.nonzeros()),guard);
+            }
+        }
+        const auto map=observations_.parameter_basis() ? product(entry_map,*observations_.parameter_basis(),guard,live) : entry_map;
+        residual_origin_=numeric::checked_apply(map,origin_,guard);
+        for(std::size_t i=0;i<relations_.size();++i) residual_origin_[i]=guard.sub(residual_origin_[i],relations_[i].expected);
+        residual_directions_=product(map,kernel_,guard,machine::checked_size_add(live,residual_origin_.size()));
+        statuses_.resize(relations_.size());std::vector<bool> moving(relations_.size());
+        for(const auto& [key,q]:residual_directions_.entries()) {(void)q;guard.step();moving[key.first]=true;}
+        for(std::size_t i=0;i<relations_.size();++i) {
+            guard.step();statuses_[i]=moving[i] ? TransportParameterRelationStatus::Open :
+                (residual_origin_[i]==0 ? TransportParameterRelationStatus::Forced : TransportParameterRelationStatus::Excluded);
+        }
+        retained_=machine::checked_size_add(retained_,machine::checked_size_add(residual_origin_.size(),
+            machine::checked_size_add(residual_directions_.nonzeros(),statuses_.size())));
+        workspace(machine::checked_size_add(live,machine::checked_size_add(entry_map.nonzeros(),map.nonzeros())),guard);
+    }
 public:
     PreparedTransportParameterRelations(PreparedTransportObservations observations,
         std::vector<TransportObservation> samples,std::vector<TransportParameterRelation> relations,Guard& guard,
@@ -122,39 +157,21 @@ public:
                     machine::checked_size_add(kernel_.nonzeros(),free_columns_.size())));
             workspace(machine::checked_size_add(live,machine::checked_size_add(frames.stored_entries(),augmented.stored_entries())),guard);
         }
-        const std::size_t live{};
-        const auto count=observations_.variable_coordinates().size();M entry_map(relations_.size(),count);
-        std::set<std::string> names;
-        for(std::size_t i=0;i<relations_.size();++i) {
-            guard.step();auto& relation=relations_[i];
-            if(relation.name.empty() || relation.name.size()>256 || !names.insert(relation.name).second ||
-                (relation.terms.empty() && support_policy!=TransportParameterSupportPolicy::IncludeConstants))
-                throw std::invalid_argument("distinct bounded names and nonempty parameter relation support required");
-            relation.expected=numeric::canonical_rational(relation.expected);guard.value(relation.expected);
-            retained_=machine::checked_size_add(retained_,machine::checked_size_add(relation.name.size(),2));
-            std::set<std::size_t> support;
-            for(auto& term:relation.terms) {
-                guard.step();term.coefficient=numeric::canonical_rational(term.coefficient);guard.value(term.coefficient);
-                if(term.entry>=count || !support.insert(term.entry).second)
-                    throw std::invalid_argument("distinct original supported variable map entries required");
-                retained_=machine::checked_size_add(retained_,2);entry_map.set(i,term.entry,term.coefficient);
-                workspace(machine::checked_size_add(live,entry_map.nonzeros()),guard);
-            }
-        }
-        const auto map=observations_.parameter_basis() ? product(entry_map,*observations_.parameter_basis(),guard,live) : entry_map;
-        residual_origin_=numeric::checked_apply(map,origin_,guard);
-        for(std::size_t i=0;i<relations_.size();++i) residual_origin_[i]=guard.sub(residual_origin_[i],relations_[i].expected);
-        residual_directions_=product(map,kernel_,guard,machine::checked_size_add(live,residual_origin_.size()));
-        statuses_.resize(relations_.size());std::vector<bool> moving(relations_.size());
-        for(const auto& [key,q]:residual_directions_.entries()) {(void)q;guard.step();moving[key.first]=true;}
-        for(std::size_t i=0;i<relations_.size();++i) {
-            guard.step();statuses_[i]=moving[i] ? TransportParameterRelationStatus::Open :
-                (residual_origin_[i]==0 ? TransportParameterRelationStatus::Forced : TransportParameterRelationStatus::Excluded);
-        }
-        retained_=machine::checked_size_add(retained_,machine::checked_size_add(residual_origin_.size(),
-            machine::checked_size_add(residual_directions_.nonzeros(),statuses_.size())));
-        workspace(machine::checked_size_add(live,machine::checked_size_add(entry_map.nonzeros(),map.nonzeros())),guard);
+        evaluate_relations(guard,support_policy);
         preparation_steps_=guard.steps()-start;
+    }
+    PreparedTransportParameterRelations(PreparedTransportEvidence evidence,
+        std::vector<TransportParameterRelation> relations,Guard& guard,
+        TransportParameterSupportPolicy support_policy=TransportParameterSupportPolicy::VariableEntries)
+        :observations_(evidence.model()),evidence_(std::move(evidence)),relations_(std::move(relations)) {
+        observations_.require_grade_one_profile();const auto start=guard.steps();guard.step();
+        guard.dimension(relations_.size());
+        if(relations_.empty())throw std::invalid_argument("named parameter relations required");
+        origin_=evidence_->particular();kernel_=evidence_->kernel();free_columns_=evidence_->free_columns();rank_=evidence_->rank();
+        retained_=machine::checked_size_add(evidence_->retained_entries(),machine::checked_size_add(observations_.retained_entries(),
+            machine::checked_size_add(origin_.size(),machine::checked_size_add(kernel_.nonzeros(),free_columns_.size()))));
+        workspace(0,guard);guard.vector(origin_);guard.matrix(kernel_);
+        evaluate_relations(guard,support_policy);preparation_steps_=guard.steps()-start;
     }
     const PreparedTransportObservations& observations() const & {return observations_;}
     const PreparedTransportObservations& observations() const &&=delete;

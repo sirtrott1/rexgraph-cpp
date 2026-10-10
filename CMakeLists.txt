@@ -421,6 +421,10 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
     target_link_libraries(rfc_column_transport_tests PRIVATE rfc::learning Threads::Threads)
     add_test(NAME rfc_column_transport_observations COMMAND rfc_column_transport_tests)
 
+    add_executable(rfc_context_observation_fields_tests tests/learning/test_context_observation_fields.cpp)
+    target_link_libraries(rfc_context_observation_fields_tests PRIVATE rfc::learning Threads::Threads)
+    add_test(NAME rfc_context_observation_fields COMMAND rfc_context_observation_fields_tests)
+
     add_executable(rfc_graded_transport_fit_tests tests/learning/test_graded_transport_fit.cpp)
     target_link_libraries(rfc_graded_transport_fit_tests PRIVATE rfc::learning Threads::Threads)
     add_test(NAME rfc_graded_transport_fit COMMAND rfc_graded_transport_fit_tests)

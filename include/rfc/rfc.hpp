@@ -36,6 +36,7 @@
 #include "rfc/learning/transport_observations.hpp"
 #include "rfc/learning/column_transport_observations.hpp"
 #include "rfc/learning/transport_evidence.hpp"
+#include "rfc/learning/context_observation_fields.hpp"
 #include "rfc/learning/graded_transport_fit.hpp"
 #include "rfc/learning/transport_field_objective.hpp"
 #include "rfc/learning/transport_parameter_relations.hpp"

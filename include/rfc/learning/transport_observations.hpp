@@ -146,6 +146,8 @@ public:
     PreparedTransportObservations(local::OwnedLinearFiberSystem owner,
         std::vector<TransportCoordinate> fixed_support, std::vector<TransportCoordinate> variables, M basis, Guard& guard)
         : PreparedTransportObservations(std::move(owner),std::move(fixed_support),std::move(variables),std::optional<M>{std::move(basis)},guard) {}
+    const std::vector<std::size_t>& input_stalk_offsets() const & {return upper_;}
+    const std::vector<std::size_t>& input_stalk_offsets() const &&=delete;
     std::size_t parameter_count() const noexcept { return basis_ ? basis_->cols() : variables_.size(); }
     std::size_t retained_entries() const noexcept { return retained_; }
     std::size_t preparation_steps() const noexcept { return preparation_steps_; }

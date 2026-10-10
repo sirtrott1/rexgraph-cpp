@@ -1,5 +1,6 @@
 #pragma once
 #include "rfc/learning/context_transport_hypotheses.hpp"
+#include "rfc/learning/context_observation_fields.hpp"
 
 namespace rfc::learning {
 // Accession and reconstruction into an explicitly declared common carrier.
@@ -93,10 +94,11 @@ inline TransportContextViewWitness intersection_inputs(const TransportContextVie
 // Compare full retained stars only on their actual shared represented inputs.
 // Unshared inputs and all original parameter directions remain in the evidence.
 inline TransportContextViewAcquisition acquire_context_transport_views(
-    const PreparedTransportObservations& observations,const std::vector<TransportObservation>& samples,
+    const TransportContextSamples& samples,
     const std::vector<std::size_t>& targets,const std::vector<std::vector<TransportContextView>>& atlas,
     numeric::ExactActionGuard& guard,TransportContextInputScope scope=TransportContextInputScope::FullCarrier) {
     using namespace context_view_detail;
+    const auto& observations=samples.model();
     observations.require_grade_one_profile();
     const auto start=guard.steps();guard.step();
     if(scope!=TransportContextInputScope::FullCarrier && scope!=TransportContextInputScope::ObservedFields)
@@ -125,32 +127,27 @@ inline TransportContextViewAcquisition acquire_context_transport_views(
     std::set<std::size_t> distinct;
     for(const auto row:targets) {guard.step();if(row>=arena.cell_count() || !distinct.insert(row).second)
         throw std::invalid_argument("distinct original target rows required");}
-    const auto offsets=fibers.stalks().offsets(up);
+    out.retained=add(out.retained,samples.retained_entries());admit();
     std::vector<std::vector<std::size_t>> evidence(arena.cell_count());
-    for(std::size_t s=0;s<samples.size();++s) {
-        guard.step();const auto& sample=samples[s];guard.vector(sample.input);guard.vector(sample.target);
-        if(sample.input.size()!=offsets.back() || sample.target.size()!=fibers.stalks().total_dimension(lo) ||
-            sample.observed.size()!=source.grade(lo).cell_count() ||
-            std::any_of(sample.observed.begin(),sample.observed.end(),[](auto bit){return bit>1;}))
-            throw std::invalid_argument("complete Boolean contextual observation fields required");
-        out.retained=add(out.retained,add(sample.input.size(),add(sample.target.size(),sample.observed.size())));admit();
-        for(std::size_t row=0;row<arena.cell_count();++row) {
-            bool input=false,observed=false;
-            for(auto j=offsets[row];j<offsets[row+1];++j) {guard.step();input=input || sample.input[j]!=0;}
-            if(!input) continue;
-            const auto [begin,end]=arena.incidence_range(row);
+    for(std::size_t sample=0;sample<samples.size();++sample) {
+        guard.step();
+        for(const auto row:samples.active_inputs(sample,guard)) {
+            bool observed=false;const auto [begin,end]=arena.incidence_range(row);
             for(auto p=begin;p<end;++p) {guard.step();observed=observed ||
-                (sample.observed[arena.lower_index[p]] && arena.aspects.get(source.signature().existence_aspect(),p) &&
+                (samples.observed(sample,arena.lower_index[p],guard) &&
+                 arena.aspects.get(source.signature().existence_aspect(),p) &&
                  algebra::owned_gluing_detail::coefficient(source,up,p,guard)!=0);}
-            if(observed) {evidence[row].push_back(s);out.retained=add(out.retained,1);admit();}
+            if(observed) {evidence[row].push_back(sample);out.retained=add(out.retained,1);admit();}
         }
     }
     for(std::size_t row=0;row<evidence.size();++row) if(!evidence[row].empty()) out.seed_rows.push_back(row);
     std::map<std::size_t,M> observed_images;
     if(scope==TransportContextInputScope::ObservedFields) for(const auto row:out.seed_rows) {
-        guard.step();M input(offsets[row+1]-offsets[row],evidence[row].size());guard.dimension(evidence[row].size());
-        for(std::size_t j=0;j<evidence[row].size();++j) for(auto i=offsets[row];i<offsets[row+1];++i) {
-            guard.step();input.set(i-offsets[row],j,samples[evidence[row][j]].input[i]);admit(input.nonzeros());
+        guard.step();const auto n=fibers.stalks().dimension({up,static_cast<std::uint32_t>(row)});
+        M input(n,evidence[row].size());guard.dimension(evidence[row].size());
+        for(std::size_t j=0;j<evidence[row].size();++j) {
+            const auto field=samples.input(evidence[row][j],row,guard);admit(add(input.nonzeros(),field.size()));
+            for(std::size_t i=0;i<n;++i) {guard.step();input.set(i,j,field[i]);admit(add(input.nonzeros(),field.size()));}
         }
         const numeric::PreparedExactFrames frames(input,guard);admit(add(input.nonzeros(),frames.stored_entries()));
         auto image=frames.image();out.retained=add(out.retained,add(2,image.nonzeros()));admit();
@@ -245,5 +242,17 @@ inline TransportContextViewAcquisition acquire_context_transport_views(
         out.hypotheses.push_back(std::move(h));result.witnesses.push_back(std::move(witness));admit();
     }
     out.steps=guard.steps()-start;return result;
+}
+inline TransportContextViewAcquisition acquire_context_transport_views(
+    const PreparedTransportObservations& observations,const std::vector<TransportObservation>& samples,
+    const std::vector<std::size_t>& targets,const std::vector<std::vector<TransportContextView>>& atlas,
+    numeric::ExactActionGuard& guard,TransportContextInputScope scope=TransportContextInputScope::FullCarrier) {
+    return acquire_context_transport_views(TransportContextSamples(observations,samples,guard),targets,atlas,guard,scope);
+}
+inline TransportContextViewAcquisition acquire_context_transport_views(
+    const PreparedTransportEvidence& evidence,const std::vector<std::size_t>& targets,
+    const std::vector<std::vector<TransportContextView>>& atlas,numeric::ExactActionGuard& guard,
+    TransportContextInputScope scope=TransportContextInputScope::FullCarrier) {
+    return acquire_context_transport_views(TransportContextSamples(evidence),targets,atlas,guard,scope);
 }
 } // namespace rfc::learning

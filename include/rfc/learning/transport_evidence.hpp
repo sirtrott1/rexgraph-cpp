@@ -274,6 +274,53 @@ public:
     const std::vector<TransportObservation>& observations(Guard& guard) const & {return state_->materialize(guard);}
     std::size_t materialized_field_entries() const noexcept {return state_->materialized_entries.load();}
     std::size_t observation_count() const noexcept {return state_->history.size();}
+    // Read an original stalk without constructing the surrounding field.
+    V input_stalk(std::size_t sample,std::size_t cell,Guard& guard) const {
+        guard.step();const auto& model=*state_->model;
+        const auto& fibers=model.owner().fibers();
+        if(sample>=state_->history.size() || cell>=fibers.complex().grade(model.grade()).cell_count())
+            throw std::invalid_argument("original observation and input stalk required");
+        const auto n=fibers.stalks().dimension({model.grade(),static_cast<std::uint32_t>(cell)});
+        guard.dimension(n);state_->workspace(guard,n);V out(n);
+        const auto& record=state_->history[sample];
+        if(const auto* dense=std::get_if<TransportObservation>(&record)) {
+            const auto& offsets=model.input_stalk_offsets();
+            for(std::size_t i=0;i<n;++i){guard.step();guard.value(dense->input[offsets[cell]+i]);out[i]=dense->input[offsets[cell]+i];}
+        } else {
+            const auto& fields=std::get<TransportColumnObservation>(record).input;
+            const auto found=std::lower_bound(fields.begin(),fields.end(),cell,
+                [](const auto& field,std::size_t wanted){return field.cell<wanted;});
+            if(found!=fields.end() && found->cell==cell)for(const auto& entry:found->tensor.values().entries()) {
+                guard.step();guard.value(entry.value);out[entry.index]=entry.value;
+            }
+        }
+        return out;
+    }
+    std::vector<std::size_t> active_input_stalks(std::size_t sample,Guard& guard) const {
+        guard.step();if(sample>=state_->history.size())throw std::invalid_argument("original observation required");
+        std::vector<std::size_t> out;const auto& record=state_->history[sample];
+        if(const auto* dense=std::get_if<TransportObservation>(&record)) {
+            const auto& offsets=state_->model->input_stalk_offsets();
+            for(std::size_t cell=0;cell+1<offsets.size();++cell) {
+                bool active=false;for(auto i=offsets[cell];i<offsets[cell+1];++i){guard.step();guard.value(dense->input[i]);active=active || dense->input[i]!=0;}
+                if(active){out.push_back(cell);state_->workspace(guard,out.size());}
+            }
+        } else for(const auto& field:std::get<TransportColumnObservation>(record).input) {
+            guard.step();if(field.tensor.stored_nonzeros()){out.push_back(field.cell);state_->workspace(guard,out.size());}
+        }
+        return out;
+    }
+    bool observed_stalk(std::size_t sample,std::size_t cell,Guard& guard) const {
+        guard.step();const auto lower=core::Grade{static_cast<std::uint16_t>(state_->model->grade().value-1)};
+        if(sample>=state_->history.size() || cell>=state_->model->owner().fibers().complex().grade(lower).cell_count())
+            throw std::invalid_argument("original observation and boundary stalk required");
+        const auto& record=state_->history[sample];
+        if(const auto* dense=std::get_if<TransportObservation>(&record))return dense->observed[cell]!=0;
+        const auto& fields=std::get<TransportColumnObservation>(record).target;
+        const auto found=std::lower_bound(fields.begin(),fields.end(),cell,
+            [](const auto& field,std::size_t wanted){return field.cell<wanted;});
+        return found!=fields.end() && found->cell==cell;
+    }
     std::size_t column_observation_count() const noexcept {
         return static_cast<std::size_t>(std::count_if(state_->history.begin(),state_->history.end(),
             [](const auto& item){return std::holds_alternative<TransportColumnObservation>(item);}));
