@@ -27,6 +27,10 @@ struct TransportPatternBankResponse {
     std::vector<numeric::RationalVector> coordinates;
     std::vector<std::size_t> offsets;
 };
+struct TransportPatternSparseCandidate {
+    std::size_t pattern{};
+    std::optional<TransportPatternBankResponse> response;
+};
 struct TransportPatternGluing {
     bool consistent{}, forced{};
     numeric::RationalVector defect_origin, parameter_origin, contradiction;
@@ -225,7 +229,7 @@ class PreparedTransportPatternBank {
         for(auto& [index,q]:sums) {guard.step();out.push_back({index,std::move(q)});}
         return numeric::SparseRationalVector(map.rows(),std::move(out));
     }
-    V input_coordinates(const TransportPatternSparseInput& request,G& guard) const {
+    std::optional<V> sparse_coordinates(const TransportPatternSparseInput& request,G& guard) const {
         using namespace context_view_detail;const auto& s=*state_;const auto& domain=s.domains[request.pattern];
         const auto& tensor=request.value;
         if(request.frame!=s.input_frames[request.pattern] || tensor.domain()!=numeric::IndexDomain::linear(domain.rows()) ||
@@ -235,13 +239,18 @@ class PreparedTransportPatternBank {
         for(const auto& e:tensor.values().entries()) {guard.step();guard.value(e.value);}
         const auto c=sparse_action(s.reconstructions[request.pattern],tensor.values(),guard);
         const auto restored=sparse_action(domain,c,guard);
-        if(restored.entries()!=tensor.values().entries()) throw std::invalid_argument("input outside evidenced bank domain");
+        if(restored.entries()!=tensor.values().entries()) return std::nullopt;
         guard.entries(add(s.retained,add(tensor.values().nonzeros(),c.size())));
         return c.dense();
     }
+    V input_coordinates(const TransportPatternSparseInput& request,G& guard) const {
+        auto coordinates=sparse_coordinates(request,guard);
+        if(!coordinates) throw std::invalid_argument("input outside evidenced bank domain");
+        return std::move(*coordinates);
+    }
     template<class Input>
     M readout(const std::vector<Input>& inputs,G& guard,bool shared,
-        std::vector<V>& coordinates) const {
+        std::vector<V>& coordinates,const std::vector<V>* prepared=nullptr) const {
         using namespace context_view_detail;const auto& s=*state_;guard.step();guard.entries(s.retained);
         if(inputs.empty()) throw std::invalid_argument("nonempty bank input selection required");
         coordinates.resize(s.domains.size());std::set<std::size_t> selected;
@@ -250,7 +259,7 @@ class PreparedTransportPatternBank {
         for(const auto& request:inputs) {
             guard.step();if(request.pattern>=s.domains.size() || !selected.insert(request.pattern).second)
                 throw std::invalid_argument("distinct original bank pattern indices required");
-            auto& c=coordinates[request.pattern];c=input_coordinates(request,guard);
+            auto& c=coordinates[request.pattern];c=prepared?(*prepared)[request.pattern]:input_coordinates(request,guard);
             const auto [begin,end]=arena.incidence_range(request.pattern);
             for(std::size_t p=begin;p<end;++p) {
                 const auto n=s.occurrence_at[p+1]-s.occurrence_at[p];
@@ -392,6 +401,35 @@ public:
     TransportPatternBankResponse response_sparse(const std::vector<TransportPatternSparseInput>& inputs,G& guard,bool shared=true) const {
         std::vector<V> coordinates;const auto map=readout(inputs,guard,shared,coordinates);
         return apply(map,state_->weights,state_->directions,std::move(coordinates),guard,shared);
+    }
+    // Each candidate retains its own full field family. Outside-domain inputs
+    // have no response; invalid declarations and resource failures reject.
+    std::vector<TransportPatternSparseCandidate> response_sparse_candidates(
+        const std::vector<TransportPatternSparseInput>& inputs,G& guard,bool shared=true) const {
+        using namespace context_view_detail;guard.dimension(inputs.size());
+        if(inputs.empty()) throw std::invalid_argument("nonempty sparse bank candidates required");
+        std::vector<TransportPatternSparseCandidate> out;std::set<std::size_t> selected;
+        std::size_t retained=add(state_->retained,inputs.size());
+        for(const auto& input:inputs) {guard.step();retained=add(retained,input.value.values().nonzeros());}
+        guard.entries(retained);
+        for(const auto& input:inputs) {
+            guard.step();
+            if(input.pattern>=state_->domains.size() || !selected.insert(input.pattern).second)
+                throw std::invalid_argument("distinct original bank candidate indices required");
+            TransportPatternSparseCandidate candidate;candidate.pattern=input.pattern;
+            auto value=sparse_coordinates(input,guard);
+            if(value) {
+                std::vector<V> prepared(state_->domains.size()),coordinates;
+                prepared[input.pattern]=std::move(*value);
+                const auto map=readout(std::vector<TransportPatternSparseInput>{input},guard,shared,coordinates,&prepared);
+                candidate.response=apply(map,state_->weights,state_->directions,std::move(coordinates),guard,shared);
+                const auto& response=*candidate.response;
+                retained=add(retained,add(response.origin.size(),add(response.directions.nonzeros(),response.offsets.size())));
+                for(const auto& c:response.coordinates) retained=add(retained,c.size());
+            }
+            guard.entries(retained);out.push_back(std::move(candidate));
+        }
+        return out;
     }
     // One action budget covers the complete batch and its retained responses.
     std::vector<TransportPatternBankResponse> response_sparse_batch(

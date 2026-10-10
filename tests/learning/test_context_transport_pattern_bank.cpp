@@ -124,6 +124,32 @@ void sparse_fields() {
     check(answer.origin==V{Q{6,7}} && small_work.steps()<1000,"sparse inference scanned the ambient carrier");
     std::cout<<"sparse_carrier="<<width<<" nonzeros=2 action_steps="<<small_work.steps()<<'\n';
 }
+void sparse_candidates() {
+    const auto bank=learn(1,true);G guard;
+    const auto inputs=std::vector<learning::TransportPatternSparseInput>{
+        sparse(0,2,{{0,1},{1,1}}),sparse(1,2,{{0,1}}),sparse(2,2,{{0,1},{1,1}})};
+    const auto candidates=bank.response_sparse_candidates(inputs,guard);
+    check(candidates.size()==3 && candidates[0].pattern==0 && candidates[1].pattern==1 &&
+        candidates[2].pattern==2,"candidate order or original identities changed");
+    check(candidates[0].response && !candidates[1].response && candidates[2].response,
+        "outside-domain candidate became a response or suppressed supported candidates");
+    const auto context=bank.response_sparse({inputs[0]},guard),anchor=bank.response_sparse({inputs[2]},guard);
+    check(candidates[0].response->origin==context.origin && candidates[0].response->directions==context.directions &&
+        candidates[0].response->coordinates==context.coordinates && candidates[0].response->offsets==context.offsets,
+        "candidate lost its complete unresolved field family");
+    check(candidates[2].response->origin==anchor.origin && candidates[2].response->directions==anchor.directions,
+        "candidate responses were combined or independently refitted");
+    const auto zero=bank.response_sparse_candidates({sparse(0,2,{})},guard);
+    check(zero[0].response && zero[0].response->origin==V{Q{0}} && !zero[0].response->directions.cols(),
+        "supported zero was treated as outside the evidenced domain");
+    rejects([&]{(void)bank.response_sparse_candidates({},guard);});
+    rejects([&]{(void)bank.response_sparse_candidates({inputs[0],inputs[0]},guard);});
+    rejects([&]{(void)bank.response_sparse_candidates({sparse(3,2,{})},guard);});
+    rejects([&]{(void)bank.response_sparse_candidates({sparse(0,2,{},99)},guard);});
+    rejects([&]{(void)bank.response_sparse_candidates({sparse(0,1,{})},guard);});
+    auto limits=numeric::ExactActionLimits{};limits.steps=1;G bounded(limits);
+    rejects([&]{(void)bank.response_sparse_candidates(inputs,bounded);});
+}
 void family() {
     const auto bank=learn();G guard;
     check(bank.endpoint().source.grade(core::Grade{1}).cell_count()==3 && bank.endpoint().source.grade(core::Grade{0}).cell_count()==1,
@@ -245,5 +271,5 @@ void occurrence_states() {
         "stored occurrence states lost their full field family");
 }
 }
-int main(){try{family();gluing();persistence();admission();occurrence_states();observed_fields();sparse_fields();std::cout<<checks<<" exact pattern bank assertions passed\n";}
+int main(){try{family();gluing();persistence();admission();occurrence_states();observed_fields();sparse_fields();sparse_candidates();std::cout<<checks<<" exact pattern bank assertions passed\n";}
 catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
