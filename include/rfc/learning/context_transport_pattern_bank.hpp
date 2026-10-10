@@ -10,6 +10,11 @@ struct TransportPatternInput {
     std::size_t pattern{};
     numeric::RationalVector value;
 };
+struct TransportPatternSparseInput {
+    std::size_t pattern{};
+    std::uint64_t frame{};
+    numeric::SparseRationalTensor value;
+};
 struct TransportPatternComparison {
     std::string name;
     std::size_t left{}, right{};
@@ -41,6 +46,7 @@ class PreparedTransportPatternBank {
     struct State {
         storage::TemporalEndpoint endpoint;
         std::vector<M> domains, reconstructions;
+        std::vector<std::uint64_t> input_frames;
         V weights;
         M directions;
         TransportPatternProvenance provenance;
@@ -137,6 +143,7 @@ class PreparedTransportPatternBank {
                     guard.dimension(occurrence_at.back());guard.dimension(weights_at.back());
                 }
                 domains.push_back(std::move(domain));reconstructions.push_back(std::move(reconstruction));
+                input_frames.push_back(carriers.at(3+count+i)->coordinate_system);
             }
             if(touched.size()!=lower || weights_at.back()!=weights.size()) throw std::invalid_argument("complete bank occurrence weights required");
             const numeric::PreparedExactFrames unknown(directions,guard);
@@ -159,7 +166,7 @@ class PreparedTransportPatternBank {
             for(const auto& t:endpoint.tensors) {
                 retained=add(retained,add(10,add(t.interpretation.size(),add(t.tensor.values().nonzeros(),t.tensor.domain().rank()))));guard.entries(retained);
             }
-            retained=add(retained,add(66,add(lower_at.size(),add(owners.size(),add(weights_at.size(),occurrence_at.size())))));
+            retained=add(retained,add(input_frames.size(),add(66,add(lower_at.size(),add(owners.size(),add(weights_at.size(),occurrence_at.size()))))));
             if(endpoint.tensors.size()==count+4) {
                 if(!tensors.contains(4)) throw std::invalid_argument("bank frame declarations missing");
                 const auto& t=*tensors.at(4);const std::string prefix="rfc.context-transport-pattern-bank.frames.v1:";
@@ -193,7 +200,47 @@ class PreparedTransportPatternBank {
     std::shared_ptr<const State> state_;
     explicit PreparedTransportPatternBank(storage::TemporalEndpoint endpoint,G& guard)
         :state_(std::make_shared<const State>(std::move(endpoint),guard)) {}
-    M readout(const std::vector<TransportPatternInput>& inputs,G& guard,bool shared,
+    V input_coordinates(const TransportPatternInput& request,G& guard) const {
+        const auto& s=*state_;const auto input=guard.canonical_input(request.value);
+        const auto& domain=s.domains[request.pattern];
+        if(input.size()!=domain.rows()) throw std::invalid_argument("declared bank common input required");
+        auto c=numeric::checked_apply(s.reconstructions[request.pattern],input,guard);
+        if(numeric::checked_apply(domain,c,guard)!=input) throw std::invalid_argument("input outside evidenced bank domain");
+        return c;
+    }
+    numeric::SparseRationalVector sparse_action(const M& map,const numeric::SparseRationalVector& input,G& guard) const {
+        using namespace context_view_detail;
+        if(map.cols()!=input.size()) throw std::invalid_argument("sparse bank action dimensions");
+        guard.dimension(map.rows());guard.dimension(map.cols());
+        const auto& values=input.entries();std::map<std::size_t,Q> sums;
+        for(const auto& [key,q]:map.entries()) {
+            guard.step();const auto it=std::lower_bound(values.begin(),values.end(),key.second,
+                [](const auto& entry,std::size_t index){return entry.index<index;});
+            if(it==values.end() || it->index!=key.second) continue;
+            const auto value=guard.add(sums[key.first],guard.mul(q,it->value));
+            if(value==0) sums.erase(key.first);else sums[key.first]=value;
+            guard.entries(add(state_->retained,add(input.nonzeros(),sums.size())));
+        }
+        std::vector<numeric::SparseRationalEntry> out;out.reserve(sums.size());
+        for(auto& [index,q]:sums) {guard.step();out.push_back({index,std::move(q)});}
+        return numeric::SparseRationalVector(map.rows(),std::move(out));
+    }
+    V input_coordinates(const TransportPatternSparseInput& request,G& guard) const {
+        using namespace context_view_detail;const auto& s=*state_;const auto& domain=s.domains[request.pattern];
+        const auto& tensor=request.value;
+        if(request.frame!=s.input_frames[request.pattern] || tensor.domain()!=numeric::IndexDomain::linear(domain.rows()) ||
+            tensor.support().count()!=domain.rows())
+            throw std::invalid_argument("complete sparse field on the declared bank common frame required");
+        guard.dimension(domain.rows());guard.entries(add(s.retained,tensor.values().nonzeros()));
+        for(const auto& e:tensor.values().entries()) {guard.step();guard.value(e.value);}
+        const auto c=sparse_action(s.reconstructions[request.pattern],tensor.values(),guard);
+        const auto restored=sparse_action(domain,c,guard);
+        if(restored.entries()!=tensor.values().entries()) throw std::invalid_argument("input outside evidenced bank domain");
+        guard.entries(add(s.retained,add(tensor.values().nonzeros(),c.size())));
+        return c.dense();
+    }
+    template<class Input>
+    M readout(const std::vector<Input>& inputs,G& guard,bool shared,
         std::vector<V>& coordinates) const {
         using namespace context_view_detail;const auto& s=*state_;guard.step();guard.entries(s.retained);
         if(inputs.empty()) throw std::invalid_argument("nonempty bank input selection required");
@@ -203,10 +250,7 @@ class PreparedTransportPatternBank {
         for(const auto& request:inputs) {
             guard.step();if(request.pattern>=s.domains.size() || !selected.insert(request.pattern).second)
                 throw std::invalid_argument("distinct original bank pattern indices required");
-            const auto input=guard.canonical_input(request.value);const auto& domain=s.domains[request.pattern];
-            if(input.size()!=domain.rows()) throw std::invalid_argument("declared bank common input required");
-            auto& c=coordinates[request.pattern];c=numeric::checked_apply(s.reconstructions[request.pattern],input,guard);
-            if(numeric::checked_apply(domain,c,guard)!=input) throw std::invalid_argument("input outside evidenced bank domain");
+            auto& c=coordinates[request.pattern];c=input_coordinates(request,guard);
             const auto [begin,end]=arena.incidence_range(request.pattern);
             for(std::size_t p=begin;p<end;++p) {
                 const auto n=s.occurrence_at[p+1]-s.occurrence_at[p];
@@ -345,12 +389,45 @@ public:
         std::vector<V> coordinates;const auto map=readout(inputs,guard,shared,coordinates);
         return apply(map,state_->weights,state_->directions,std::move(coordinates),guard,shared);
     }
+    TransportPatternBankResponse response_sparse(const std::vector<TransportPatternSparseInput>& inputs,G& guard,bool shared=true) const {
+        std::vector<V> coordinates;const auto map=readout(inputs,guard,shared,coordinates);
+        return apply(map,state_->weights,state_->directions,std::move(coordinates),guard,shared);
+    }
+    // One action budget covers the complete batch and its retained responses.
+    std::vector<TransportPatternBankResponse> response_sparse_batch(
+        const std::vector<std::vector<TransportPatternSparseInput>>& batch,G& guard,bool shared=true) const {
+        using namespace context_view_detail;guard.dimension(batch.size());
+        if(batch.empty()) throw std::invalid_argument("nonempty sparse bank batch required");
+        std::vector<TransportPatternBankResponse> out;std::size_t retained=add(state_->retained,batch.size());
+        for(const auto& inputs:batch) {
+            guard.step();retained=add(retained,inputs.size());
+            for(const auto& input:inputs) {guard.step();retained=add(retained,input.value.values().nonzeros());}
+            guard.entries(retained);
+        }
+        for(const auto& inputs:batch) {
+            auto response=response_sparse(inputs,guard,shared);
+            retained=add(retained,add(response.origin.size(),add(response.directions.nonzeros(),response.offsets.size())));
+            for(const auto& c:response.coordinates) retained=add(retained,c.size());
+            guard.entries(retained);out.push_back(std::move(response));
+        }
+        return out;
+    }
     // Restriction maps compare unscaled occurrence fields in declared interfaces.
     // Shared source cells require equal complete local fields and appear once
     // in the glued section. Signed boundary assembly is a separate response.
     // Inconsistent comparisons return an exact left-kernel witness.
     TransportPatternGluing glue(const std::vector<TransportPatternInput>& inputs,
         const std::vector<TransportPatternComparison>& comparisons,G& guard,bool shared=true) const {
+        return glue_impl(inputs,comparisons,guard,shared);
+    }
+    TransportPatternGluing glue_sparse(const std::vector<TransportPatternSparseInput>& inputs,
+        const std::vector<TransportPatternComparison>& comparisons,G& guard,bool shared=true) const {
+        return glue_impl(inputs,comparisons,guard,shared);
+    }
+private:
+    template<class Input>
+    TransportPatternGluing glue_impl(const std::vector<Input>& inputs,
+        const std::vector<TransportPatternComparison>& comparisons,G& guard,bool shared) const {
         using namespace context_view_detail;const auto& s=*state_;
         std::vector<V> coordinates;const auto unscaled=readout(inputs,guard,false,coordinates);
         std::set<std::size_t> selected;for(const auto& i:inputs) selected.insert(i.pattern);

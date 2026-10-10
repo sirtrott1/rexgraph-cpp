@@ -66,6 +66,64 @@ void observed_fields() {
     check(larger.weights()==bank.weights() && larger.parameter_directions()==bank.parameter_directions(),"repeated fields changed observable parameters");
     check(learning::encode_transport_pattern_bank(larger,476).size()<=bytes.size()+8,"observed bank stored its samples");
 }
+learning::TransportPatternSparseInput sparse(std::size_t pattern,std::size_t size,
+    std::vector<numeric::SparseRationalEntry> entries,std::uint64_t frame=2) {
+    return {pattern,frame,numeric::SparseRationalTensor(numeric::IndexDomain::linear(size),
+        numeric::StructuralSupport::full(size),numeric::SparseRationalVector(size,std::move(entries)))};
+}
+void sparse_fields() {
+    const auto bank=learn(1,true);G guard;
+    const auto a=sparse(0,2,{{0,Q{3,7}},{1,Q{3,7}}}),b=sparse(1,2,{{0,Q{-3,7}},{1,Q{-3,7}}});
+    const auto dense=bank.response({{0,{Q{3,7},Q{3,7}}},{1,{Q{-3,7},Q{-3,7}}}},guard);
+    const auto field=bank.response_sparse({a,b},guard);
+    check(field.origin==dense.origin && field.directions==dense.directions && field.coordinates==dense.coordinates && field.offsets==dense.offsets,
+        "sparse input changed the complete joint family");
+    const auto zero=bank.response_sparse({sparse(0,2,{})},guard);
+    check(zero.origin==V{Q{0}} && !zero.directions.cols(),"complete supported sparse zero became unknown");
+    const auto anchor=sparse(2,2,{{0,1},{1,1}}),context=sparse(0,2,{{0,1},{1,1}});
+    const auto glued=bank.glue_sparse({context,anchor},{comparison("anchor",0,2)},guard);
+    const auto old=bank.glue({{0,{1,1}},{2,{1,1}}},{comparison("anchor",0,2)},guard);
+    check(glued.parameter_origin==old.parameter_origin && glued.parameter_directions==old.parameter_directions &&
+        glued.section->origin==old.section->origin && glued.boundary_response->origin==old.boundary_response->origin,
+        "sparse gluing changed conditional sections or boundary assembly");
+    const auto conflict=bank.glue_sparse({context,anchor},{comparison("first",0,2),comparison("second",0,2,Q{1,2})},guard);
+    check(!conflict.consistent && !conflict.section && dot(conflict.defect_origin,conflict.contradiction,guard)!=0,
+        "sparse contradiction lost its exact witness");
+    const std::vector<std::vector<learning::TransportPatternSparseInput>> batch{{a,b},{anchor},{sparse(0,2,{})}};
+    const auto all=bank.response_sparse_batch(batch,guard);
+    check(all.size()==3 && all[0].origin==field.origin && all[1].origin==V{Q{2}} && all[2].directions.cols()==0,
+        "sparse batch changed a field response");
+    rejects([&]{G g;(void)bank.response_sparse_batch({},g);});
+    rejects([&]{G g;(void)bank.response_sparse_batch({{a},{sparse(0,2,{{0,1}})}},g);});
+    rejects([&]{G g;(void)bank.response_sparse({sparse(0,2,{{0,1},{1,1}},99)},g);});
+    rejects([&]{G g;(void)bank.response_sparse({sparse(0,1,{{0,1}})},g);});
+    rejects([&]{G g;(void)bank.response_sparse({a,a},g);});
+    rejects([&]{auto partial=a;partial.value=numeric::SparseRationalTensor::zero(numeric::IndexDomain::linear(2),
+        numeric::StructuralSupport::sparse(2,{}));G g;(void)bank.response_sparse({partial},g);});
+    G counted;(void)bank.response_sparse({a},counted);
+    numeric::ExactActionLimits limits;limits.steps=counted.steps()+4;
+    rejects([&]{G g(limits);(void)bank.response_sparse_batch({{a},{a}},g);});
+    limits={};limits.entries=bank.retained_entries()+10;
+    rejects([&]{G g(limits);(void)bank.response_sparse_batch({{a},{a},{a},{a}},g);});
+    rejects([&]{G g({},[]{throw std::runtime_error("cancelled");});(void)bank.response_sparse({a},g);});
+    const auto bytes=learning::encode_transport_pattern_bank(bank,479);
+    const auto loaded=learning::decode_transport_pattern_bank(bytes,479,guard);
+    check(loaded.response_sparse({a,b},guard).directions==field.directions &&
+        learning::encode_transport_pattern_bank(loaded,479)==bytes,"sparse execution changed canonical bank storage");
+    std::vector<std::future<V>> jobs;
+    for(int i=0;i<4;++i)jobs.push_back(std::async(std::launch::async,[loaded,anchor]{G g;return loaded.response_sparse({anchor},g).origin;}));
+    for(auto& job:jobs)check(job.get()==V{Q{2}},"concurrent sparse owning inference changed");
+    auto endpoint=bank.endpoint();const std::size_t width=65536;
+    endpoint.tensors.erase(std::remove_if(endpoint.tensors.begin(),endpoint.tensors.end(),[](const auto& t){return t.key==4;}),endpoint.tensors.end());
+    for(auto& c:endpoint.carriers)if(c.key>=6 && c.key<=8){c.domain=numeric::IndexDomain::linear(width);c.coordinate_system=999;}
+    for(auto& t:endpoint.tensors)if(t.key>=5){auto old_image=storage::temporal_tensor_matrix(t);M image(width,old_image.cols());
+        for(const auto& [key,q]:old_image.entries())image.set(key.first?width-1:0,key.second,q);t.tensor=storage::temporal_matrix_tensor(image);}
+    limits={};limits.dimension=width;G wide_guard(limits);
+    const auto wide=learning::PreparedTransportPatternBank::from_endpoint(std::move(endpoint),wide_guard);
+    G small_work(limits);const auto answer=wide.response_sparse({sparse(2,width,{{0,Q{3,7}},{width-1,Q{3,7}}},999)},small_work);
+    check(answer.origin==V{Q{6,7}} && small_work.steps()<1000,"sparse inference scanned the ambient carrier");
+    std::cout<<"sparse_carrier="<<width<<" nonzeros=2 action_steps="<<small_work.steps()<<'\n';
+}
 void family() {
     const auto bank=learn();G guard;
     check(bank.endpoint().source.grade(core::Grade{1}).cell_count()==3 && bank.endpoint().source.grade(core::Grade{0}).cell_count()==1,
@@ -187,5 +245,5 @@ void occurrence_states() {
         "stored occurrence states lost their full field family");
 }
 }
-int main(){try{family();gluing();persistence();admission();occurrence_states();observed_fields();std::cout<<checks<<" exact pattern bank assertions passed\n";}
+int main(){try{family();gluing();persistence();admission();occurrence_states();observed_fields();sparse_fields();std::cout<<checks<<" exact pattern bank assertions passed\n";}
 catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
