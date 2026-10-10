@@ -14,29 +14,57 @@ void check(bool ok,const char* message){++checks;if(!ok)throw std::runtime_error
 M column(std::initializer_list<Q> values){M out(values.size(),1);std::size_t i{};for(const auto& q:values)out.set(i++,0,q);return out;}
 Q dot(const V& a,const V& b,G& guard){Q out;for(std::size_t i=0;i<a.size();++i)out=guard.add(out,guard.mul(a[i],b[i]));return out;}
 template<class F>void rejects(F&& f){bool rejected=false;try{f();}catch(const std::exception&){rejected=true;}check(rejected,"invalid bank accepted");}
-auto learn(std::size_t repetitions=1) {
+auto learn(std::size_t repetitions=1,bool observed_inputs=false) {
     G guard;core::RelationSignature signature;
     const auto a=signature.add_type("context",core::BoundaryPolicy::DeclaredExact,0,1);
     const auto b=signature.add_type("anchor",core::BoundaryPolicy::DeclaredExact,0,1);
     core::RelationalComplexBuilder builder(signature);
     for(std::size_t i=0;i<6;++i) builder.add_grade_one(i<3?a:b,{{0,true,false,Q{1},{}}});
-    const auto source=builder.freeze();local::LinearStalkBundle stalks(source);local::LinearRelationalFiberSystem fibers(stalks);
+    const auto source=builder.freeze();local::LinearStalkBundle stalks(source);
+    const auto dimension=observed_inputs?2u:1u;
+    for(std::size_t row=0;row<6;++row)stalks.set_dimension({core::Grade{1},static_cast<std::uint32_t>(row)},dimension);
+    local::LinearRelationalFiberSystem fibers(stalks);
     std::vector<learning::TransportCoordinate> entries;
-    for(std::size_t p=0;p<6;++p){fibers.set_transport(core::Grade{1},p,M(1,1));entries.push_back({p,0,0});}
+    for(std::size_t p=0;p<6;++p){fibers.set_transport(core::Grade{1},p,M(1,dimension));
+        for(std::size_t j=0;j<dimension;++j)entries.push_back({p,0,j});}
     learning::PreparedTransportObservations observations(local::OwnedLinearFiberSystem(fibers),{},entries,guard);
     std::vector<learning::TransportObservation> samples;
     for(std::size_t r=0;r<repetitions;++r) {
         for(const auto i:{1u,2u}) {learning::TransportObservation s;s.input=V(6);s.input[0]=-1;s.input[i]=1;s.target={0};s.observed={1};samples.push_back(std::move(s));}
         for(std::size_t i=3;i<6;++i){learning::TransportObservation s;s.input=V(6);s.input[i]=Q{1,2};s.target={1};s.observed={1};samples.push_back(std::move(s));}
     }
+    if(observed_inputs)for(auto& s:samples) {
+        V input(12);for(std::size_t i=0;i<6;++i)input[2*i]=input[2*i+1]=s.input[i];s.input=std::move(input);
+    }
     std::vector<std::vector<learning::TransportContextView>> atlas(2);atlas[0].push_back({1,M::identity(1),M::identity(1)});
-    for(std::size_t i=0;i<6;++i)atlas[1].push_back({2,M::identity(1),M::identity(1)});
+    for(std::size_t i=0;i<6;++i)atlas[1].push_back({2,M::identity(dimension),M::identity(dimension)});
     learning::TransportPatternProvenance p;p.source_sha256.fill(std::byte{7});p.evidence_sha256.fill(std::byte{11});
-    return learning::PreparedTransportPatternBank::learn(observations,samples,{0,1,2,3,4,5},{0,1,3},atlas,2,{101,102,{100,103,104}},p,guard)
-        .with_frame_labels({{1,"reading",{"value"}},{2,"context",{"signal"}}},guard);
+    return learning::PreparedTransportPatternBank::learn(observations,samples,{0,1,2,3,4,5},{0,1,3},atlas,2,{101,102,{100,103,104}},p,guard,
+        observed_inputs?learning::TransportContextInputScope::ObservedFields:learning::TransportContextInputScope::FullCarrier)
+        .with_frame_labels({{1,"reading",{"value"}},{2,"context",observed_inputs?std::vector<std::string>{"signal","context"}:std::vector<std::string>{"signal"}}},guard);
 }
 auto comparison(std::string name,std::size_t left,std::size_t right,Q right_gain=1) {
     return learning::TransportPatternComparison{std::move(name),left,right,1,1,1,column({1}),column({right_gain})};
+}
+void observed_fields() {
+    G guard;const auto bank=learn(1,true);
+    for(const auto& domain:bank.input_images())check(domain.rows()==2 && domain.cols()==1 &&
+        domain.get(0,0)!=0 && domain.get(0,0)==domain.get(1,0),"observed bank discarded complete input carriers");
+    check(bank.parameter_directions().cols()==1 && bank.response({{2,{1,1}}},guard).origin==V{Q{2}},"observable correlation changed");
+    const auto cancelled=bank.response({{0,{1,1}},{1,{-1,-1}}},guard);
+    check(cancelled.origin==V{Q{0}} && !cancelled.directions.cols(),"observed joint directions were independently filled");
+    check(bank.response({{0,{1,1}}},guard).directions.cols()==1,"observable unknown became a known weight");
+    rejects([&]{(void)bank.response({{0,{1,0}}},guard);});
+    const auto glued=bank.glue({{0,{1,1}},{2,{1,1}}},{comparison("anchor",0,2)},guard);
+    check(glued.section->origin==V{Q{2}} && glued.boundary_response->origin==V{Q{4}},"observed gluing replaced boundary addition");
+    const auto bytes=learning::encode_transport_pattern_bank(bank,476);
+    const auto loaded=learning::decode_transport_pattern_bank(bytes,476,guard);
+    check(loaded.parameter_directions()==bank.parameter_directions() && loaded.input_images()==bank.input_images(),"cold observed bank changed domains or parameters");
+    check(loaded.frame_labels()[1].axes==std::vector<std::string>({"signal","context"}),"unobserved direction label was discarded");
+    rejects([&]{(void)loaded.response({{0,{1,0}}},guard);});
+    const auto larger=learn(100,true);
+    check(larger.weights()==bank.weights() && larger.parameter_directions()==bank.parameter_directions(),"repeated fields changed observable parameters");
+    check(learning::encode_transport_pattern_bank(larger,476).size()<=bytes.size()+8,"observed bank stored its samples");
 }
 void family() {
     const auto bank=learn();G guard;
@@ -159,5 +187,5 @@ void occurrence_states() {
         "stored occurrence states lost their full field family");
 }
 }
-int main(){try{family();gluing();persistence();admission();occurrence_states();std::cout<<checks<<" exact pattern bank assertions passed\n";}
+int main(){try{family();gluing();persistence();admission();occurrence_states();observed_fields();std::cout<<checks<<" exact pattern bank assertions passed\n";}
 catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

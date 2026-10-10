@@ -154,6 +154,39 @@ void admission() {
         G g(limits);(void)p.response({Q{2,3},Q{-3,7},0,0},g);});
     rejects([&]{G g({},[]{throw std::runtime_error("cancelled");});(void)p.response({0,0,0,0},g);});
 }
+void observed_fields() {
+    G guard;const auto owner=observations(guard);
+    std::vector<learning::TransportObservation> data;
+    const std::vector<std::size_t> at{0,3,5};
+    for(const auto start:at) {
+        learning::TransportObservation s;s.input=V(10);s.input[start]=s.input[start+1]=1;
+        s.target=V(8);s.observed=std::vector<std::size_t>(8);
+        const auto row=data.size();s.target[2*row]=5;s.target[2*row+1]=-5;
+        s.observed[2*row]=s.observed[2*row+1]=1;data.push_back(std::move(s));
+    }
+    const auto compile=[&](const auto& samples,learning::TransportContextInputScope scope) {
+        return learning::PreparedTransportPattern::learn(owner,samples,{0,1,2},0,atlas(),2,
+            {100,101,102},provenance(samples.size()),guard,scope);
+    };
+    rejects([&]{(void)compile(data,learning::TransportContextInputScope::FullCarrier);});
+    const auto pattern=compile(data,learning::TransportContextInputScope::ObservedFields);
+    M domain(4,1);domain.set(0,0,1);domain.set(1,0,1);
+    check(pattern.input_image()==domain,"observed line replaced its complete common carrier");
+    check(pattern.weights()==V({5,10}) && !pattern.parameter_directions().cols(),"observable learned weights changed");
+    check(pattern.response({2,2,0,0},guard).origin==V({10,-10}),"observed field response changed");
+    rejects([&]{(void)pattern.response({1,0,0,0},guard);});
+    rejects([&]{(void)pattern.response({0,0,1,0},guard);});
+    rejects([&]{(void)compile(data,static_cast<learning::TransportContextInputScope>(99));});
+    const auto bytes=learning::encode_transport_pattern(pattern,475);
+    const auto loaded=learning::decode_transport_pattern(bytes,475,guard);
+    check(loaded.response({2,2,0,0},guard).origin==V({10,-10}),"cold observed field response changed");
+    rejects([&]{(void)loaded.response({1,0,0,0},guard);});
+    std::vector<learning::TransportObservation> repeated;
+    for(int i=0;i<100;++i) repeated.insert(repeated.end(),data.begin(),data.end());
+    const auto larger=compile(repeated,learning::TransportContextInputScope::ObservedFields);
+    check(larger.weights()==pattern.weights() && larger.input_image()==domain,"repeated fields changed observable learning");
+    check(learning::encode_transport_pattern(larger,475).size()<=bytes.size()+8,"observed pattern retained training fields");
 }
-int main() {try {learned_family();persistence();labels();admission();std::cout<<checks<<" exact learned pattern assertions passed\n";}
+}
+int main() {try {learned_family();persistence();labels();admission();observed_fields();std::cout<<checks<<" exact learned pattern assertions passed\n";}
     catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}}

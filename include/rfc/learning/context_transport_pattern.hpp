@@ -195,9 +195,10 @@ public:
         const std::vector<TransportObservation>& samples,const std::vector<std::size_t>& training,
         std::size_t origin,const std::vector<std::vector<TransportContextView>>& atlas,
         std::size_t minimum_peers,TransportPatternCoordinates coordinates,
-        TransportPatternProvenance provenance,G& guard) {
+        TransportPatternProvenance provenance,G& guard,
+        TransportContextInputScope scope=TransportContextInputScope::FullCarrier) {
         using namespace context_view_detail;
-        const auto acquired=acquire_context_transport_view_rules(observations,samples,training,{},atlas,minimum_peers,guard);
+        const auto acquired=acquire_context_transport_view_rules(observations,samples,training,{},atlas,minimum_peers,guard,scope);
         const auto rule=std::find_if(acquired.rules.begin(),acquired.rules.end(),[&](const auto& r){return r.origin==origin;});
         if(rule==acquired.rules.end() || !rule->admitted || !acquired.proof)
             throw std::invalid_argument("independently admitted training origin required");

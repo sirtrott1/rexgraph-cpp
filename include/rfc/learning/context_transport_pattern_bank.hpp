@@ -234,12 +234,13 @@ public:
     static PreparedTransportPatternBank learn(const PreparedTransportObservations& observations,
         const std::vector<TransportObservation>& samples,const std::vector<std::size_t>& training,
         const std::vector<std::size_t>& origins,const std::vector<std::vector<TransportContextView>>& atlas,
-        std::size_t minimum_peers,TransportPatternBankCoordinates coordinates,TransportPatternProvenance provenance,G& guard) {
+        std::size_t minimum_peers,TransportPatternBankCoordinates coordinates,TransportPatternProvenance provenance,G& guard,
+        TransportContextInputScope scope=TransportContextInputScope::FullCarrier) {
         using namespace context_view_detail;
         if(origins.empty() || origins.size()!=coordinates.domains.size() ||
             !std::is_sorted(origins.begin(),origins.end()) || std::adjacent_find(origins.begin(),origins.end())!=origins.end())
             throw std::invalid_argument("ordered distinct bank origins and domain identities required");
-        const auto acquired=acquire_context_transport_view_rules(observations,samples,training,{},atlas,minimum_peers,guard);
+        const auto acquired=acquire_context_transport_view_rules(observations,samples,training,{},atlas,minimum_peers,guard,scope);
         if(!acquired.proof) throw std::invalid_argument("independently admitted bank training required");
         const auto& source=observations.owner().fibers().complex();algebra::SubcomplexMask patch(source);
         for(const auto origin:origins) patch.select({core::Grade{1},static_cast<std::uint32_t>(origin)});
