@@ -1,5 +1,8 @@
 #pragma once
-#include "rfc/learning/transport_observations.hpp"
+#include "rfc/learning/column_transport_observations.hpp"
+#include <mutex>
+#include <variant>
+#include <atomic>
 
 namespace rfc::learning {
 struct TransportEvidenceUpdate {
@@ -18,7 +21,12 @@ class PreparedTransportEvidence {
         std::shared_ptr<const PreparedTransportObservations> model;
         numeric::ExactActionLimits limits;
         std::shared_ptr<const M> fixed_equations;
-        std::vector<TransportObservation> observations;
+        using Observation=std::variant<TransportObservation,TransportColumnObservation>;
+        std::vector<Observation> history;
+        std::shared_ptr<const PreparedColumnTransportObservations> columns;
+        mutable std::once_flag materialization;
+        mutable std::vector<TransportObservation> whole_fields;
+        mutable std::atomic<std::size_t> materialized_entries{},materialization_steps{};
         TransportObservationSystem system;
         std::map<std::size_t,Row> rows, observation_rows;
         V particular;
@@ -31,6 +39,7 @@ class PreparedTransportEvidence {
         static std::size_t add(std::size_t a,std::size_t b) {return machine::checked_size_add(a,b);}
         std::size_t retained() const {
             auto count=add(model->retained_entries(),input_entries);
+            if(columns)count=add(count,columns->retained_entries()-model->retained_entries());
             for(const auto n:{system.design.nonzeros(),system.augmented.nonzeros(),system.target.size(),
                     machine::checked_size_mul(system.constraints.size(),3),row_entries,rows.size(),
                     particular.size(),kernel.nonzeros(),pivots.size(),free_columns.size()}) count=add(count,n);
@@ -40,14 +49,14 @@ class PreparedTransportEvidence {
             return count;
         }
         void workspace(Guard& guard,std::size_t scratch=0) const {
-            guard.entries(add(add(retained(),copied_entries),scratch));
+            guard.entries(add(add(add(retained(),materialized_entries.load()),copied_entries),scratch));
         }
         void admit(Guard& guard) const {
             const auto& requested=guard.limits();
             if(requested.dimension!=limits.dimension || requested.entries!=limits.entries ||
                     requested.steps!=limits.steps || requested.integer_bits!=limits.integer_bits)
                 throw std::invalid_argument("transport evidence append requires its original action limits");
-            guard.dimension(add(model->parameter_count(),1));guard.dimension(observations.size());
+            guard.dimension(add(model->parameter_count(),1));guard.dimension(history.size());
             guard.matrix(system.design);guard.matrix(system.augmented);guard.vector(system.target);
             workspace(guard);
         }
@@ -74,21 +83,29 @@ class PreparedTransportEvidence {
             finish(guard);
             initial_steps=guard.steps()-start;
         }
-        State(const State& parent,const std::vector<TransportObservation>& suffix,Guard& guard)
+        template<class ObservationType>
+        State(const State& parent,const std::vector<ObservationType>& suffix,Guard& guard)
             :model(parent.model),limits(parent.limits),fixed_equations(parent.fixed_equations),kernel(model->parameter_count(),0) {
             const auto start=guard.steps();guard.step();parent.admit(guard);
             if(suffix.empty()) throw std::invalid_argument("nonempty original observation suffix required");
-            guard.dimension(add(parent.observations.size(),suffix.size()));
-            guard.entries(machine::checked_size_mul(parent.retained(),2));
-            observations=parent.observations;system=parent.system;rows=parent.rows;observation_rows=parent.observation_rows;
+            guard.dimension(add(parent.history.size(),suffix.size()));
+            guard.entries(add(machine::checked_size_mul(parent.retained(),2),parent.materialized_entries.load()));
+            history=parent.history;columns=parent.columns;system=parent.system;rows=parent.rows;observation_rows=parent.observation_rows;
             observation_row_entries=parent.observation_row_entries;fixed_rank=parent.fixed_rank;
             input_entries=parent.input_entries;row_entries=parent.row_entries;history_steps=parent.history_steps;
             initial_steps=parent.initial_steps;
-            copied_entries=parent.retained();workspace(guard);
+            if constexpr(std::is_same_v<ObservationType,TransportColumnObservation>) {
+                if(!columns) {
+                    const auto preparing=guard.steps();
+                    columns=std::make_shared<const PreparedColumnTransportObservations>(model,guard);
+                    initial_steps=add(initial_steps,guard.steps()-preparing);
+                }
+            }
+            copied_entries=add(parent.retained(),parent.materialized_entries.load());workspace(guard);
             for(const auto& observation:suffix) append(observation,guard);
             finish(guard);copied_entries=0;
             if(replay_steps()>limits.steps)throw std::length_error("complete transport evidence replay exceeds step admission");
-            update={parent.observations.size(),suffix.size(),guard.steps()-start};
+            update={parent.history.size(),suffix.size(),guard.steps()-start};
         }
         void change(Row& row,std::size_t column,Q value,Guard& guard,std::size_t scratch,std::size_t& retained_rows) {
             const auto found=row.find(column);
@@ -134,12 +151,20 @@ class PreparedTransportEvidence {
             workspace(guard,add(external,add(row.size(),1)));retained_rows=add(retained_rows,row.size());
             if(!family.emplace(pivot,std::move(row)).second) throw std::logic_error("duplicate transport evidence pivot");
         }
-        void append(const TransportObservation& observation,Guard& guard) {
+        template<class ObservationType>
+        void append(const ObservationType& observation,Guard& guard) {
             const auto start=guard.steps();
-            auto block=model->assemble({observation},guard);
+            TransportObservationSystem block;
+            std::size_t entries{};
+            if constexpr(std::is_same_v<ObservationType,TransportColumnObservation>) {
+                block=columns->assemble({observation},guard);entries=columns->observation_entries(observation);
+            } else {
+                block=model->assemble({observation},guard);
+                entries=add(observation.input.size(),add(observation.target.size(),observation.observed.size()));
+            }
             const auto offset=system.design.rows(),count=add(offset,block.design.rows()),n=model->parameter_count();
-            guard.dimension(count);guard.dimension(add(observations.size(),1));
-            input_entries=add(input_entries,add(observation.input.size(),add(observation.target.size(),observation.observed.size())));
+            guard.dimension(count);guard.dimension(add(history.size(),1));
+            input_entries=add(input_entries,entries);
             workspace(guard,add(block.design.nonzeros(),block.augmented.nonzeros()));
             M design(count,n),augmented(count,add(n,1));
             for(const auto* original:{&system.design,&system.augmented}) {
@@ -158,7 +183,7 @@ class PreparedTransportEvidence {
             }
             for(const auto& value:block.target){guard.step();system.target.push_back(value);workspace(guard);}
             for(const auto& constraint:block.constraints) {
-                guard.step();system.constraints.push_back({observations.size(),constraint.cell,constraint.axis});workspace(guard);
+                guard.step();system.constraints.push_back({history.size(),constraint.cell,constraint.axis});workspace(guard);
             }
             auto next=block.augmented.entries().begin();
             for(std::size_t i=0;i<block.augmented.rows();++i) {
@@ -169,7 +194,7 @@ class PreparedTransportEvidence {
                 if(fixed_equations)insert(row,guard,true,row.size());
                 insert(std::move(row),guard);
             }
-            observations.push_back(observation);workspace(guard);
+            history.emplace_back(observation);workspace(guard);
             history_steps=add(history_steps,guard.steps()-start);
         }
         void finish(Guard& guard) {
@@ -200,8 +225,32 @@ class PreparedTransportEvidence {
                 throw std::logic_error("fixed transport equation family certificate failed");
             workspace(guard);family_steps=guard.steps()-start;
         }
+        const std::vector<TransportObservation>& materialize(Guard& guard) const {
+            guard.step();std::size_t complete{};
+            const auto& fibers=model->owner().fibers();
+            for(const auto grade:{core::Grade{static_cast<std::uint16_t>(model->grade().value-1)},model->grade()})
+                for(std::size_t i=0;i<fibers.complex().grade(grade).cell_count();++i) {
+                    guard.step();complete=add(complete,fibers.stalks().dimension({grade,static_cast<std::uint32_t>(i)}));
+                }
+            complete=add(complete,fibers.complex().grade(core::Grade{static_cast<std::uint16_t>(model->grade().value-1)}).cell_count());
+            const auto needed=machine::checked_size_mul(history.size(),complete);
+            guard.entries(add(retained(),needed));
+            const auto start=guard.steps();bool prepared=false;
+            std::call_once(materialization,[&] {
+                std::vector<TransportObservation> fields;fields.reserve(history.size());
+                for(const auto& item:history) {
+                    guard.step();
+                    if(const auto* dense=std::get_if<TransportObservation>(&item))fields.push_back(*dense);
+                    else fields.push_back(columns->materialize(std::get<TransportColumnObservation>(item),guard));
+                }
+                whole_fields=std::move(fields);materialized_entries.store(needed);
+                materialization_steps.store(guard.steps()-start);prepared=true;
+            });
+            if(!prepared)for(std::size_t i=0;i<materialization_steps.load();++i)guard.step();
+            return whole_fields;
+        }
         std::size_t replay_steps() const {
-            return observations.empty()?initial_steps:add(initial_steps,add(1,add(history_steps,family_steps)));
+            return history.empty()?initial_steps:add(initial_steps,add(1,add(history_steps,family_steps)));
         }
     };
     explicit PreparedTransportEvidence(std::shared_ptr<const State> state):state_(std::move(state)){}
@@ -219,7 +268,19 @@ public:
         return PreparedTransportEvidence(std::make_shared<const State>(*state_,suffix,guard));
     }
     const PreparedTransportObservations& model() const & {return *state_->model;}
-    const std::vector<TransportObservation>& observations() const & {return state_->observations;}
+    const std::vector<TransportObservation>& observations() const & {
+        Guard guard(state_->limits);return state_->materialize(guard);
+    }
+    const std::vector<TransportObservation>& observations(Guard& guard) const & {return state_->materialize(guard);}
+    std::size_t materialized_field_entries() const noexcept {return state_->materialized_entries.load();}
+    std::size_t observation_count() const noexcept {return state_->history.size();}
+    std::size_t column_observation_count() const noexcept {
+        return static_cast<std::size_t>(std::count_if(state_->history.begin(),state_->history.end(),
+            [](const auto& item){return std::holds_alternative<TransportColumnObservation>(item);}));
+    }
+    PreparedTransportEvidence append_columns(const std::vector<TransportColumnObservation>& suffix,Guard& guard) const {
+        return PreparedTransportEvidence(std::make_shared<const State>(*state_,suffix,guard));
+    }
     const TransportObservationSystem& system() const & {return state_->system;}
     const V& particular() const & {return state_->particular;}
     const M& kernel() const & {return state_->kernel;}
