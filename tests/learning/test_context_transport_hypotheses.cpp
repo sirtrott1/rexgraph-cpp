@@ -100,6 +100,29 @@ void admission() {
     }
     rejects([&]{Guard q({},[]{throw std::runtime_error("cancelled");});(void)learning::acquire_context_transport_hypotheses(owner,samples(),{1},frames,q);});
 }
+void indexed_scope() {
+    Guard guard;core::RelationSignature signature;std::vector<core::RelationTypeId> types;
+    for(std::size_t i=0;i<1000;++i)types.push_back(signature.add_type("type-"+std::to_string(i),core::BoundaryPolicy::DeclaredExact,0,1));
+    core::RelationalComplexBuilder builder(signature);
+    for(const auto type:types)builder.add_grade_one(type,{{0,true,false,Q{1},{}}});
+    const auto source=builder.freeze();local::LinearStalkBundle stalks(source);local::LinearRelationalFiberSystem fibers(stalks);
+    std::vector<learning::TransportCoordinate> entries;
+    for(std::size_t i=0;i<1000;++i){fibers.set_transport(core::Grade{1},i,M(1,1));entries.push_back({i,0,0});}
+    learning::PreparedTransportObservations owner(local::OwnedLinearFiberSystem(fibers),{},entries,guard);
+    learning::TransportObservation sample;sample.input=numeric::RationalVector(1000,Q{1});sample.target={1};sample.observed={1};
+    std::vector<std::vector<Frame>> frames{{{1,{0}}},std::vector<Frame>(1000,{2,{0}})};
+    std::vector<std::size_t> targets;for(std::size_t i=0;i<1000;++i)targets.push_back(i);
+    Guard work;const auto result=learning::acquire_context_transport_hypotheses(owner,{sample},targets,frames,work);
+    check(result.attempts==1000000 && result.rejections.at("primary-type")==999000 && result.rejections.at("original-row")==1000,
+        "indexed context scope changed complete rejection counts");
+    check(result.hypotheses.empty() && result.relations.empty() && work.steps()<20000,
+        "incompatible context pairs were materialized or scanned");
+    auto absent=frames;for(auto& frame:absent[1])frame={};Guard q;
+    const auto empty=learning::acquire_context_transport_hypotheses(owner,{sample},{0,1},absent,q);
+    check(empty.attempts==2000 && empty.rejections.at("original-row")==2 && empty.rejections.at("primary-type")==1998 &&
+        !empty.rejections.contains("undeclared-upper-frame"),"original-row rejection precedence changed for absent frames");
+    std::cout<<"indexed_context_scope="<<result.attempts<<" steps="<<work.steps()<<'\n';
 }
-int main() {try {discovery();admission();std::cout<<checks<<" exact contextual hypothesis assertions passed\n";}
+}
+int main() {try {discovery();admission();indexed_scope();std::cout<<checks<<" exact contextual hypothesis assertions passed\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}}

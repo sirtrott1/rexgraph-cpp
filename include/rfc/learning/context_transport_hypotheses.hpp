@@ -25,6 +25,46 @@ struct TransportContextAcquisition {
 };
 
 namespace context_transport_detail {
+// Index declared target rows without constructing their Cartesian pair space.
+// Rejection counts retain the full scope and its original precedence.
+class TargetIndex {
+    using Key=std::pair<std::size_t,std::uint64_t>;
+    std::map<Key,std::vector<std::size_t>> groups_;
+    std::map<std::size_t,std::size_t> counts_;
+    std::set<std::size_t> rows_;
+    std::vector<std::size_t> empty_;
+public:
+    template<class Atlas>
+    TargetIndex(const core::RelationalComplex& source,const std::vector<std::size_t>& targets,
+        const Atlas& atlas,numeric::ExactActionGuard& guard,std::size_t retained=0) {
+        guard.dimension(targets.size());const auto& arena=source.grade(core::Grade{1});
+        for(const auto target:targets) {
+            guard.step();const auto type=arena.relation_types[target];
+            groups_[{type,atlas[1][target].frame}].push_back(target);
+            ++counts_[type];rows_.insert(target);
+            guard.entries(algebra::owned_gluing_detail::add(retained,entries()));
+        }
+    }
+    std::size_t entries() const {
+        using namespace algebra::owned_gluing_detail;
+        return add(mul(rows_.size(),2),add(mul(groups_.size(),3),mul(counts_.size(),2)));
+    }
+    const std::vector<std::size_t>& targets(const core::RelationalComplex& source,std::size_t origin,
+        std::uint64_t frame,TransportContextAcquisition& out,numeric::ExactActionGuard& guard) const {
+        using namespace algebra::owned_gluing_detail;guard.step();
+        out.attempts=add(out.attempts,rows_.size());
+        const auto type=source.grade(core::Grade{1}).relation_types[origin];
+        const auto found=groups_.find({type,frame});
+        const auto& selected=frame && found!=groups_.end()?found->second:empty_;
+        const auto count=counts_.find(type);const auto same=count==counts_.end()?0:count->second;
+        const auto original=rows_.contains(origin)?1u:0u;
+        const auto absent=rows_.size()-same;
+        const auto undeclared=same-selected.size()-(frame?0:original);
+        const auto reject=[&](const char* name,std::size_t n){if(n)out.rejections[name]=add(out.rejections[name],n);};
+        reject("original-row",original);reject("primary-type",absent);reject("undeclared-upper-frame",undeclared);
+        return selected;
+    }
+};
 // Validate the full ordered star on original cells and retained occurrences.
 inline std::string star(const core::RelationalComplex& source,TransportContextHypothesis& hypothesis,
     numeric::ExactActionGuard& guard) {
@@ -120,7 +160,9 @@ inline TransportContextAcquisition acquire_context_transport_hypotheses(
         }
     }
     for(std::size_t row=0;row<evidence.size();++row) if(!evidence[row].empty()) out.seed_rows.push_back(row);
-    const auto attempts=mul(out.seed_rows.size(),targets.size());guard.dimension(attempts);
+    guard.dimension(out.seed_rows.size());
+    const context_transport_detail::TargetIndex index(source,targets,atlas,guard,out.retained);
+    out.retained=add(out.retained,index.entries());admit();
     using Key=std::tuple<std::size_t,std::size_t,std::size_t>;
     std::map<Key,std::size_t> variables;std::set<Key> fixed;
     for(std::size_t i=0;i<observations.variable_coordinates().size();++i) {
@@ -132,13 +174,11 @@ inline TransportContextAcquisition acquire_context_transport_hypotheses(
         const auto& x=atlas[k][a];const auto& y=atlas[k][b];guard.step();
         return x.frame && x.frame==y.frame;
     };
-    for(const auto origin:out.seed_rows) for(const auto target:targets) {
-        guard.step();++out.attempts;std::string failure;
+    for(const auto origin:out.seed_rows) for(const auto target:index.targets(source,origin,atlas[1][origin].frame,out,guard)) {
+        if(origin==target)continue;
+        guard.step();std::string failure;
         const auto reject=[&](const char* reason){failure=reason;};
         TransportContextHypothesis hypothesis;hypothesis.origin=origin;hypothesis.target=target;
-        if(origin==target) reject("original-row");
-        else if(arena.relation_types[origin]!=arena.relation_types[target]) reject("primary-type");
-        else if(!compare_frame(1,origin,target)) reject("undeclared-upper-frame");
         const auto [ab,ae]=arena.incidence_range(origin);const auto [bb,be]=arena.incidence_range(target);
         if(failure.empty() && ae-ab!=be-bb) reject("complete-occurrence-count");
         std::map<std::size_t,std::size_t> lowers;std::set<std::size_t> images;

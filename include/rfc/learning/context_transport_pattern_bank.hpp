@@ -31,6 +31,24 @@ struct TransportPatternSparseCandidate {
     std::size_t pattern{};
     std::optional<TransportPatternBankResponse> response;
 };
+struct TransportPatternProgramEdge {
+    std::size_t node{}, occurrence{};
+    std::uint64_t source_frame{}, target_frame{};
+    numeric::ExactMatrix map;
+};
+struct TransportPatternProgramNode {
+    std::string name;
+    std::size_t pattern{};
+    std::optional<TransportPatternSparseInput> input;
+    std::vector<TransportPatternProgramEdge> edges;
+};
+enum class TransportPatternProgramStatus { Supported, OutsideDomain, OpenInput, Blocked };
+struct TransportPatternProgramResult {
+    TransportPatternProgramStatus status{TransportPatternProgramStatus::Blocked};
+    std::optional<numeric::SparseRationalTensor> input;
+    numeric::ExactMatrix input_directions, parameter_directions;
+    std::optional<TransportPatternBankResponse> response;
+};
 struct TransportPatternGluing {
     bool consistent{}, forced{};
     numeric::RationalVector defect_origin, parameter_origin, contradiction;
@@ -428,6 +446,103 @@ public:
                 for(const auto& c:response.coordinates) retained=add(retained,c.size());
             }
             guard.entries(retained);out.push_back(std::move(candidate));
+        }
+        return out;
+    }
+    // Ordered stages read original unscaled occurrence fields through complete
+    // declared maps. All directions use the bank's same parameter coordinates.
+    // An unresolved input remains a full family and is not passed to a stage.
+    std::vector<TransportPatternProgramResult> response_sparse_program(
+        const std::vector<TransportPatternProgramNode>& nodes,G& guard) const {
+        using namespace context_view_detail;const auto& s=*state_;
+        if(nodes.empty()) throw std::invalid_argument("nonempty ordered pattern program required");
+        guard.dimension(nodes.size());std::size_t retained=s.retained;
+        const auto carriers=storage::temporal_endpoint_detail::carriers(s.endpoint);
+        const auto& arena=s.endpoint.source.grade(core::Grade{1});
+        std::set<std::string> names;
+        // Validate every declaration before execution, including blocked stages.
+        for(std::size_t i=0;i<nodes.size();++i) {
+            guard.step();const auto& node=nodes[i];
+            if(node.name.empty() || node.name.size()>256 || !names.insert(node.name).second ||
+                node.pattern>=s.domains.size() || (node.input.has_value()==!node.edges.empty()))
+                throw std::invalid_argument("distinct named stages with an input or declared incoming maps required");
+            retained=add(retained,add(4,node.name.size()));guard.entries(retained);
+            if(node.input) {
+                const auto& input=*node.input;
+                if(input.pattern!=node.pattern || input.frame!=s.input_frames[node.pattern] ||
+                    input.value.domain()!=numeric::IndexDomain::linear(s.domains[node.pattern].rows()) ||
+                    input.value.support().count()!=s.domains[node.pattern].rows())
+                    throw std::invalid_argument("complete program input on the actual pattern carrier required");
+                retained=add(retained,input.value.values().nonzeros());guard.entries(retained);
+                for(const auto& e:input.value.values().entries()){guard.step();guard.value(e.value);}
+            }
+            std::set<std::pair<std::size_t,std::size_t>> edges;
+            for(const auto& edge:node.edges) {
+                guard.step();guard.matrix(edge.map);
+                if(edge.node>=i || edge.occurrence>=s.owners.size() ||
+                    s.owners[edge.occurrence]!=nodes[edge.node].pattern ||
+                    !edges.emplace(edge.node,edge.occurrence).second)
+                    throw std::invalid_argument("distinct original occurrence maps from preceding stages required");
+                const auto cell=arena.lower_index[edge.occurrence];
+                if(edge.source_frame!=carriers.at(3+2*s.domains.size()+cell)->coordinate_system ||
+                    edge.target_frame!=s.input_frames[node.pattern] ||
+                    edge.map.cols()!=s.occurrence_at[edge.occurrence+1]-s.occurrence_at[edge.occurrence] ||
+                    edge.map.rows()!=s.domains[node.pattern].rows())
+                    throw std::invalid_argument("complete program map between actual named carriers required");
+                retained=add(retained,add(4,edge.map.nonzeros()));guard.entries(retained);
+            }
+        }
+        std::vector<TransportPatternProgramResult> out;out.reserve(nodes.size());
+        for(const auto& node:nodes) {
+            guard.step();TransportPatternProgramResult result;
+            const auto size=s.domains[node.pattern].rows();const auto parameters=s.directions.cols();
+            result.input_directions=M(size,parameters);result.parameter_directions=M(s.occurrence_at.back(),parameters);
+            if(node.input) result.input=node.input->value;
+            else {
+                std::map<std::size_t,Q> values;bool blocked=false;
+                for(const auto& edge:node.edges) {
+                    guard.step();const auto& previous=out[edge.node];
+                    if(!previous.response){blocked=true;continue;}
+                    const auto at=s.occurrence_at[edge.occurrence];
+                    for(const auto& [key,q]:edge.map.entries()) {
+                        guard.step();const auto row=at+key.second;
+                        const auto value=guard.add(values[key.first],guard.mul(q,previous.response->origin[row]));
+                        if(value==0) values.erase(key.first);else values[key.first]=value;
+                        const auto& directions=previous.parameter_directions.entries();
+                        for(auto it=directions.lower_bound({row,0});it!=directions.end() && it->first.first==row;++it) {
+                            guard.step();const auto col=it->first.second;
+                            result.input_directions.set(key.first,col,guard.add(result.input_directions.get(key.first,col),guard.mul(q,it->second)));
+                        }
+                        guard.entries(add(retained,add(values.size(),result.input_directions.nonzeros())));
+                    }
+                }
+                if(blocked){
+                    result.input_directions=M();result.parameter_directions=M();
+                    out.push_back(std::move(result));continue;
+                }
+                std::vector<numeric::SparseRationalEntry> entries;entries.reserve(values.size());
+                for(auto& [i,q]:values){guard.step();entries.push_back({i,std::move(q)});}
+                result.input=numeric::SparseRationalTensor(numeric::IndexDomain::linear(size),numeric::StructuralSupport::full(size),
+                    numeric::SparseRationalVector(size,std::move(entries)));
+                if(result.input_directions.nonzeros()) result.status=TransportPatternProgramStatus::OpenInput;
+            }
+            if(result.status!=TransportPatternProgramStatus::OpenInput) {
+                const TransportPatternSparseInput input{node.pattern,s.input_frames[node.pattern],*result.input};
+                auto c=sparse_coordinates(input,guard);
+                if(!c) result.status=TransportPatternProgramStatus::OutsideDomain;
+                else {
+                    std::vector<V> prepared(s.domains.size()),coordinates;prepared[node.pattern]=std::move(*c);
+                    const auto map=readout(std::vector<TransportPatternSparseInput>{input},guard,false,coordinates,&prepared);
+                    result.parameter_directions=product(map,s.directions,guard,retained);
+                    result.response=apply(map,s.weights,s.directions,std::move(coordinates),guard,false);
+                    result.status=TransportPatternProgramStatus::Supported;
+                    retained=add(retained,add(result.response->origin.size(),add(result.response->directions.nonzeros(),result.response->offsets.size())));
+                    for(const auto& coordinate:result.response->coordinates)retained=add(retained,coordinate.size());
+                }
+            }
+            if(result.input)retained=add(retained,result.input->values().nonzeros());
+            retained=add(retained,add(result.input_directions.nonzeros(),result.parameter_directions.nonzeros()));
+            guard.entries(retained);out.push_back(std::move(result));
         }
         return out;
     }

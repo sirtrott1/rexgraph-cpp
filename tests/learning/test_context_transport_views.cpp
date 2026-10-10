@@ -119,6 +119,19 @@ void admission() {
         G guard(limits);(void)learning::acquire_context_transport_views(owner,samples(),{1},atlas(),guard);});
     rejects([&]{G guard({},[]{throw std::runtime_error("cancelled");});(void)learning::acquire_context_transport_views(owner,samples(),{1},atlas(),guard);});
 }
+void indexed_frames() {
+    G guard;const auto owner=fixture(guard);auto views=atlas();
+    views[1][0].frame=0;views[1][0].accession=M(0,0);views[1][0].reconstruction=M(0,0);
+    views[1][1].frame=0;views[1][1].accession=M(0,0);views[1][1].reconstruction=M(0,0);
+    const auto result=learning::acquire_context_transport_views(owner,samples(),{0,1},views,guard);
+    check(result.acquisition.attempts==2 && result.acquisition.rejections.at("original-row")==1 &&
+        result.acquisition.rejections.at("undeclared-upper-frame")==1 && result.acquisition.hypotheses.empty(),
+        "indexed rectangular views changed absent frame rejection precedence");
+    auto separate=atlas();separate[1][1].frame=91;G q;
+    const auto disjoint=learning::acquire_context_transport_views(owner,samples(),{1},separate,q);
+    check(disjoint.acquisition.attempts==1 && disjoint.acquisition.rejections.at("undeclared-upper-frame")==1,
+        "indexed views identified undeclared equal dimensional frames");
 }
-int main() {try {common_inputs();admission();std::cout<<checks<<" exact context view assertions passed\n";}
+}
+int main() {try {common_inputs();admission();indexed_frames();std::cout<<checks<<" exact context view assertions passed\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}}

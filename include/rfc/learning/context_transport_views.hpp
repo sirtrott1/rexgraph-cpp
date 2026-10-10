@@ -156,7 +156,9 @@ inline TransportContextViewAcquisition acquire_context_transport_views(
         auto image=frames.image();out.retained=add(out.retained,add(2,image.nonzeros()));admit();
         observed_images.emplace(row,std::move(image));
     }
-    guard.dimension(mul(out.seed_rows.size(),targets.size()));
+    guard.dimension(out.seed_rows.size());
+    const context_transport_detail::TargetIndex index(source,targets,atlas,guard,out.retained);
+    out.retained=add(out.retained,index.entries());admit();
     std::vector<std::vector<std::size_t>> variables(arena.incidence_count()),constants(arena.incidence_count());
     for(std::size_t i=0;i<observations.variable_coordinates().size();++i) {
         guard.step();variables[observations.variable_coordinates()[i].occurrence].push_back(i);
@@ -167,13 +169,11 @@ inline TransportContextViewAcquisition acquire_context_transport_views(
     out.retained=add(out.retained,add(mul(arena.incidence_count(),2),
         add(observations.variable_coordinates().size(),observations.fixed_coordinates().size())));admit();
     const auto same=[&](std::size_t k,std::size_t a,std::size_t b) {guard.step();return atlas[k][a].frame && atlas[k][a].frame==atlas[k][b].frame;};
-    for(const auto origin:out.seed_rows) for(const auto target:targets) {
-        guard.step();++out.attempts;TransportContextHypothesis h;h.origin=origin;h.target=target;
+    for(const auto origin:out.seed_rows) for(const auto target:index.targets(source,origin,atlas[1][origin].frame,out,guard)) {
+        if(origin==target)continue;
+        guard.step();TransportContextHypothesis h;h.origin=origin;h.target=target;
         std::string failure;
-        if(origin==target) failure="original-row";
-        else if(arena.relation_types[origin]!=arena.relation_types[target]) failure="primary-type";
-        else if(!same(1,origin,target)) failure="undeclared-upper-frame";
-        else failure=context_transport_detail::star(source,h,guard);
+        failure=context_transport_detail::star(source,h,guard);
         if(failure.empty()) for(const auto& [a,b]:h.cells) if(!same(0,a,b)) {failure="undeclared-lower-frame";break;}
         if(!failure.empty()) {++out.rejections[failure];continue;}
         const auto target_image=observed_images.find(target);

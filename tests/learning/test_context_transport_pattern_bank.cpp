@@ -150,6 +150,69 @@ void sparse_candidates() {
     auto limits=numeric::ExactActionLimits{};limits.steps=1;G bounded(limits);
     rejects([&]{(void)bank.response_sparse_candidates(inputs,bounded);});
 }
+void sparse_program() {
+    using Node=learning::TransportPatternProgramNode;
+    using Edge=learning::TransportPatternProgramEdge;
+    using Status=learning::TransportPatternProgramStatus;
+    const auto root=[](std::string name,std::size_t pattern,Q value){
+        std::vector<numeric::SparseRationalEntry> entries;
+        if(value!=0)entries={{0,value},{1,value}};
+        return Node{std::move(name),pattern,sparse(pattern,2,std::move(entries)),{}};
+    };
+    const auto edge=[](std::size_t node,std::size_t occurrence,Q gain=1){return Edge{node,occurrence,1,2,column({gain,gain})};};
+    const auto bank=learn(1,true);G guard;
+    const std::vector<Node> stages{root("original",2,Q{3,7}),
+        {"transport",2,{}, {edge(0,2,Q{1,2})}}, {"next",2,{}, {edge(1,2)}}};
+    const auto result=bank.response_sparse_program(stages,guard);
+    check(result.size()==3 && result[2].status==Status::Supported && result[2].response->origin==V({0,0,Q{12,7}}),
+        "native stage composition changed exact fields");
+    check(result[1].input->values().entries()==std::vector<numeric::SparseRationalEntry>({{0,Q{3,7}},{1,Q{3,7}}}) &&
+        !result[1].input_directions.nonzeros(),"complete stage accession changed its rational input");
+    check(result[0].response->directions.cols()==0 && result[0].parameter_directions==M(3,1),
+        "identified stage lost original joint parameter coordinates");
+    const auto families=bank.response_sparse_program({root("first",0,1),root("second",1,-1),root("anchor",2,1),
+        {"cancelled",2,{}, {edge(0,0),edge(1,1),edge(2,2)}},
+        {"open",2,{}, {edge(0,0)}}, {"blocked",2,{}, {edge(0,0),edge(4,2)}}},guard);
+    check(families[0].response->directions.cols()==1 && families[1].response->directions.cols()==1 &&
+        families[0].parameter_directions.get(0,0)==1 && families[1].parameter_directions.get(1,0)==-1,
+        "stage readouts independently rebased correlated parameters");
+    check(families[3].status==Status::Supported && families[3].input_directions.nonzeros()==0 &&
+        families[3].response->origin==V({0,0,4}),"joint unknown cancellation was lost during composition");
+    check(families[4].status==Status::OpenInput && !families[4].response && families[4].input_directions==column({1,1}) &&
+        families[5].status==Status::Blocked && !families[5].input,"open input was assigned a parameter value");
+    check(families[5].input_directions==M() && families[5].parameter_directions==M(),
+        "blocked stage retained partial input families");
+    auto outside=root("outside",2,1);outside.input=sparse(2,2,{{0,1}});
+    const auto missing=bank.response_sparse_program({outside,{"dependent",2,{}, {edge(0,2)}}},guard);
+    check(missing[0].status==Status::OutsideDomain && !missing[0].response && missing[1].status==Status::Blocked,
+        "unsupported stage was evaluated or silently treated as zero");
+    const auto zero=bank.response_sparse_program({root("zero",0,0),{"zero-next",2,{}, {edge(0,0)}}},guard);
+    check(zero[1].status==Status::Supported && zero[1].response->origin==V(3) && !zero[1].response->directions.cols(),
+        "supported zero stage became unsupported");
+    rejects([&]{(void)bank.response_sparse_program({},guard);});
+    for(std::size_t which=0;which<10;++which) {
+        auto wrong=stages;
+        if(which==0)wrong[1].name=wrong[0].name;
+        if(which==1)wrong[1].edges[0].node=1;
+        if(which==2)wrong[1].edges[0].occurrence=0;
+        if(which==3)wrong[1].edges[0].source_frame=2;
+        if(which==4)wrong[1].edges[0].target_frame=1;
+        if(which==5)wrong[1].edges[0].map=M(1,1);
+        if(which==6)wrong[1].input=stages[0].input;
+        if(which==7)wrong[0].input->pattern=1;
+        if(which==8)wrong[1].edges.push_back(wrong[1].edges[0]);
+        if(which==9){wrong[0].input=sparse(2,2,{{0,1}});wrong[2].edges[0].source_frame=99;}
+        rejects([&]{(void)bank.response_sparse_program(wrong,guard);});
+    }
+    G counted;(void)bank.response_sparse_program(stages,counted);
+    auto limits=numeric::ExactActionLimits{};limits.steps=counted.steps()-1;
+    rejects([&]{G g(limits);(void)bank.response_sparse_program(stages,g);});
+    rejects([&]{G g({},[]{throw std::runtime_error("cancelled");});(void)bank.response_sparse_program(stages,g);});
+    const auto bytes=learning::encode_transport_pattern_bank(bank,480);
+    const auto loaded=learning::decode_transport_pattern_bank(bytes,480,guard);
+    check(loaded.response_sparse_program(stages,guard)[2].response->origin==result[2].response->origin &&
+        learning::encode_transport_pattern_bank(loaded,480)==bytes,"program execution changed cold canonical storage");
+}
 void family() {
     const auto bank=learn();G guard;
     check(bank.endpoint().source.grade(core::Grade{1}).cell_count()==3 && bank.endpoint().source.grade(core::Grade{0}).cell_count()==1,
@@ -271,5 +334,5 @@ void occurrence_states() {
         "stored occurrence states lost their full field family");
 }
 }
-int main(){try{family();gluing();persistence();admission();occurrence_states();observed_fields();sparse_fields();sparse_candidates();std::cout<<checks<<" exact pattern bank assertions passed\n";}
+int main(){try{family();gluing();persistence();admission();occurrence_states();observed_fields();sparse_fields();sparse_candidates();sparse_program();std::cout<<checks<<" exact pattern bank assertions passed\n";}
 catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
