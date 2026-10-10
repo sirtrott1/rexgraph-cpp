@@ -127,6 +127,49 @@ void admission() {
         G guard(limits);(void)learning::acquire_context_transport_view_rules(owner,samples(),{0,1,2},{3},views,2,guard);});
     rejects([&]{G guard({},[]{throw std::runtime_error("cancelled");});(void)learning::acquire_context_transport_view_rules(owner,samples(),{0,1,2},{3},views,2,guard);});
 }
+void observed_field_spans() {
+    G guard;const auto owner=fixture(guard);auto views=atlas();
+    views[1][3].accession.set(3,0,0);views[1][3].reconstruction.set(0,0,1);views[1][3].reconstruction.set(0,3,0);
+    std::vector<learning::TransportObservation> data;
+    const std::vector<std::size_t> offsets{0,3,5,7,10};
+    for(std::size_t row=0;row<3;++row) {
+        learning::TransportObservation o;o.input.resize(10);o.input[offsets[row]]=o.input[offsets[row]+1]=1;
+        o.target.resize(8);o.observed.resize(8);o.target[2*row]=5;o.target[2*row+1]=-5;
+        o.observed[2*row]=o.observed[2*row+1]=1;data.push_back(std::move(o));
+    }
+    const auto full=learning::acquire_context_transport_view_rules(owner,data,{0,1,2},{3},views,2,guard);
+    check(full.selected_blocks.empty(),"one observed field identified complete original maps");
+    const auto scope=learning::TransportContextInputScope::ObservedFields;
+    const auto observed=learning::acquire_context_transport_view_rules(owner,data,{0,1,2},{3},views,2,guard,scope);
+    check(observed.selected_blocks.size()==1,"observed common field span was not learned");
+    const auto selected=observed.selected_blocks[0];const auto& block=observed.comparisons.acquisition.hypotheses[selected];
+    const auto& witness=observed.comparisons.witnesses[selected];
+    check(witness.common_input.cols()==1 && witness.origin_input.rows()==3 && witness.target_input.rows()==3,
+        "observed image replaced the original stalk carriers");
+    check(witness.origin_input.get(0,0)==witness.origin_input.get(1,0) && witness.origin_input.get(2,0)==0,
+        "observed mixed field direction was flattened");
+    check(observed.covering_peers[selected].size()==2,"observed input lacks independent peers");
+    const auto family=observed.proof->condition(block.equations,guard);
+    check(family.consistent && family.kernel.rows()==20 && family.kernel.cols()==12,
+        "unobserved original transport parameters were lost");
+    const auto assembled=owner.assemble(data,guard);
+    check(numeric::checked_apply(assembled.design,family.origin,guard)==assembled.target,
+        "observed-span transfer changed original evidence");
+    check(numeric::checked_multiply(assembled.design,family.kernel,guard).nonzeros()==0,
+        "observed-span directions changed original evidence");
+    auto conflicting=data;conflicting[2].target[4]=6;
+    check(learning::acquire_context_transport_view_rules(owner,conflicting,{0,1,2},{3},views,2,guard,scope).selected_blocks.empty(),
+        "contradictory observed semantic fields admitted a rule");
+    auto partial=data;partial[2].input[6]=0;partial[2].target[4]=2;partial[2].target[5]=-2;
+    check(learning::acquire_context_transport_view_rules(owner,partial,{0,1,2},{3},views,2,guard,scope).selected_blocks.empty(),
+        "nonintersecting observed input provided independent coverage");
+    auto redundant=data;redundant.insert(redundant.end(),data.begin(),data.end());
+    const auto repeated=learning::acquire_context_transport_view_rules(owner,redundant,{0,1,2},{3},views,2,guard,scope);
+    check(repeated.selected_blocks.size()==1 && repeated.comparisons.witnesses[repeated.selected_blocks[0]].common_input.cols()==1,
+        "repeated observations added field directions");
+    rejects([&]{G g;(void)learning::acquire_context_transport_view_rules(owner,data,{0,1,2},{3},views,2,g,
+        static_cast<learning::TransportContextInputScope>(99));});
 }
-int main() {try {faithful_coverage();negative_evidence();admission();std::cout<<checks<<" exact context view rule assertions passed\n";}
+}
+int main() {try {faithful_coverage();negative_evidence();admission();observed_field_spans();std::cout<<checks<<" exact context view rule assertions passed\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}}

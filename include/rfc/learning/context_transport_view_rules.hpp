@@ -22,7 +22,8 @@ inline TransportContextViewRuleAcquisition acquire_context_transport_view_rules(
     const std::vector<TransportObservation>& samples,
     const std::vector<std::size_t>& training,const std::vector<std::size_t>& targets,
     const std::vector<std::vector<TransportContextView>>& atlas,
-    std::size_t minimum_peers,numeric::ExactActionGuard& guard) {
+    std::size_t minimum_peers,numeric::ExactActionGuard& guard,
+    TransportContextInputScope scope=TransportContextInputScope::FullCarrier) {
     using namespace context_view_detail;
     const auto start=guard.steps();guard.step();
     if(observations.parameter_basis())
@@ -35,7 +36,7 @@ inline TransportContextViewRuleAcquisition acquire_context_transport_view_rules(
         throw std::invalid_argument("distinct target rows outside the training family required");}
     std::vector<std::size_t> all=training;all.insert(all.end(),targets.begin(),targets.end());guard.dimension(all.size());
     TransportContextViewRuleAcquisition out;
-    out.comparisons=acquire_context_transport_views(observations,samples,all,atlas,guard);
+    out.comparisons=acquire_context_transport_views(observations,samples,all,atlas,guard,scope);
     const auto& acquired=out.comparisons.acquisition;
     const std::set<std::size_t> seeds(acquired.seed_rows.begin(),acquired.seed_rows.end());
     for(const auto row:training) if(!seeds.contains(row))

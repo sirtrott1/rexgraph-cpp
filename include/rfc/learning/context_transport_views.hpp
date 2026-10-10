@@ -17,6 +17,7 @@ struct TransportContextViewAcquisition {
     TransportContextAcquisition acquisition;
     std::vector<TransportContextViewWitness> witnesses;
 };
+enum class TransportContextInputScope { FullCarrier, ObservedFields };
 namespace context_view_detail {
 using M=numeric::ExactMatrix;
 using Q=numeric::Rational;
@@ -65,6 +66,28 @@ inline TransportContextViewWitness intersection(const TransportContextView& a,co
         throw std::logic_error("context common input reconstruction certificate");
     return out;
 }
+inline TransportContextViewWitness intersection_inputs(const TransportContextView& a,const TransportContextView& b,
+    const M& observed_origin,const M* observed_target,Guard& guard,std::size_t resident) {
+    const auto u=product(a.accession,observed_origin,guard,resident);
+    const auto v=observed_target ? product(b.accession,*observed_target,guard,add(resident,u.nonzeros())) : b.accession;
+    const auto n=u.cols(),m=v.cols();guard.dimension(add(n,m));
+    M joined(u.rows(),add(n,m));
+    for(const auto& [key,q]:u.entries()) {guard.step();joined.set(key.first,key.second,q);}
+    for(const auto& [key,q]:v.entries()) {guard.step();joined.set(key.first,add(n,key.second),guard.sub(0,q));}
+    const auto inputs_live=add(resident,add(u.nonzeros(),v.nonzeros()));guard.entries(add(inputs_live,joined.nonzeros()));
+    const numeric::PreparedExactFrames frames(joined,guard);
+    const auto left=slice(frames.kernel(),0,n,guard),right=slice(frames.kernel(),n,m,guard);
+    const auto live=add(inputs_live,add(joined.nonzeros(),add(frames.stored_entries(),add(left.nonzeros(),right.nonzeros()))));
+    TransportContextViewWitness out;out.common_input=product(u,left,guard,live);
+    out.origin_input=product(a.reconstruction,out.common_input,guard,add(live,out.common_input.nonzeros()));
+    out.target_input=product(b.reconstruction,out.common_input,guard,add(live,add(out.common_input.nonzeros(),out.origin_input.nonzeros())));
+    const auto retained=add(live,add(out.common_input.nonzeros(),add(out.origin_input.nonzeros(),out.target_input.nonzeros())));
+    if(out.origin_input!=product(observed_origin,left,guard,retained) ||
+        out.target_input!=(observed_target ? product(*observed_target,right,guard,retained) : right) ||
+        product(b.accession,out.target_input,guard,retained)!=out.common_input)
+        throw std::logic_error("observed context input reconstruction certificate");
+    return out;
+}
 } // namespace context_view_detail
 
 // Compare full retained stars only on their actual shared represented inputs.
@@ -72,10 +95,12 @@ inline TransportContextViewWitness intersection(const TransportContextView& a,co
 inline TransportContextViewAcquisition acquire_context_transport_views(
     const PreparedTransportObservations& observations,const std::vector<TransportObservation>& samples,
     const std::vector<std::size_t>& targets,const std::vector<std::vector<TransportContextView>>& atlas,
-    numeric::ExactActionGuard& guard) {
+    numeric::ExactActionGuard& guard,TransportContextInputScope scope=TransportContextInputScope::FullCarrier) {
     using namespace context_view_detail;
     observations.require_grade_one_profile();
     const auto start=guard.steps();guard.step();
+    if(scope!=TransportContextInputScope::FullCarrier && scope!=TransportContextInputScope::ObservedFields)
+        throw std::invalid_argument("declared context input scope required");
     const auto& fibers=observations.owner().fibers();const auto& source=fibers.complex();
     const core::Grade lo{0},up{1};const auto& arena=source.grade(up);
     TransportContextViewAcquisition result;auto& out=result.acquisition;
@@ -121,6 +146,16 @@ inline TransportContextViewAcquisition acquire_context_transport_views(
         }
     }
     for(std::size_t row=0;row<evidence.size();++row) if(!evidence[row].empty()) out.seed_rows.push_back(row);
+    std::map<std::size_t,M> observed_images;
+    if(scope==TransportContextInputScope::ObservedFields) for(const auto row:out.seed_rows) {
+        guard.step();M input(offsets[row+1]-offsets[row],evidence[row].size());guard.dimension(evidence[row].size());
+        for(std::size_t j=0;j<evidence[row].size();++j) for(auto i=offsets[row];i<offsets[row+1];++i) {
+            guard.step();input.set(i-offsets[row],j,samples[evidence[row][j]].input[i]);admit(input.nonzeros());
+        }
+        const numeric::PreparedExactFrames frames(input,guard);admit(add(input.nonzeros(),frames.stored_entries()));
+        auto image=frames.image();out.retained=add(out.retained,add(2,image.nonzeros()));admit();
+        observed_images.emplace(row,std::move(image));
+    }
     guard.dimension(mul(out.seed_rows.size(),targets.size()));
     std::vector<std::vector<std::size_t>> variables(arena.incidence_count()),constants(arena.incidence_count());
     for(std::size_t i=0;i<observations.variable_coordinates().size();++i) {
@@ -141,7 +176,11 @@ inline TransportContextViewAcquisition acquire_context_transport_views(
         else failure=context_transport_detail::star(source,h,guard);
         if(failure.empty()) for(const auto& [a,b]:h.cells) if(!same(0,a,b)) {failure="undeclared-lower-frame";break;}
         if(!failure.empty()) {++out.rejections[failure];continue;}
-        auto witness=intersection(atlas[1][origin],atlas[1][target],guard,out.retained);
+        const auto target_image=observed_images.find(target);
+        auto witness=scope==TransportContextInputScope::FullCarrier ?
+            intersection(atlas[1][origin],atlas[1][target],guard,out.retained) :
+            intersection_inputs(atlas[1][origin],atlas[1][target],observed_images.at(origin),
+                target_image==observed_images.end()?nullptr:&target_image->second,guard,out.retained);
         if(!witness.common_input.cols()) {++out.rejections["empty-input-intersection"];continue;}
         const auto witness_entries=add(witness.common_input.nonzeros(),add(witness.origin_input.nonzeros(),witness.target_input.nonzeros()));
         admit(witness_entries);
