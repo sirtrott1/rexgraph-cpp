@@ -401,6 +401,95 @@ public:
     const TransportPatternProvenance& provenance() const &&=delete;
     const std::vector<TransportPatternFrameLabel>& frame_labels() const &&=delete;
     std::size_t retained_entries() const noexcept {return state_->retained;}
+    // Restrict the joint affine family to a boundary-closed union of stored stars.
+    // Provenance describes the original fit; selection does not acquire evidence.
+    PreparedTransportPatternBank select(const std::vector<std::size_t>& patterns,
+        std::uint64_t weight_frame,std::uint64_t parameter_frame,G& guard) const {
+        using namespace context_view_detail;
+        const auto& s=*state_;guard.step();guard.entries(s.retained);guard.dimension(patterns.size());
+        if(patterns.empty() || !std::is_sorted(patterns.begin(),patterns.end()) ||
+            std::adjacent_find(patterns.begin(),patterns.end())!=patterns.end() || patterns.back()>=s.domains.size())
+            throw std::invalid_argument("ordered distinct stored pattern indices required");
+        if(!weight_frame || !parameter_frame || weight_frame==parameter_frame)
+            throw std::invalid_argument("distinct nonzero selection coordinates required");
+        for(const auto& carrier:s.endpoint.carriers) {
+            guard.step();if(carrier.coordinate_system==weight_frame || carrier.coordinate_system==parameter_frame)
+                throw std::invalid_argument("selection coordinates must differ from parent carriers");
+        }
+        const auto& source=s.endpoint.source;const auto& arena=source.grade(core::Grade{1});
+        auto resident=add(s.retained,add(patterns.size(),mul(source.grade_count(),2)));
+        for(std::size_t k=0;k<source.grade_count();++k) {
+            guard.step();resident=add(resident,mul(source.grade(core::Grade{static_cast<std::uint16_t>(k)}).cell_count(),3));
+        }
+        guard.entries(resident);algebra::SubcomplexMask patch(source);
+        std::size_t size{};
+        for(const auto pattern:patterns) {
+            guard.step();patch.select({core::Grade{1},static_cast<std::uint32_t>(pattern)});
+            const auto [begin,end]=arena.incidence_range(pattern);
+            size=add(size,s.weights_at[end]-s.weights_at[begin]);guard.dimension(size);
+            for(auto p=begin;p<end;++p) {guard.step();patch.select({core::Grade{0},arena.lower_index[p]});}
+        }
+        guard.step();auto selected=algebra::materialize_subcomplex(source,patch);guard.step();
+        resident=add(resident,algebra::owned_gluing_detail::words(selected.complex));
+        resident=add(resident,size);guard.entries(resident);
+        V weights;weights.reserve(size);M projected(size,s.directions.cols());std::size_t row{};
+        for(const auto pattern:patterns) {
+            const auto [begin,end]=arena.incidence_range(pattern);
+            const auto first=s.weights_at[begin],last=s.weights_at[end];
+            for(auto i=first;i<last;++i) {guard.step();guard.value(s.weights[i]);weights.push_back(s.weights[i]);}
+            const auto& entries=s.directions.entries();
+            for(auto it=entries.lower_bound({first,0});it!=entries.end() && it->first.first<last;++it) {
+                guard.step();guard.value(it->second);projected.set(row+it->first.first-first,it->first.second,it->second);
+                guard.entries(add(resident,projected.nonzeros()));
+            }
+            row=add(row,last-first);
+        }
+        numeric::PreparedExactFrames joint(std::move(projected),guard);
+        resident=add(resident,joint.stored_entries());guard.entries(resident);
+        storage::TemporalEndpoint endpoint(std::move(selected.complex));
+        const auto parent_carriers=storage::temporal_endpoint_detail::carriers(s.endpoint);
+        const auto parent_tensors=storage::temporal_endpoint_detail::tensors(s.endpoint);
+        const auto carrier=[&](std::uint64_t old_key,std::uint64_t new_key) {
+            guard.step();auto value=*parent_carriers.at(old_key);value.key=new_key;
+            endpoint.carriers.push_back(std::move(value));resident=add(resident,8);guard.entries(resident);
+        };
+        carrier(1,1);endpoint.carriers.back().coordinate_system=weight_frame;
+        endpoint.carriers.back().domain=numeric::IndexDomain::linear(size);
+        carrier(2,2);endpoint.carriers.back().coordinate_system=parameter_frame;
+        endpoint.carriers.back().domain=numeric::IndexDomain::linear(joint.rank());
+        for(std::size_t i=0;i<patterns.size();++i) {
+            const auto pattern=patterns[i];carrier(3+pattern,3+i);
+            carrier(3+s.domains.size()+pattern,3+patterns.size()+i);
+            guard.step();auto image=*parent_tensors.at(5+pattern);image.key=5+i;
+            image.input=3+i;image.output=3+patterns.size()+i;
+            resident=add(resident,add(10,image.tensor.values().nonzeros()));guard.entries(resident);
+            endpoint.tensors.push_back(std::move(image));
+        }
+        for(std::size_t i=0;i<selected.to_ambient[0].size();++i)
+            carrier(3+2*s.domains.size()+selected.to_ambient[0][i],3+2*patterns.size()+i);
+        guard.step();storage::TemporalTensor w;w.key=1;w.role=storage::TemporalTensorRole::Field;
+        w.output=1;w.interpretation="ordered-bank-occurrence-weights";
+        std::vector<numeric::SparseRationalEntry> values;
+        for(std::size_t i=0;i<weights.size();++i) {
+            guard.step();if(weights[i]!=0) values.push_back({i,std::move(weights[i])});
+            guard.entries(add(resident,values.size()));
+        }
+        w.tensor=numeric::SparseRationalTensor(numeric::IndexDomain::linear(size),numeric::StructuralSupport::full(size),
+            numeric::SparseRationalVector(size,std::move(values)));endpoint.tensors.push_back(std::move(w));
+        storage::TemporalTensor f;f.key=2;f.role=storage::TemporalTensorRole::PhysicalRealization;
+        f.input=2;f.output=1;f.interpretation="joint-observable-parameter-directions";
+        f.tensor=storage::temporal_matrix_tensor(joint.image());endpoint.tensors.push_back(std::move(f));
+        endpoint.tensors.push_back(*parent_tensors.at(3));
+        std::sort(endpoint.carriers.begin(),endpoint.carriers.end(),[](const auto& a,const auto& b){return a.key<b.key;});
+        std::sort(endpoint.tensors.begin(),endpoint.tensors.end(),[](const auto& a,const auto& b){return a.key<b.key;});
+        auto local=PreparedTransportPatternBank(std::move(endpoint),guard);
+        if(s.labels.empty()) return local;
+        std::set<std::uint64_t> frames;
+        for(const auto& c:local.endpoint().carriers) if(c.key>=3+patterns.size()) {guard.step();frames.insert(c.coordinate_system);}
+        std::vector<TransportPatternFrameLabel> labels;
+        for(const auto& label:s.labels) {guard.step();if(frames.contains(label.frame)) labels.push_back(label);}
+        return local.with_frame_labels(std::move(labels),guard);
+    }
     PreparedTransportPatternBank with_frame_labels(std::vector<TransportPatternFrameLabel> labels,G& guard) const {
         using namespace context_view_detail;auto endpoint=state_->endpoint;
         if(endpoint.tensors.size()!=state_->domains.size()+3) throw std::invalid_argument("bank frame labels are immutable");
