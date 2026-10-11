@@ -87,6 +87,9 @@ class PreparedTransportPattern {
             }
             domain=storage::temporal_tensor_matrix(a);guard.matrix(domain);
             if(!domain.cols()) throw std::invalid_argument("nonempty common pattern input required");
+            guard.dimension(w.tensor.domain().logical_size());guard.entries(w.tensor.domain().logical_size());
+            for(const auto n:f.tensor.domain().extents())guard.dimension(n);
+            guard.entries(f.tensor.values().nonzeros());
             weights=w.tensor.values().dense();directions=storage::temporal_tensor_matrix(f);
             guard.vector(weights);guard.matrix(directions);
             const auto full=[](const auto& t){return t.support().count()==t.domain().logical_size();};

@@ -15,6 +15,8 @@ struct TemporalReadLimits {
     bool require_canonical{true};
     composite::DeclarationLimits declarations{};
     SourceDeclarationLimits source_declarations{};
+    // Zero retains the maximum dimension as the logical tensor size bound.
+    std::size_t max_logical_size{};
 };
 
 namespace temporal_codec_detail {
@@ -90,7 +92,8 @@ public:
         std::vector<std::size_t> extents;
         for (std::size_t i = 0; i < rank; ++i) extents.push_back(dimension());
         numeric::IndexDomain out(std::move(extents));
-        require(out.logical_size() <= limits_.max_dimension, "temporal logical size exceeds configured limit");
+        const auto maximum=limits_.max_logical_size?limits_.max_logical_size:limits_.max_dimension;
+        require(out.logical_size() <= maximum, "temporal logical size exceeds configured limit");
         return out;
     }
 private:

@@ -108,6 +108,9 @@ class PreparedTransportPatternBank {
             if(!full(w.tensor) || !full(f.tensor) || !full(receipt.tensor) ||
                 receipt.tensor.domain()!=numeric::IndexDomain::linear(receipt.interpretation.ends_with(".v2")?67:66))
                 throw std::invalid_argument("complete bank tensor support required");
+            guard.dimension(w.tensor.domain().logical_size());guard.entries(w.tensor.domain().logical_size());
+            for(const auto n:f.tensor.domain().extents())guard.dimension(n);
+            guard.entries(f.tensor.values().nonzeros());
             weights=w.tensor.values().dense();directions=storage::temporal_tensor_matrix(f);
             guard.vector(weights);guard.matrix(directions);
             if(directions.rows()!=weights.size()) throw std::invalid_argument("joint bank weight dimensions");

@@ -1,6 +1,7 @@
 #include "rfc/core/builder.hpp"
 #include "rfc/learning/context_transport_pattern_bank_codec.hpp"
 #include <future>
+#include <fstream>
 #include <iostream>
 
 using namespace rfc;
@@ -342,5 +343,68 @@ void occurrence_states() {
         "stored occurrence states lost their full field family");
 }
 }
-int main(){try{family();gluing();persistence();admission();occurrence_states();observed_fields();sparse_fields();sparse_candidates();sparse_program();std::cout<<checks<<" exact pattern bank assertions passed\n";}
+void archive_admission(const char* fixture) {
+    constexpr std::size_t n=256;
+    const auto original=learn();auto endpoint=original.endpoint();
+    std::erase_if(endpoint.tensors,[](const auto& t){return t.key==4;});
+    for(auto& c:endpoint.carriers)
+        if(c.key<=2)c.domain=numeric::IndexDomain::linear(3*n);
+        else if(c.key<=8)c.domain=numeric::IndexDomain::linear(n);
+    for(auto& t:endpoint.tensors) {
+        if(t.key==1)t.tensor=numeric::SparseRationalTensor(numeric::IndexDomain::linear(3*n),
+            numeric::StructuralSupport::full(3*n),numeric::SparseRationalVector(3*n,{}));
+        else if(t.key==2)t.tensor=storage::temporal_matrix_tensor(M::identity(3*n));
+        else if(t.key>=5)t.tensor=storage::temporal_matrix_tensor(M::identity(n));
+    }
+    const numeric::ExactActionLimits action{4096,50000,64000000,16384};G guard(action);
+    const auto bank=learning::PreparedTransportPatternBank::from_endpoint(endpoint,guard);
+    const auto policy=learning::transport_pattern_bank_archive_limits(action);
+    check(policy.temporal.max_records==action.entries,"archive changed stored record admission");
+    check(policy.temporal.max_logical_size==action.dimension*action.dimension,"archive logical matrix bound");
+    const auto bytes=learning::encode_transport_pattern_bank(bank,49051,policy);
+    check(bytes.size()<50000 && 9*n*n>action.entries,"sparse fixture did not exceed logical entry budget");
+    auto legacy=policy;legacy.temporal.max_logical_size=0;
+    rejects([&]{G g(action);(void)learning::decode_transport_pattern_bank(bytes,49051,g,legacy);});
+    auto axis=policy;axis.temporal.max_dimension=3*n-1;
+    rejects([&]{G g(action);(void)learning::decode_transport_pattern_bank(bytes,49051,g,axis);});
+    auto shape=policy;shape.temporal.max_logical_size=9*n*n-1;
+    rejects([&]{G g(action);(void)learning::decode_transport_pattern_bank(bytes,49051,g,shape);});
+    auto records=policy;records.temporal.max_records=1;
+    rejects([&]{G g(action);(void)learning::decode_transport_pattern_bank(bytes,49051,g,records);});
+    auto small=policy;small.max_archive_bytes=bytes.size()-1;
+    rejects([&]{G g(action);(void)learning::decode_transport_pattern_bank(bytes,49051,g,small);});
+    auto rank=policy;rank.temporal.max_rank=1;
+    rejects([&]{G g(action);(void)learning::decode_transport_pattern_bank(bytes,49051,g,rank);});
+    auto integer=policy;integer.temporal.max_integer_bytes=0;
+    rejects([&]{G g(action);(void)learning::decode_transport_pattern_bank(bytes,49051,g,integer);});
+    G cold_guard(action);const auto cold=learning::decode_transport_pattern_bank(bytes,49051,cold_guard,policy);
+    check(cold.weights()==bank.weights() && cold.parameter_directions()==bank.parameter_directions() &&
+        cold.input_images()==bank.input_images(),"cold sparse family changed");
+    check(learning::encode_transport_pattern_bank(cold,49051,policy)==bytes,"sparse canonical bytes changed");
+    const auto tensor=std::find_if(cold.endpoint().tensors.begin(),cold.endpoint().tensors.end(),
+        [](const auto& t){return t.key==2;});
+    check(tensor->tensor.domain().logical_size()==9*n*n && tensor->tensor.support().count()==9*n*n &&
+        tensor->tensor.values().nonzeros()==3*n,"logical size expanded sparse support");
+    auto huge=action;huge.dimension=std::numeric_limits<std::size_t>::max();
+    check(learning::transport_pattern_bank_archive_limits(huge).temporal.max_logical_size==huge.dimension,
+        "logical size overflow wrapped");
+    storage::temporal_codec_detail::Writer overflow;overflow.u64(2);overflow.u64(huge.dimension);overflow.u64(2);
+    const auto widest=learning::transport_pattern_bank_archive_limits(huge);
+    rejects([&]{storage::temporal_codec_detail::Reader reader(overflow.bytes(),widest.temporal);(void)reader.domain();});
+    constexpr std::size_t oversized=1000000000;
+    for(auto& c:endpoint.carriers)if(c.key==1)c.domain=numeric::IndexDomain::linear(oversized);
+    for(auto& t:endpoint.tensors) {
+        if(t.key==1)t.tensor=numeric::SparseRationalTensor(numeric::IndexDomain::linear(oversized),
+            numeric::StructuralSupport::full(oversized),numeric::SparseRationalVector(oversized,{}));
+        else if(t.key==2)t.tensor=storage::temporal_matrix_tensor(M(oversized,3*n));
+    }
+    storage::validate_temporal_endpoint(endpoint);
+    bool rejected=false;
+    try{G g(action);(void)learning::PreparedTransportPatternBank::from_endpoint(endpoint,g);}
+    catch(const std::length_error& e){rejected=std::string(e.what())=="exact action dimension limit";}
+    check(rejected,"oversized dense weight field was not rejected before allocation");
+    if(fixture){std::ofstream out(fixture,std::ios::binary);out.write(reinterpret_cast<const char*>(bytes.data()),
+        static_cast<std::streamsize>(bytes.size()));if(!out)throw std::runtime_error("fixture write failed");}
+}
+int main(int argc,char** argv){try{family();gluing();persistence();admission();occurrence_states();observed_fields();sparse_fields();sparse_candidates();sparse_program();archive_admission(argc>1?argv[1]:nullptr);std::cout<<checks<<" exact pattern bank assertions passed\n";}
 catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
