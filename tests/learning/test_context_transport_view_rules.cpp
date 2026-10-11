@@ -170,6 +170,37 @@ void observed_field_spans() {
     rejects([&]{G g;(void)learning::acquire_context_transport_view_rules(owner,data,{0,1,2},{3},views,2,g,
         static_cast<learning::TransportContextInputScope>(99));});
 }
+void equal_carrier_certificates(){
+    for(std::size_t n=0;n<20;++n){
+        G guard;M a(n+2,n),r(n,n+2),s(n,n+2);
+        for(std::size_t j=0;j<n;++j){
+            const Q value{numeric::Integer(j+1),numeric::Integer(7)};
+            a.set(j,j,value);a.set(n,j,Q{-2,3});r.set(j,j,1/value);s.set(j,j,1/value);s.set(j,n+1,Q{5,3});
+        }
+        M joined(a.rows(),2*n);
+        for(const auto& [key,q]:a.entries()){joined.set(key.first,key.second,q);joined.set(key.first,n+key.second,-q);}
+        const numeric::PreparedExactFrames oracle(joined,guard);
+        const auto left=learning::context_view_detail::slice(oracle.kernel(),0,n,guard);
+        const auto right=learning::context_view_detail::slice(oracle.kernel(),n,n,guard);
+        const auto out=learning::context_view_detail::intersection({17,a,r},{17,a,s},guard,0);
+        check(out.common_input==numeric::checked_multiply(a,left,guard),"equal carrier common field differs");
+        check(out.origin_input==left && out.target_input==right,"equal carrier coordinate order differs");
+        check(out.common_input==a && out.origin_input==M::identity(n),"equal carrier original directions lost");
+        if(n){s.set(0,0,0);rejects([&]{(void)learning::context_view_detail::intersection({17,a,r},{17,a,s},guard,0);});}
+    }
+    numeric::ExactActionLimits limits;limits.dimension=1024;limits.steps=20000;
+    const M a=M::identity(256);G fast(limits),foreign(limits),absent(limits);
+    check(learning::context_view_detail::intersection({17,a,a},{17,a,a},fast,0).common_input==a,"bounded equal carrier failed");
+    rejects([&]{(void)learning::context_view_detail::intersection({17,a,a},{19,a,a},foreign,0);});
+    rejects([&]{(void)learning::context_view_detail::intersection({0,a,a},{0,a,a},absent,0);});
+    limits.dimension=256;G dimension(limits);
+    rejects([&]{(void)learning::context_view_detail::intersection({17,a,a},{17,a,a},dimension,0);});
+    limits.dimension=1024;limits.entries=256;G entries(limits);
+    rejects([&]{(void)learning::context_view_detail::intersection({17,a,a},{17,a,a},entries,0);});
+    G stopped({},[]{throw std::runtime_error("stopped");});
+    rejects([&]{(void)learning::context_view_detail::intersection({17,a,a},{17,a,a},stopped,0);});
+    std::cout<<"equal_carrier_steps="<<fast.steps()<<'\n';
 }
-int main() {try {faithful_coverage();negative_evidence();admission();observed_field_spans();std::cout<<checks<<" exact context view rule assertions passed\n";}
+}
+int main() {try {faithful_coverage();negative_evidence();admission();observed_field_spans();equal_carrier_certificates();std::cout<<checks<<" exact context view rule assertions passed\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}}

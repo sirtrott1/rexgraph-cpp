@@ -49,6 +49,17 @@ inline M slice(const M& a,std::size_t begin,std::size_t count,Guard& guard) {
 inline TransportContextViewWitness intersection(const TransportContextView& a,const TransportContextView& b,
     Guard& guard,std::size_t resident) {
     const auto n=a.accession.cols(),m=b.accession.cols();guard.dimension(add(n,m));
+    // Equal maps in one declared carrier retain the original coordinate order.
+    if(a.frame && a.frame==b.frame && a.accession==b.accession) {
+        guard.matrix(a.accession);
+        guard.entries(add(resident,add(a.accession.nonzeros(),mul(n,2))));
+        auto identity=M::identity(n);
+        const auto live=add(resident,add(a.accession.nonzeros(),identity.nonzeros()));
+        if(product(a.reconstruction,a.accession,guard,live)!=identity ||
+            product(b.reconstruction,b.accession,guard,live)!=identity)
+            throw std::logic_error("context common input reconstruction certificate");
+        return {a.accession,identity,std::move(identity),{}, {}};
+    }
     M joined(a.accession.rows(),add(n,m));
     for(const auto& [key,q]:a.accession.entries()) {guard.step();joined.set(key.first,key.second,q);}
     for(const auto& [key,q]:b.accession.entries()) joined.set(key.first,add(n,key.second),guard.sub(0,q));

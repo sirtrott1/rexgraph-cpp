@@ -169,8 +169,8 @@ class PreparedTransportPatternBank {
                 input_frames.push_back(carriers.at(3+count+i)->coordinate_system);
             }
             if(touched.size()!=lower || weights_at.back()!=weights.size()) throw std::invalid_argument("complete bank occurrence weights required");
-            const numeric::PreparedExactFrames unknown(directions,guard);
-            if(unknown.rank()!=directions.cols()) throw std::invalid_argument("independent joint bank parameter image required");
+            if(transport_parameter_basis_rank(directions,guard).rank!=directions.cols())
+                throw std::invalid_argument("independent joint bank parameter image required");
             const auto number=[&](std::size_t i) {
                 const auto q=receipt.tensor.state(i).value();guard.value(q);
                 if(q<0 || q.get_den()!=1 || q.get_num()>numeric::Integer(std::to_string(std::numeric_limits<std::size_t>::max())))

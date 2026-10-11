@@ -113,5 +113,45 @@ void sparse_observable_image(){
     rejects([&]{(void)learning::transport_observable_image(large,stopped);});
     std::cout<<"sparse_observable_image_steps="<<bounded.steps()<<'\n';
 }
+void exclusive_row_certificates(){
+    for(std::size_t n=0;n<18;++n){
+        G guard;M basis(n+3,3*n+2),expected(n+3,n);
+        for(std::size_t j=0;j<n;++j){
+            const Q pivot{numeric::Integer(j+1),numeric::Integer(7)};
+            const Q shared{numeric::Integer(j%2?3:-2),numeric::Integer(5)};
+            basis.set(j,3*j+1,pivot);basis.set(n,3*j+1,shared);
+            expected.set(j,j,pivot);expected.set(n,j,shared);
+        }
+        const numeric::PreparedExactFrames oracle(basis,guard);
+        check(learning::transport_parameter_basis_rank(basis,guard).rank==oracle.rank(),"exclusive row rank differs");
+        check(learning::transport_observable_image(basis,guard)==oracle.image(),"exclusive row image differs");
+        check(oracle.image()==expected,"exclusive row column order differs");
+    }
+    G guard;M no_certificate(2,3);
+    no_certificate.set(0,0,1);no_certificate.set(0,1,1);no_certificate.set(1,0,1);no_certificate.set(1,1,-1);
+    check(learning::transport_parameter_basis_rank(no_certificate,guard).rank==2,"uncertified independent fallback differs");
+    no_certificate.set(0,2,2);
+    check(learning::transport_parameter_basis_rank(no_certificate,guard).rank==2,"partial exclusive witnesses imply full rank");
+    const numeric::PreparedExactFrames fallback(no_certificate,guard);
+    check(learning::transport_observable_image(no_certificate,guard)==fallback.image(),
+        "uncertified image fallback differs");
+    numeric::ExactActionLimits limits;limits.dimension=40000;limits.steps=500000;
+    M large(10001,30000),expected(10001,10000);
+    for(std::size_t j=0;j<10000;++j){
+        large.set(j,3*j+1,Q{2,7});large.set(10000,3*j+1,Q{-3,5});
+        expected.set(j,j,Q{2,7});expected.set(10000,j,Q{-3,5});
+    }
+    G rank(limits),image(limits),full(limits);
+    check(learning::transport_parameter_basis_rank(large,rank).rank==10000,"bounded exclusive rank failed");
+    check(learning::transport_observable_image(large,image)==expected,"bounded exclusive image failed");
+    rejects([&]{(void)numeric::PreparedExactFrames(large,full);});
+    limits.entries=large.nonzeros();G small(limits);
+    rejects([&]{(void)learning::transport_parameter_basis_rank(large,small);});
+    limits.entries=16000000;limits.integer_bits=1;G bits(limits);
+    rejects([&]{(void)learning::transport_parameter_basis_rank(large,bits);});
+    G stopped({},[]{throw std::runtime_error("stopped");});
+    rejects([&]{(void)learning::transport_observable_image(large,stopped);});
+    std::cout<<"exclusive_rank_steps="<<rank.steps()<<" exclusive_image_steps="<<image.steps()<<'\n';
 }
-int main(){try{declared_family();declared_family(true);sparse_basis_rank();sparse_observable_image();std::cout<<checks<<" declared template bank checks passed\n";}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}return 0;}
+}
+int main(){try{declared_family();declared_family(true);sparse_basis_rank();sparse_observable_image();exclusive_row_certificates();std::cout<<checks<<" declared template bank checks passed\n";}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}return 0;}

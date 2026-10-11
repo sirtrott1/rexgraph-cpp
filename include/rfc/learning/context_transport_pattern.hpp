@@ -178,8 +178,8 @@ class PreparedTransportPattern {
             reconstruction=field::hodge_frame_detail::solve_columns(solve,domain.transpose(),guard);
             if(product(reconstruction,domain,guard,retained)!=M::identity(domain.cols()))
                 throw std::invalid_argument("independent pattern input frame required");
-            const numeric::PreparedExactFrames unknown(directions,guard);
-            if(unknown.rank()!=directions.cols()) throw std::invalid_argument("independent observable parameter frame required");
+            if(transport_parameter_basis_rank(directions,guard).rank!=directions.cols())
+                throw std::invalid_argument("independent observable parameter frame required");
             retained=add(retained,reconstruction.nonzeros());guard.entries(retained);
         }
     };

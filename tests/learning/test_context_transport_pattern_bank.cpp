@@ -117,7 +117,8 @@ void sparse_fields() {
     endpoint.tensors.erase(std::remove_if(endpoint.tensors.begin(),endpoint.tensors.end(),[](const auto& t){return t.key==4;}),endpoint.tensors.end());
     for(auto& c:endpoint.carriers)if(c.key>=6 && c.key<=8){c.domain=numeric::IndexDomain::linear(width);c.coordinate_system=999;}
     for(auto& t:endpoint.tensors)if(t.key>=5){auto old_image=storage::temporal_tensor_matrix(t);M image(width,old_image.cols());
-        for(const auto& [key,q]:old_image.entries())image.set(key.first?width-1:0,key.second,q);t.tensor=storage::temporal_matrix_tensor(image);}
+        for(const auto& [key,q]:old_image.entries())image.set(key.first?width-1:0,key.second,q);
+        t.tensor=storage::temporal_matrix_tensor(image);}
     limits={};limits.dimension=width;G wide_guard(limits);
     const auto wide=learning::PreparedTransportPatternBank::from_endpoint(std::move(endpoint),wide_guard);
     G small_work(limits);const auto answer=wide.response_sparse({sparse(2,width,{{0,Q{3,7}},{width-1,Q{3,7}}},999)},small_work);
@@ -251,8 +252,12 @@ void gluing() {
     const auto after=bank.response({{0,{1}}},guard);
     check(after.directions.cols()==1 && bank.weights()[0]==0,"prospective gluing mutated the learned model");
     for(int kind=0;kind<6;++kind)rejects([&]{auto c=comparison("invalid",0,2);G g;
-        if(kind==0)c.left_frame=99;if(kind==1)c.right_frame=99;if(kind==2)c.interface_frame=0;
-        if(kind==3)c.left=99;if(kind==4)c.left_map=M(2,1);if(kind==5)c.right_map=M(1,2);
+        if(kind==0)c.left_frame=99;
+        if(kind==1)c.right_frame=99;
+        if(kind==2)c.interface_frame=0;
+        if(kind==3)c.left=99;
+        if(kind==4)c.left_map=M(2,1);
+        if(kind==5)c.right_map=M(1,2);
         (void)bank.glue({{0,{1}},{2,{1}}},{c},g);});
     rejects([&]{G g;(void)bank.glue({{0,{1}}},{comparison("missing",0,2)},g);});
     rejects([&]{G g;(void)bank.glue({{0,{1}},{2,{1}}},{comparison("same",0,2),comparison("same",0,2)},g);});
@@ -292,7 +297,10 @@ void admission() {
         if(kind==6)endpoint.carriers.back().coordinate_system=102;
         (void)learning::PreparedTransportPatternBank::from_endpoint(std::move(endpoint),g);});
     for(int kind=0;kind<4;++kind)rejects([&]{numeric::ExactActionLimits limits;
-        if(kind==0)limits.dimension=1;if(kind==1)limits.entries=1;if(kind==2)limits.steps=1;if(kind==3)limits.integer_bits=1;
+        if(kind==0)limits.dimension=1;
+        if(kind==1)limits.entries=1;
+        if(kind==2)limits.steps=1;
+        if(kind==3)limits.integer_bits=1;
         G g(limits);(void)bank.response({{0,{Q{3,5}}}},g);});
     rejects([&]{G g({},[]{throw std::runtime_error("cancelled");});(void)bank.response({{0,{1}}},g);});
 }
