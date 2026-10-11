@@ -14,7 +14,7 @@ struct TransportContextViewRuleAcquisition {
     std::size_t steps{}, retained{};
 };
 
-// Compare independent observed stars through faithful rectangular views.
+// Compare observed stars through faithful rectangular views.
 // Each target input must lie in the shared image of enough agreeing peers.
 // Target transfer is conditional; unshared inputs remain unidentified.
 inline TransportContextViewRuleAcquisition acquire_context_transport_view_rules(
@@ -22,12 +22,14 @@ inline TransportContextViewRuleAcquisition acquire_context_transport_view_rules(
     const std::vector<std::size_t>& training,const std::vector<std::size_t>& targets,
     const std::vector<std::vector<TransportContextView>>& atlas,
     std::size_t minimum_peers,numeric::ExactActionGuard& guard,
-    TransportContextInputScope scope=TransportContextInputScope::FullCarrier) {
+    TransportContextInputScope scope=TransportContextInputScope::FullCarrier,bool declared_templates=false) {
     using namespace context_view_detail;
     const auto& observations=samples.model();
     const auto start=guard.steps();guard.step();
-    if(observations.parameter_basis())
+    if(observations.parameter_basis() && !declared_templates)
         throw std::invalid_argument("context view rules require independent original map entries");
+    if(declared_templates && !observations.parameter_basis())
+        throw std::invalid_argument("declared context templates require a named parameter basis");
     if(!minimum_peers) throw std::invalid_argument("positive independent peer admission required");
     std::set<std::size_t> train,held;
     for(const auto row:training) {guard.step();if(!train.insert(row).second)
@@ -113,13 +115,13 @@ inline TransportContextViewRuleAcquisition acquire_context_transport_view_rules(
     const PreparedTransportObservations& observations,const std::vector<TransportObservation>& samples,
     const std::vector<std::size_t>& training,const std::vector<std::size_t>& targets,
     const std::vector<std::vector<TransportContextView>>& atlas,std::size_t minimum_peers,
-    numeric::ExactActionGuard& guard,TransportContextInputScope scope=TransportContextInputScope::FullCarrier) {
-    return acquire_context_transport_view_rules(TransportContextSamples(observations,samples,guard),training,targets,atlas,minimum_peers,guard,scope);
+    numeric::ExactActionGuard& guard,TransportContextInputScope scope=TransportContextInputScope::FullCarrier,bool declared_templates=false) {
+    return acquire_context_transport_view_rules(TransportContextSamples(observations,samples,guard),training,targets,atlas,minimum_peers,guard,scope,declared_templates);
 }
 inline TransportContextViewRuleAcquisition acquire_context_transport_view_rules(
     const PreparedTransportEvidence& evidence,const std::vector<std::size_t>& training,const std::vector<std::size_t>& targets,
     const std::vector<std::vector<TransportContextView>>& atlas,std::size_t minimum_peers,
-    numeric::ExactActionGuard& guard,TransportContextInputScope scope=TransportContextInputScope::FullCarrier) {
-    return acquire_context_transport_view_rules(TransportContextSamples(evidence),training,targets,atlas,minimum_peers,guard,scope);
+    numeric::ExactActionGuard& guard,TransportContextInputScope scope=TransportContextInputScope::FullCarrier,bool declared_templates=false) {
+    return acquire_context_transport_view_rules(TransportContextSamples(evidence),training,targets,atlas,minimum_peers,guard,scope,declared_templates);
 }
 } // namespace rfc::learning

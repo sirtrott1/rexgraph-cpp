@@ -1,4 +1,5 @@
 #pragma once
+#include "rfc/learning/transport_parameter_basis.hpp"
 #include "rfc/learning/context_transport_view_rules.hpp"
 #include "rfc/field/prepared_hodge_frames.hpp"
 #include "rfc/storage/temporal_endpoint.hpp"
@@ -8,6 +9,7 @@ namespace rfc::learning {
 struct TransportPatternProvenance {
     std::array<std::byte,32> source_sha256{}, evidence_sha256{};
     std::size_t observations{}, peers{};
+    bool declared_templates{};
 };
 struct TransportPatternCoordinates {
     std::uint64_t domain{}, weights{}, parameters{};
@@ -266,7 +268,7 @@ private:
             guard.step();offsets.push_back(add(offsets.back(),mul(atlas[0][arena.lower_index[p]].accession.rows(),domain.cols())));
             guard.dimension(offsets.back());
         }
-        M readout(offsets.back(),observations.parameter_count());V fixed(offsets.back());
+        M entry_readout(offsets.back(),observations.variable_coordinates().size());V fixed(offsets.back());
         for(std::size_t p=begin;p<end;++p) {
             guard.step();const auto& lower=atlas[0][arena.lower_index[p]].accession;
             const auto coefficient=algebra::owned_gluing_detail::coefficient(source,up,p,guard);
@@ -283,16 +285,19 @@ private:
             for(const auto& [lo,lq]:lower.entries()) if(lo.second==c.row)
                 for(const auto& [hi,hq]:local_input.entries()) if(hi.first==c.column) {
                     const auto row=offsets[c.occurrence-begin]+lo.first*domain.cols()+hi.second;
-                    readout.set(row,e,guard.add(readout.get(row,e),guard.mul(lq,hq)));
-                    guard.entries(add(acquired.retained,add(readout.nonzeros(),fixed.size())));
+                    entry_readout.set(row,e,guard.add(entry_readout.get(row,e),guard.mul(lq,hq)));
+                    guard.entries(add(acquired.retained,add(entry_readout.nonzeros(),fixed.size())));
                 }
         }
+        auto readout=observations.parameter_basis() ?
+            product(entry_readout,*observations.parameter_basis(),guard,add(acquired.retained,entry_readout.nonzeros())) :
+            std::move(entry_readout);
         auto weights=numeric::checked_apply(readout,acquired.proof->evidence_origin(),guard);
         for(std::size_t i=0;i<weights.size();++i) weights[i]=guard.add(weights[i],fixed[i]);
         auto projected=product(readout,acquired.proof->evidence_kernel(),guard,acquired.retained);
         if(unreduced_directions) *unreduced_directions=projected;
-        const numeric::PreparedExactFrames directions(std::move(projected),guard);
-        add_carrier(3,coordinates.weights,weights.size());add_carrier(4,coordinates.parameters,directions.rank());
+        const auto directions=transport_observable_image(projected,guard,acquired.retained);
+        add_carrier(3,coordinates.weights,weights.size());add_carrier(4,coordinates.parameters,directions.cols());
         for(std::size_t i=0;i<selected.to_ambient[0].size();++i) {
             const auto& lower=atlas[0][selected.to_ambient[0][i]];
             add_carrier(5+i,lower.frame,lower.accession.rows(),storage::stable_cell_key(endpoint.source,{core::Grade{0},static_cast<std::uint32_t>(i)}));
@@ -305,7 +310,7 @@ private:
         w.tensor=numeric::SparseRationalTensor(numeric::IndexDomain::linear(weights.size()),numeric::StructuralSupport::full(weights.size()),
             numeric::SparseRationalVector(weights.size(),std::move(entries)));endpoint.tensors.push_back(std::move(w));
         storage::TemporalTensor f;f.key=3;f.role=storage::TemporalTensorRole::PhysicalRealization;f.input=4;f.output=3;
-        f.interpretation="observable-parameter-directions";f.tensor=storage::temporal_matrix_tensor(directions.image());endpoint.tensors.push_back(std::move(f));
+        f.interpretation="observable-parameter-directions";f.tensor=storage::temporal_matrix_tensor(directions);endpoint.tensors.push_back(std::move(f));
         storage::TemporalTensor receipt;receipt.key=4;receipt.role=storage::TemporalTensorRole::OpaqueExact;
         receipt.interpretation="rfc.context-transport-pattern.v1";entries.clear();
         for(std::size_t i=0;i<64;++i) {

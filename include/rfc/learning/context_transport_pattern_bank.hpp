@@ -101,11 +101,12 @@ class PreparedTransportPatternBank {
                 w.interpretation!="ordered-bank-occurrence-weights" || f.role!=storage::TemporalTensorRole::PhysicalRealization ||
                 f.owner!=global || f.input!=2 || f.output!=1 || f.interpretation!="joint-observable-parameter-directions" ||
                 receipt.role!=storage::TemporalTensorRole::OpaqueExact || receipt.owner!=global || receipt.input || receipt.output ||
-                receipt.interpretation!="rfc.context-transport-pattern-bank.v1")
+                (receipt.interpretation!="rfc.context-transport-pattern-bank.v1" &&
+                    receipt.interpretation!="rfc.context-transport-pattern-bank.v2"))
                 throw std::invalid_argument("invalid bank tensor roles");
             const auto full=[](const auto& t){return t.support().count()==t.domain().logical_size();};
             if(!full(w.tensor) || !full(f.tensor) || !full(receipt.tensor) ||
-                receipt.tensor.domain()!=numeric::IndexDomain::linear(66))
+                receipt.tensor.domain()!=numeric::IndexDomain::linear(receipt.interpretation.ends_with(".v2")?67:66))
                 throw std::invalid_argument("complete bank tensor support required");
             weights=w.tensor.values().dense();directions=storage::temporal_tensor_matrix(f);
             guard.vector(weights);guard.matrix(directions);
@@ -181,6 +182,9 @@ class PreparedTransportPatternBank {
                 (i<32?provenance.source_sha256[i]:provenance.evidence_sha256[i-32])=static_cast<std::byte>(v);
             }
             provenance.observations=number(64);provenance.peers=number(65);
+            provenance.declared_templates=receipt.interpretation.ends_with(".v2");
+            if(provenance.declared_templates && number(66)!=1)
+                throw std::invalid_argument("declared template bank provenance required");
             if(!provenance.observations || !provenance.peers ||
                 std::all_of(provenance.source_sha256.begin(),provenance.source_sha256.end(),[](auto v){return v==std::byte{0};}) ||
                 std::all_of(provenance.evidence_sha256.begin(),provenance.evidence_sha256.end(),[](auto v){return v==std::byte{0};}))
@@ -305,13 +309,14 @@ public:
     static PreparedTransportPatternBank learn(const TransportContextSamples& samples,const std::vector<std::size_t>& training,
         const std::vector<std::size_t>& origins,const std::vector<std::vector<TransportContextView>>& atlas,
         std::size_t minimum_peers,TransportPatternBankCoordinates coordinates,TransportPatternProvenance provenance,G& guard,
-        TransportContextInputScope scope=TransportContextInputScope::FullCarrier) {
+        TransportContextInputScope scope=TransportContextInputScope::FullCarrier,bool declared_templates=false) {
         using namespace context_view_detail;
         const auto& observations=samples.model();
         if(origins.empty() || origins.size()!=coordinates.domains.size() ||
             !std::is_sorted(origins.begin(),origins.end()) || std::adjacent_find(origins.begin(),origins.end())!=origins.end())
             throw std::invalid_argument("ordered distinct bank origins and domain identities required");
-        const auto acquired=acquire_context_transport_view_rules(samples,training,{},atlas,minimum_peers,guard,scope);
+        const auto acquired=acquire_context_transport_view_rules(samples,training,{},atlas,minimum_peers,guard,scope,declared_templates);
+        provenance.declared_templates=declared_templates;
         if(!acquired.proof) throw std::invalid_argument("independently admitted bank training required");
         const auto& source=observations.owner().fibers().complex();algebra::SubcomplexMask patch(source);
         for(const auto origin:origins) patch.select({core::Grade{1},static_cast<std::uint32_t>(origin)});
@@ -349,8 +354,8 @@ public:
             for(const auto& [key,q]:directions[i].entries()) {guard.step();projected.set(at+key.first,key.second,q);guard.entries(add(resident,projected.nonzeros()));}
             at=add(at,weights[i].size());
         }
-        numeric::PreparedExactFrames joint(std::move(projected),guard);
-        carrier(1,coordinates.weights,origin.size());carrier(2,coordinates.parameters,joint.rank());
+        const auto joint=transport_observable_image(projected,guard,resident);
+        carrier(1,coordinates.weights,origin.size());carrier(2,coordinates.parameters,joint.cols());
         for(std::size_t i=0;i<selected.to_ambient[0].size();++i) {
             const auto& view=atlas[0][selected.to_ambient[0][i]];
             carrier(3+2*origins.size()+i,view.frame,view.accession.rows(),storage::stable_cell_key(endpoint.source,{core::Grade{0},static_cast<std::uint32_t>(i)}));
@@ -361,16 +366,18 @@ public:
         w.tensor=numeric::SparseRationalTensor(numeric::IndexDomain::linear(origin.size()),numeric::StructuralSupport::full(origin.size()),
             numeric::SparseRationalVector(origin.size(),std::move(entries)));endpoint.tensors.push_back(std::move(w));
         storage::TemporalTensor f;f.key=2;f.role=storage::TemporalTensorRole::PhysicalRealization;f.input=2;f.output=1;
-        f.interpretation="joint-observable-parameter-directions";f.tensor=storage::temporal_matrix_tensor(joint.image());endpoint.tensors.push_back(std::move(f));
+        f.interpretation="joint-observable-parameter-directions";f.tensor=storage::temporal_matrix_tensor(joint);endpoint.tensors.push_back(std::move(f));
         storage::TemporalTensor receipt;receipt.key=3;receipt.role=storage::TemporalTensorRole::OpaqueExact;
-        receipt.interpretation="rfc.context-transport-pattern-bank.v1";entries.clear();
+        receipt.interpretation=declared_templates?"rfc.context-transport-pattern-bank.v2":"rfc.context-transport-pattern-bank.v1";entries.clear();
         for(std::size_t i=0;i<64;++i) {
             const auto byte=std::to_integer<unsigned>(i<32?provenance.source_sha256[i]:provenance.evidence_sha256[i-32]);
             if(byte) entries.push_back({i,Q{byte}});
         }
         entries.push_back({64,Q{numeric::Integer(std::to_string(provenance.observations))}});entries.push_back({65,Q{numeric::Integer(std::to_string(provenance.peers))}});
-        receipt.tensor=numeric::SparseRationalTensor(numeric::IndexDomain::linear(66),numeric::StructuralSupport::full(66),
-            numeric::SparseRationalVector(66,std::move(entries)));endpoint.tensors.push_back(std::move(receipt));
+        if(declared_templates)entries.push_back({66,Q{1}});
+        const auto receipt_size=declared_templates?67u:66u;
+        receipt.tensor=numeric::SparseRationalTensor(numeric::IndexDomain::linear(receipt_size),numeric::StructuralSupport::full(receipt_size),
+            numeric::SparseRationalVector(receipt_size,std::move(entries)));endpoint.tensors.push_back(std::move(receipt));
         std::sort(endpoint.carriers.begin(),endpoint.carriers.end(),[](const auto& a,const auto& b){return a.key<b.key;});
         std::sort(endpoint.tensors.begin(),endpoint.tensors.end(),[](const auto& a,const auto& b){return a.key<b.key;});
         return PreparedTransportPatternBank(std::move(endpoint),guard);
@@ -379,14 +386,14 @@ public:
         const std::vector<TransportObservation>& samples,const std::vector<std::size_t>& training,
         const std::vector<std::size_t>& origins,const std::vector<std::vector<TransportContextView>>& atlas,
         std::size_t minimum_peers,TransportPatternBankCoordinates coordinates,TransportPatternProvenance provenance,G& guard,
-        TransportContextInputScope scope=TransportContextInputScope::FullCarrier) {
-        return learn(TransportContextSamples(observations,samples,guard),training,origins,atlas,minimum_peers,std::move(coordinates),provenance,guard,scope);
+        TransportContextInputScope scope=TransportContextInputScope::FullCarrier,bool declared_templates=false) {
+        return learn(TransportContextSamples(observations,samples,guard),training,origins,atlas,minimum_peers,std::move(coordinates),provenance,guard,scope,declared_templates);
     }
     static PreparedTransportPatternBank learn(const PreparedTransportEvidence& evidence,const std::vector<std::size_t>& training,
         const std::vector<std::size_t>& origins,const std::vector<std::vector<TransportContextView>>& atlas,
         std::size_t minimum_peers,TransportPatternBankCoordinates coordinates,TransportPatternProvenance provenance,G& guard,
-        TransportContextInputScope scope=TransportContextInputScope::FullCarrier) {
-        return learn(TransportContextSamples(evidence),training,origins,atlas,minimum_peers,std::move(coordinates),provenance,guard,scope);
+        TransportContextInputScope scope=TransportContextInputScope::FullCarrier,bool declared_templates=false) {
+        return learn(TransportContextSamples(evidence),training,origins,atlas,minimum_peers,std::move(coordinates),provenance,guard,scope,declared_templates);
     }
     const storage::TemporalEndpoint& endpoint() const & {return state_->endpoint;}
     const V& weights() const & {return state_->weights;}
