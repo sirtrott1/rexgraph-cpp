@@ -15,7 +15,7 @@ void check(bool ok,const char* message){++checks;if(!ok)throw std::runtime_error
 M column(std::initializer_list<Q> values){M out(values.size(),1);std::size_t i{};for(const auto& q:values)out.set(i++,0,q);return out;}
 Q dot(const V& a,const V& b,G& guard){Q out;for(std::size_t i=0;i<a.size();++i)out=guard.add(out,guard.mul(a[i],b[i]));return out;}
 template<class F>void rejects(F&& f){bool rejected=false;try{f();}catch(const std::exception&){rejected=true;}check(rejected,"invalid bank accepted");}
-auto learn(std::size_t repetitions=1,bool observed_inputs=false) {
+auto learn(std::size_t repetitions=1,bool observed_inputs=false,bool retained_proof=false) {
     G guard;core::RelationSignature signature;
     const auto a=signature.add_type("context",core::BoundaryPolicy::DeclaredExact,0,1);
     const auto b=signature.add_type("anchor",core::BoundaryPolicy::DeclaredExact,0,1);
@@ -40,12 +40,50 @@ auto learn(std::size_t repetitions=1,bool observed_inputs=false) {
     std::vector<std::vector<learning::TransportContextView>> atlas(2);atlas[0].push_back({1,M::identity(1),M::identity(1)});
     for(std::size_t i=0;i<6;++i)atlas[1].push_back({2,M::identity(dimension),M::identity(dimension)});
     learning::TransportPatternProvenance p;p.source_sha256.fill(std::byte{7});p.evidence_sha256.fill(std::byte{11});
+    if(retained_proof) {
+        learning::PreparedTransportEvidence evidence(observations,guard);evidence=evidence.append(samples,guard);
+        std::vector<std::size_t> training{0,1,2,3,4,5};
+        const auto scope=observed_inputs?learning::TransportContextInputScope::ObservedFields:learning::TransportContextInputScope::FullCarrier;
+        const learning::PreparedTransportPatternBankTraining prepared(evidence,training,atlas,2,guard,scope);
+        const auto direct=learning::acquire_context_transport_view_rules(evidence,training,{},atlas,2,guard,scope);
+        const auto& acquired=prepared.acquisition();
+        check(acquired.block_statuses==direct.block_statuses && acquired.block_ranks==direct.block_ranks,
+            "retained proof changed original block admissions");
+        check(acquired.proof && acquired.proof->evidence_kernel()==direct.proof->evidence_kernel(),
+            "retained proof changed complete evidence directions");
+        check(acquired.comparisons.acquisition.relations.size()==direct.comparisons.acquisition.relations.size(),
+            "retained proof omitted original equations");
+        const auto proof=acquired.proof;
+        atlas.clear();training.clear();samples.clear();
+        rejects([&]{G g;(void)prepared.compile({0,0},{101,102,{100,103}},p,g);});
+        rejects([&]{G g;(void)prepared.compile({6},{101,102,{100}},p,g);});
+        auto limits=guard.limits();--limits.integer_bits;
+        rejects([&]{G g(limits);(void)prepared.compile({0},{101,102,{100}},p,g);});
+        G compiling(guard.limits());
+        auto bank=prepared.compile({0,1,3},{101,102,{100,103,104}},p,compiling);
+        check(prepared.acquisition().proof==proof,"bank compilation reacquired original proof");
+        G repeated(guard.limits());const auto second=prepared.compile({0,1,3},{101,102,{100,103,104}},p,repeated);
+        check(learning::encode_transport_pattern_bank(bank,479)==learning::encode_transport_pattern_bank(second,479),
+            "repeated proof compilation changed canonical bytes");
+        return bank.with_frame_labels({{1,"reading",{"value"}},{2,"context",observed_inputs?
+            std::vector<std::string>{"signal","context"}:std::vector<std::string>{"signal"}}},compiling);
+    }
     return learning::PreparedTransportPatternBank::learn(observations,samples,{0,1,2,3,4,5},{0,1,3},atlas,2,{101,102,{100,103,104}},p,guard,
         observed_inputs?learning::TransportContextInputScope::ObservedFields:learning::TransportContextInputScope::FullCarrier)
         .with_frame_labels({{1,"reading",{"value"}},{2,"context",observed_inputs?std::vector<std::string>{"signal","context"}:std::vector<std::string>{"signal"}}},guard);
 }
 auto comparison(std::string name,std::size_t left,std::size_t right,Q right_gain=1) {
     return learning::TransportPatternComparison{std::move(name),left,right,1,1,1,column({1}),column({right_gain})};
+}
+void retained_training() {
+    for(const auto observed:{false,true})for(const auto repetitions:{1u,8u}) {
+        const auto direct=learn(repetitions,observed),retained=learn(repetitions,observed,true);
+        check(learning::encode_transport_pattern_bank(direct,479)==learning::encode_transport_pattern_bank(retained,479),
+            "native proof reuse changed bank archive");
+        G guard;check(direct.response({{0,observed?V{1,1}:V{1}}},guard).directions==
+            retained.response({{0,observed?V{1,1}:V{1}}},guard).directions,
+            "native proof reuse filled an unknown response");
+    }
 }
 void observed_fields() {
     G guard;const auto bank=learn(1,true);
@@ -406,5 +444,5 @@ void archive_admission(const char* fixture) {
     if(fixture){std::ofstream out(fixture,std::ios::binary);out.write(reinterpret_cast<const char*>(bytes.data()),
         static_cast<std::streamsize>(bytes.size()));if(!out)throw std::runtime_error("fixture write failed");}
 }
-int main(int argc,char** argv){try{family();gluing();persistence();admission();occurrence_states();observed_fields();sparse_fields();sparse_candidates();sparse_program();archive_admission(argc>1?argv[1]:nullptr);std::cout<<checks<<" exact pattern bank assertions passed\n";}
+int main(int argc,char** argv){try{retained_training();family();gluing();persistence();admission();occurrence_states();observed_fields();sparse_fields();sparse_candidates();sparse_program();archive_admission(argc>1?argv[1]:nullptr);std::cout<<checks<<" exact pattern bank assertions passed\n";}
 catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

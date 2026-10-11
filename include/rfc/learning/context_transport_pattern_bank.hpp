@@ -2,6 +2,7 @@
 #include "rfc/learning/context_transport_pattern.hpp"
 
 namespace rfc::learning {
+class PreparedTransportPatternBankTraining;
 struct TransportPatternBankCoordinates {
     std::uint64_t weights{}, parameters{};
     std::vector<std::uint64_t> domains;
@@ -61,6 +62,7 @@ struct TransportPatternGluing {
 // One retained complex and one joint observable family for its learned stars.
 // Shared source cells retain one identity; free parameters remain correlated.
 class PreparedTransportPatternBank {
+    friend class PreparedTransportPatternBankTraining;
     using M=numeric::ExactMatrix;
     using V=numeric::RationalVector;
     using Q=numeric::Rational;
@@ -313,12 +315,19 @@ public:
         const std::vector<std::size_t>& origins,const std::vector<std::vector<TransportContextView>>& atlas,
         std::size_t minimum_peers,TransportPatternBankCoordinates coordinates,TransportPatternProvenance provenance,G& guard,
         TransportContextInputScope scope=TransportContextInputScope::FullCarrier,bool declared_templates=false) {
+        const auto acquired=acquire_context_transport_view_rules(samples,training,{},atlas,minimum_peers,guard,scope,declared_templates);
+        return compile(samples,acquired,origins,atlas,std::move(coordinates),provenance,guard,declared_templates);
+    }
+private:
+    static PreparedTransportPatternBank compile(const TransportContextSamples& samples,
+        const TransportContextViewRuleAcquisition& acquired,const std::vector<std::size_t>& origins,
+        const std::vector<std::vector<TransportContextView>>& atlas,TransportPatternBankCoordinates coordinates,
+        TransportPatternProvenance provenance,G& guard,bool declared_templates) {
         using namespace context_view_detail;
         const auto& observations=samples.model();
         if(origins.empty() || origins.size()!=coordinates.domains.size() ||
             !std::is_sorted(origins.begin(),origins.end()) || std::adjacent_find(origins.begin(),origins.end())!=origins.end())
             throw std::invalid_argument("ordered distinct bank origins and domain identities required");
-        const auto acquired=acquire_context_transport_view_rules(samples,training,{},atlas,minimum_peers,guard,scope,declared_templates);
         provenance.declared_templates=declared_templates;
         if(!acquired.proof) throw std::invalid_argument("independently admitted bank training required");
         const auto& source=observations.owner().fibers().complex();algebra::SubcomplexMask patch(source);
@@ -385,6 +394,7 @@ public:
         std::sort(endpoint.tensors.begin(),endpoint.tensors.end(),[](const auto& a,const auto& b){return a.key<b.key;});
         return PreparedTransportPatternBank(std::move(endpoint),guard);
     }
+public:
     static PreparedTransportPatternBank learn(const PreparedTransportObservations& observations,
         const std::vector<TransportObservation>& samples,const std::vector<std::size_t>& training,
         const std::vector<std::size_t>& origins,const std::vector<std::vector<TransportContextView>>& atlas,
@@ -770,6 +780,36 @@ private:
         std::vector<V> selected_coordinates;const auto map=shared?readout(inputs,guard,true,selected_coordinates):unscaled;
         out.section=apply(product(section_map,unscaled,guard,s.retained),weights,directions,coordinates,guard,true);
         out.boundary_response=apply(map,weights,directions,std::move(coordinates),guard,shared);return out;
+    }
+};
+
+// Own the original evidence, declared views and complete comparison proof.
+class PreparedTransportPatternBankTraining {
+    using G=numeric::ExactActionGuard;
+    PreparedTransportEvidence evidence_;
+    std::vector<std::size_t> training_;
+    std::vector<std::vector<TransportContextView>> atlas_;
+    numeric::ExactActionLimits limits_;
+    bool declared_templates_;
+    TransportContextViewRuleAcquisition acquired_;
+public:
+    PreparedTransportPatternBankTraining(PreparedTransportEvidence evidence,std::vector<std::size_t> training,
+        std::vector<std::vector<TransportContextView>> atlas,std::size_t minimum_peers,G& guard,
+        TransportContextInputScope scope=TransportContextInputScope::FullCarrier,bool declared_templates=false)
+        :evidence_(std::move(evidence)),training_(std::move(training)),atlas_(std::move(atlas)),
+         limits_(guard.limits()),declared_templates_(declared_templates),
+         acquired_(acquire_context_transport_view_rules(evidence_,training_,{},atlas_,minimum_peers,guard,scope,declared_templates)) {}
+    const TransportContextViewRuleAcquisition& acquisition() const & {return acquired_;}
+    const TransportContextViewRuleAcquisition& acquisition() const &&=delete;
+    PreparedTransportPatternBank compile(const std::vector<std::size_t>& origins,
+        TransportPatternBankCoordinates coordinates,TransportPatternProvenance provenance,G& guard) const {
+        const auto& limits=guard.limits();
+        if(limits.dimension!=limits_.dimension || limits.entries!=limits_.entries ||
+            limits.steps!=limits_.steps || limits.integer_bits!=limits_.integer_bits)
+            throw std::invalid_argument("pattern proof requires its original action limits");
+        guard.step();guard.entries(acquired_.retained);
+        return PreparedTransportPatternBank::compile(TransportContextSamples(evidence_),acquired_,origins,atlas_,
+            std::move(coordinates),provenance,guard,declared_templates_);
     }
 };
 } // namespace rfc::learning
