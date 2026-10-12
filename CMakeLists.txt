@@ -332,6 +332,12 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
   add_test(NAME rfc_relational_comparison_forms COMMAND rfc_relational_comparison_forms_tests)
   add_test(NAME rfc_relational_comparison_forms_fraction COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_relational_comparison_forms.py $<TARGET_FILE:rfc_relational_comparison_forms_tests>)
+
+  add_executable(rfc_relational_value_admission_tests tests/inference/test_relational_value_admission.cpp)
+  target_link_libraries(rfc_relational_value_admission_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_relational_value_admission COMMAND rfc_relational_value_admission_tests)
+  add_test(NAME rfc_relational_value_admission_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_relational_value_admission.py $<TARGET_FILE:rfc_relational_value_admission_tests>)
   if(RFC_BUILD_LEARNING)
     add_executable(rfc_prepared_consumer_tests tests/inference/test_prepared_consumers.cpp)
     target_link_libraries(rfc_prepared_consumer_tests PRIVATE rfc::learning rfc::native_execution)

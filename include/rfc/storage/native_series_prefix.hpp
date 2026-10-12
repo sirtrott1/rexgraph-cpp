@@ -22,6 +22,8 @@ public:
     std::uint64_t first_sequence() const {return prefix_.first_sequence();}
     std::size_t segment_count() const {return prefix_.segment_count();}
     NativeSeriesEndpoint tail() const {return prefix_.tail();}
+    // An independent immutable fork containing only this selected prefix.
+    NativeTemporalSeries history() const {return prefix_;}
     NativeSeriesEndpoint at(std::uint64_t sequence) const {return prefix_.at(sequence);}
     NativeSeriesDifference difference(std::uint64_t first,std::uint64_t last) const {return prefix_.difference(first,last);}
     std::span<const std::byte> segment_bytes(std::size_t index) const & {return prefix_.segment_bytes(index);}
