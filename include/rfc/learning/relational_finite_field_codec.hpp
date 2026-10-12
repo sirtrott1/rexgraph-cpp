@@ -11,6 +11,8 @@ inline constexpr std::array<std::byte, 8> map_magic{
     std::byte{'R'}, std::byte{'F'}, std::byte{'C'}, std::byte{'Q'}, std::byte{'M'}, std::byte{1}, std::byte{0}, std::byte{0}};
 inline constexpr std::array<std::byte, 8> result_magic{
     std::byte{'R'}, std::byte{'F'}, std::byte{'C'}, std::byte{'Q'}, std::byte{'B'}, std::byte{1}, std::byte{0}, std::byte{0}};
+inline constexpr std::array<std::byte, 8> evaluation_magic{
+    std::byte{'R'}, std::byte{'F'}, std::byte{'C'}, std::byte{'Q'}, std::byte{'C'}, std::byte{1}, std::byte{0}, std::byte{0}};
 inline std::vector<std::byte> target(const RelationalFiniteFieldTarget& t) {
     return std::visit([](const auto& value) {
         if constexpr (std::is_same_v<std::decay_t<decltype(value)>, inference::OwnedRelationalFieldProgram>) return inference::encode_relational_field_program(value);
@@ -89,5 +91,21 @@ inline RelationalFiniteFieldResult decode_relational_finite_field_result(std::sp
     const auto map = decode_relational_finite_field_map(r.blob(), read_policy, limits, check); const auto expected = r.blob();
     inference::field_program_detail::require(!r.remaining(), "trailing finite branch result bytes");
     const auto out = map.execute(limits, check); canonical(expected, witness(out)); canonical(bytes, encode_relational_finite_field_result(out)); return out;
+}
+inline std::vector<std::byte> encode_relational_finite_field_evaluation(const RelationalFiniteFieldEvaluation& evaluation) {
+    using namespace relational_finite_field_codec_detail; const auto pin = evaluation; auto w = envelope(evaluation_magic);
+    blob(w, encode_relational_finite_field_result(pin.family())); w.u64(pin.ordinal());
+    relational_affine_codec_detail::vector(w, pin.free_values());
+    blob(w, inference::encode_accession_field_result(pin.result())); return finish(std::move(w));
+}
+inline RelationalFiniteFieldEvaluation decode_relational_finite_field_evaluation(std::span<const std::byte> bytes,
+    const storage::TemporalReadLimits& policy, numeric::ExactActionLimits limits = {}, std::function<void()> check = {}) {
+    using namespace relational_finite_field_codec_detail; const auto read_policy = policy;
+    const auto image = frozen_bytes(bytes, read_policy); bytes = image; Reader r(bytes, read_policy); header(r, bytes, evaluation_magic);
+    const auto family = r.blob(); const auto ordinal = size(r); auto free = relational_affine_codec_detail::vector(r);
+    const auto expected = r.blob(); inference::field_program_detail::require(!r.remaining(), "trailing finite evaluation bytes");
+    const auto owner = decode_relational_finite_field_result(family, read_policy, limits, check);
+    auto out = owner.evaluate(ordinal, std::move(free), limits, check);
+    canonical(expected, inference::encode_accession_field_result(out.result())); canonical(bytes, encode_relational_finite_field_evaluation(out)); return out;
 }
 } // namespace rfc::learning

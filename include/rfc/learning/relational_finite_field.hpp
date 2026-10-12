@@ -28,6 +28,7 @@ inline inference::OwnedRelationalFieldProgram program(const RelationalFiniteFiel
 }
 } // namespace relational_finite_field_detail
 class RelationalFiniteFieldResult;
+class RelationalFiniteFieldEvaluation;
 class PreparedRelationalFiniteFieldMap {
     struct State {
         inference::OwnedRelationalFiniteSource source;
@@ -101,6 +102,8 @@ public:
     std::size_t size() const noexcept { return state_->branches.size(); }
     const RelationalFiniteFieldBranch& branch(std::size_t ordinal) const & { return state_->branches.at(ordinal); }
     const RelationalFiniteFieldBranch& branch(std::size_t) const && = delete;
+    RelationalFiniteFieldEvaluation evaluate(std::size_t ordinal, numeric::RationalVector free,
+        numeric::ExactActionLimits limits = {}, std::function<void()> check = {}) const;
     std::vector<RelationalFiniteFieldBranch> select(std::size_t begin, std::size_t count,
         numeric::ExactActionLimits limits = {}, std::function<void()> check = {}) const {
         using namespace inference::field_program_detail; const auto pin = state_; Guard guard(limits, std::move(check));
@@ -140,5 +143,50 @@ inline RelationalFiniteFieldResult PreparedRelationalFiniteFieldMap::execute(num
         if (!matched) branches.push_back({pin, sections, branches.size(), section, {}, RelationalFiniteFieldStatus::Unmapped, {}});
     }
     guard.step(); return RelationalFiniteFieldResult({pin, sections, std::move(branches)});
+}
+class RelationalFiniteFieldEvaluation {
+    using Selected = std::variant<inference::OwnedAccessionFieldResult, RelationalAffineEvaluation>;
+    struct State {
+        RelationalFiniteFieldResult family;
+        std::size_t ordinal;
+        numeric::RationalVector free;
+        Selected selected;
+    };
+public:
+    RelationalFiniteFieldResult family() const { return state_->family; }
+    std::size_t ordinal() const noexcept { return state_->ordinal; }
+    const RelationalFiniteFieldBranch& branch() const & { return state_->family.branch(state_->ordinal); }
+    const RelationalFiniteFieldBranch& branch() const && = delete;
+    const numeric::RationalVector& free_values() const & { return state_->free; }
+    const numeric::RationalVector& free_values() const && = delete;
+    inference::OwnedAccessionFieldResult result() const {
+        return std::visit([](const auto& selected) -> inference::OwnedAccessionFieldResult {
+            if constexpr (std::is_same_v<std::decay_t<decltype(selected)>, inference::OwnedAccessionFieldResult>) return selected;
+            else return selected.result();
+        }, state_->selected);
+    }
+    std::optional<RelationalAffineEvaluation> affine_evaluation() const {
+        const auto* value = std::get_if<RelationalAffineEvaluation>(&state_->selected);
+        return value ? std::optional<RelationalAffineEvaluation>{*value} : std::nullopt;
+    }
+private:
+    friend class RelationalFiniteFieldResult;
+    explicit RelationalFiniteFieldEvaluation(State state) : state_(std::make_shared<const State>(std::move(state))) {}
+    std::shared_ptr<const State> state_;
+};
+inline RelationalFiniteFieldEvaluation RelationalFiniteFieldResult::evaluate(std::size_t ordinal,
+    numeric::RationalVector free, numeric::ExactActionLimits limits, std::function<void()> check) const {
+    using namespace inference::field_program_detail;
+    const auto owner = *this; const auto frozen = free; Guard guard(limits, check);
+    const auto& selected = owner.branch(ordinal);
+    require(selected.status == RelationalFiniteFieldStatus::Interpreted && selected.value.has_value(),
+        "finite evaluation requires an interpreted branch");
+    guard.vector(frozen);
+    auto actual = std::visit([&](const auto& value) -> RelationalFiniteFieldEvaluation::Selected {
+        if constexpr (std::is_same_v<std::decay_t<decltype(value)>, inference::OwnedAccessionFieldResult>) {
+            require(frozen.empty(), "fixed finite branch has no free parameter directions"); return value;
+        } else return value.evaluate(frozen, limits, check);
+    }, *selected.value);
+    guard.step(); return RelationalFiniteFieldEvaluation({owner, ordinal, frozen, std::move(actual)});
 }
 } // namespace rfc::learning

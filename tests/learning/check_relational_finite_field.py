@@ -55,7 +55,10 @@ def run(binary):
         packet = str(Path(tmp)/'branch.packet')
         subprocess.run([binary, '--write', packet], check=True)
         subprocess.run([binary, '--read', packet], check=True)
-    print('12 complete affine Fraction cases plus64 finite compatibility cases and separate cold process passed')
+        choice = str(Path(tmp)/'choice.packet')
+        subprocess.run([binary, '--write-choice', choice], check=True)
+        subprocess.run([binary, '--read-choice', choice], check=True)
+    print('12 complete affine Fraction cases plus64 finite compatibility cases and two separate cold processes passed')
 
 
 if __name__ == '__main__':

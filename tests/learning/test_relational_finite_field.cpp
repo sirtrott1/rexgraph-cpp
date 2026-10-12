@@ -166,7 +166,9 @@ void corpus(bool emit) {
     for(std::size_t trial=0;trial<12;++trial) {
         V xi{Q{static_cast<long>(trial)-4,3},Q{static_cast<long>(trial%7)-2,5},Q{static_cast<long>(trial%11)-3,7}};
         for(auto& q:xi)q.canonicalize();
-        const auto selected=learned.evaluate(xi);const auto selected_result=selected.result();const auto fields=selected_result.result();
+        const auto selection=result.evaluate(1,xi);const auto selected_result=selection.result();const auto fields=selected_result.result();
+        check(selection.ordinal()==1&&selection.branch().rule==6403&&selection.free_values()==xi&&selection.affine_evaluation().has_value(),"finite completion owns actual branch and full common choice");
+        check(selection.family().size()==4&&selection.family().map().same_owner(map),"finite completion keeps every original alternative and actual map owner");
         check(fields.field(2).values().dense()==response({2,3,5,7},{-10+4*xi[0],5-2*xi[0],xi[0]}),"complete held field follows correlated learned maps");
         if(emit){std::cout<<"{\"xi\":";json(xi);std::cout<<",\"input\":";json(V{2,3,5,7});
             std::cout<<",\"particular\":";json(learned.field(2).particular.values().dense());std::cout<<",\"directions\":";json(learned.field(2).directions);
@@ -188,6 +190,47 @@ void corpus(bool emit) {
     std::vector<std::future<std::vector<std::byte>>> readers;
     for(int i=0;i<6;++i)readers.push_back(std::async(std::launch::async,[map]{return encode_relational_finite_field_result(map.execute());}));
     for(auto& f:readers)check(f.get()==image,"immutable finite owners and whole fields survive six concurrent readers");
+}
+void completions() {
+    const auto family=finite_map().execute();const auto map=family.map();const auto fixed=family.evaluate(0,{});
+    const auto equal_field=family.evaluate(2,{});
+    check(fixed.ordinal()==0&&fixed.free_values().empty()&&!fixed.affine_evaluation(),"fixed finite choice explicitly has no parameter carrier");
+    check(encode_accession_field_result(fixed.result())==encode_accession_field_result(equal_field.result())&&encode_relational_finite_field_evaluation(fixed)!=encode_relational_finite_field_evaluation(equal_field),"equal selected fields retain different finite branch identity");
+    const auto selected=family.evaluate(1,{3,5,7});const auto image=encode_relational_finite_field_evaluation(selected);
+    const auto cold=decode_relational_finite_field_evaluation(image,{});const auto raw=cold.result();const auto fields=raw.result();
+    check(cold.family().size()==4&&cold.ordinal()==1&&cold.free_values()==V({3,5,7})&&cold.branch().finite.assignment(cold.branch().section)==std::vector<std::uint64_t>({101,101,101}),"cold completion retains entire finite source/assignment/rule/free family");
+    check(encode_relational_finite_field_evaluation(cold)==image&&fields.field(2).values().dense()==response({2,3,5,7},{2,-1,3}),"canonical complete finite completion and independent response");
+    const auto escaped=[] {return finite_map().execute().evaluate(1,{3,5,7});}();
+    check(encode_relational_finite_field_evaluation(escaped)==image,"escaped completion owns full original model, alternatives and selected fields");
+    const auto a=escaped.family().map().source().asset();check(a.recover(112,10).size()==1&&escaped.branch().map.declaration().rules[1].key==6402,"escaped selection preserves exact original source mapping and unselected rules");
+    rejects([&]{family.evaluate(3,{});},"unsupported finite branch cannot masquerade as a zero completion");
+    rejects([&]{family.evaluate(4,{});},"out-of-range finite branch selection");
+    rejects([&]{family.evaluate(0,{1});},"fixed finite branch cannot invent a parameter direction");
+    rejects([&]{family.evaluate(1,{1,2});},"affine finite branch requires every actual common free direction");
+    auto d=map.declaration();d.rules.erase(d.rules.begin()+1,d.rules.end());const PreparedRelationalFiniteFieldMap partial(map.source(),map.targets(),d);const auto unresolved=partial.execute();
+    rejects([&]{unresolved.evaluate(1,{});},"unmapped finite branch cannot be implicitly interpreted");
+    auto active=family;bool changed{};const auto frozen=active.evaluate(1,{3,5,7},{},[&]{if(!changed){changed=true;active=unresolved;}});
+    check(frozen.family().size()==4&&active.size()==3&&encode_relational_finite_field_evaluation(frozen)==image,"finite completion pins full family before callbacks replace handle");
+    V values{3,5,7};auto& original=values[0];bool changed_values{};
+    const auto frozen_values=family.evaluate(1,std::move(values),{},[&]{if(!changed_values){changed_values=true;original=999;}});
+    check(frozen_values.free_values()==V({3,5,7})&&encode_relational_finite_field_evaluation(frozen_values)==image,"moved full finite choice frozen before callbacks");
+    rejects([&]{family.evaluate(1,{3,5,7},{},[]{throw std::runtime_error("cancel");});},"cancelled finite completion publishes no selected child");
+    auto caller=image;auto policy=storage::TemporalReadLimits{};bool changed_image{};
+    const auto frozen_image=decode_relational_finite_field_evaluation(caller,policy,{},[&]{if(!changed_image){changed_image=true;caller[0]=std::byte{0};policy.max_file_bytes=1;}});
+    check(encode_relational_finite_field_evaluation(frozen_image)==image,"cold completion bytes and read policy frozen before callbacks");
+    using namespace relational_finite_field_codec_detail;
+    auto bad=image;bad.back()^=std::byte{1};const auto hash=storage::rfcx_detail::fnv1a64(std::span<const std::byte>(bad).subspan(32));for(unsigned i=0;i<8;++i)bad[24+i]=static_cast<std::byte>((hash>>(i*8u))&255u);
+    rejects([&]{decode_relational_finite_field_evaluation(bad,{});},"selected full native witness is recomputed despite repaired checksum");
+    auto limits=numeric::ExactActionLimits{};limits.steps=1;rejects([&]{family.evaluate(1,{3,5,7},limits);},"finite completion exact work refusal");
+    std::vector<std::future<std::vector<std::byte>>> readers;
+    for(int i=0;i<6;++i)readers.push_back(std::async(std::launch::async,[family]{return encode_relational_finite_field_evaluation(family.evaluate(1,{3,5,7}));}));
+    for(auto& f:readers)check(f.get()==image,"six immutable finite completion readers retain complete ancestry");
+    const auto program=relational_finite_field_detail::program(map.targets()[0]);auto parameters_active=parameters();parameters_active.parameters.resize(3);parameters_active.variables.resize(10);parameters_active.basis=M(10,3);
+    const auto original_parameters=parameters();for(const auto& [ij,q]:original_parameters.basis.entries())if(ij.first<10&&ij.second<3)parameters_active.basis.set(ij.first,ij.second,q);
+    const Evidence initial(program,parameters_active);const auto learned=initial.append({observation(program,asset(),{1,2,0,0},1),observation(program,asset(),{0,0,1,3},2)});
+    auto targets=map.targets();targets[1]=learned;const PreparedRelationalFiniteFieldMap identified(map.source(),targets,map.declaration());const auto identified_family=identified.execute();const auto empty_choice=identified_family.evaluate(1,{});
+    check(learned.kernel().cols()==0&&empty_choice.affine_evaluation().has_value()&&empty_choice.free_values().empty(),"identified affine finite branch requires explicit empty choice while retaining evidence ancestry");
+    check(encode_relational_finite_field_evaluation(decode_relational_finite_field_evaluation(encode_relational_finite_field_evaluation(empty_choice),{}))==encode_relational_finite_field_evaluation(empty_choice),"identified affine empty-choice canonical replay");
 }
 void finite_cases(bool emit) {
     const auto original=finite_asset();std::uint64_t rng=0x1234abcd;
@@ -251,7 +294,9 @@ void admissions() {
 }
 } // namespace
 int main(int argc,char** argv){try{
+    if(argc==3&&std::string_view(argv[1])=="--write-choice"){const auto result=finite_map().execute().evaluate(1,{3,5,7});bytes(std::filesystem::path(argv[2]),encode_relational_finite_field_evaluation(result));return 0;}
+    if(argc==3&&std::string_view(argv[1])=="--read-choice"){const auto image=bytes(std::filesystem::path(argv[2]));const auto result=decode_relational_finite_field_evaluation(image,{});check(result.ordinal()==1&&result.family().size()==4,"standalone completion retains finite alternatives");check(encode_relational_finite_field_evaluation(result)==image,"standalone completion canonical bytes");std::cout<<"standalone finite completion pass\n";return 0;}
     if(argc==3&&std::string_view(argv[1])=="--write"){const auto result=finite_map().execute();bytes(std::filesystem::path(argv[2]),encode_relational_finite_field_result(result));return 0;}
     if(argc==3&&std::string_view(argv[1])=="--read"){const auto image=bytes(std::filesystem::path(argv[2]));const auto result=decode_relational_finite_field_result(image,{});check(result.size()==4,"standalone complete branch cold replay");check(encode_relational_finite_field_result(result)==image,"standalone canonical bytes");std::cout<<"standalone finite whole-field pass\n";return 0;}
-    const bool emit=argc>1&&std::string_view(argv[1])=="--emit";corpus(emit);finite_cases(emit);admissions();std::cerr<<"checks="<<checks<<"\n";return 0;
+    const bool emit=argc>1&&std::string_view(argv[1])=="--emit";corpus(emit);finite_cases(emit);completions();admissions();std::cerr<<"checks="<<checks<<"\n";return 0;
 }catch(const std::exception& error){std::cerr<<"FAIL: "<<error.what()<<"\n";return 1;}}
