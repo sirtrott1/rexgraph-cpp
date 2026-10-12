@@ -1,11 +1,11 @@
 #pragma once
 
 #include "rfc/inference/relational_field_solve.hpp"
-#include "rfc/learning/relational_available_evidence_codec.hpp"
+#include "rfc/learning/relational_available_extension_codec.hpp"
 #include <variant>
 
 namespace rfc::learning {
-using AvailableRelationalSolveRhs = std::variant<inference::AvailableRelationalFieldResult, AvailableRelationalAffineEvaluation>;
+using AvailableRelationalSolveRhs = std::variant<inference::AvailableRelationalFieldResult, AvailableRelationalAffineEvaluation, AvailableRelationalExtensionEvaluation>;
 struct RelationalSolveReadoutDeclaration {
     // A boundary-closed patch in every original grade; physical partitions are separate.
     std::vector<std::vector<std::uint32_t>> patch;
@@ -21,8 +21,19 @@ using Writer = inference::field_program_codec_detail::Writer;
 inline inference::OwnedAccessionFieldResult native_rhs(const AvailableRelationalSolveRhs& rhs) {
     return std::visit([](const auto& value) -> inference::OwnedAccessionFieldResult {
         if constexpr (std::is_same_v<std::decay_t<decltype(value)>, inference::AvailableRelationalFieldResult>) return value.result();
-        else return value.result().result();
+        else if constexpr (std::is_same_v<std::decay_t<decltype(value)>, AvailableRelationalAffineEvaluation>) return value.result().result();
+        else throw std::invalid_argument("extension RHS retains its extension provenance; use solve_rhs or rhs_program");
     }, rhs);
+}
+inline inference::RelationalFieldSolveRhs solve_rhs(const AvailableRelationalSolveRhs& rhs) {
+    return std::visit([](const auto& value) -> inference::RelationalFieldSolveRhs {
+        if constexpr (std::is_same_v<std::decay_t<decltype(value)>, inference::AvailableRelationalFieldResult>) return value.result();
+        else if constexpr (std::is_same_v<std::decay_t<decltype(value)>, AvailableRelationalAffineEvaluation>) return value.result().result();
+        else return value.result();
+    }, rhs);
+}
+inline inference::OwnedRelationalFieldProgram rhs_program(const AvailableRelationalSolveRhs& rhs) {
+    return std::visit([](const auto& value) { return value.result().program(); }, solve_rhs(rhs));
 }
 inline void admit_rhs(const AvailableRelationalSolveRhs& rhs, const Context& context, const std::function<void()>& check) {
     std::visit([&](const auto& value) { value.admit(context, check); }, rhs);
@@ -30,7 +41,8 @@ inline void admit_rhs(const AvailableRelationalSolveRhs& rhs, const Context& con
 inline std::vector<std::byte> encode_rhs(const AvailableRelationalSolveRhs& rhs) {
     return std::visit([](const auto& value) -> std::vector<std::byte> {
         if constexpr (std::is_same_v<std::decay_t<decltype(value)>, inference::AvailableRelationalFieldResult>) return inference::encode_available_relational_result(value);
-        else return encode_available_relational_affine_evaluation(value);
+        else if constexpr (std::is_same_v<std::decay_t<decltype(value)>, AvailableRelationalAffineEvaluation>) return encode_available_relational_affine_evaluation(value);
+        else return encode_available_relational_extension_evaluation(value);
     }, rhs);
 }
 inline void declaration(Writer& w, const inference::RelationalFieldSolveDeclaration& d) {
@@ -126,7 +138,7 @@ public:
         admit_rhs(frozen_rhs, authority, callback);
         const auto payload = problem_payload(encode_rhs(frozen_rhs), node, frozen_d);
         auto obligations = origins(payload, frozen_readout, frozen_d, keys, authority);
-        Guard guard(limits, callback); guard.step(); const auto parent = native_rhs(frozen_rhs).result().program();
+        Guard guard(limits, callback); guard.step(); const auto parent = rhs_program(frozen_rhs);
         require(inference::field_interface_detail::node(parent, node).output_grade == frozen_d.grade, "local RHS grade");
         auto prepared_readout = prepare_readout(parent, frozen_d.grade, frozen_readout, guard);
         auto native = inference::PreparedRelationalFieldSolve(parent, frozen_d, limits, [&] { guard.step(); }); guard.step();
@@ -181,7 +193,7 @@ inline AvailableRelationalLocalResult PreparedAvailableRelationalLocalSolve::exe
     numeric::ExactActionLimits limits, std::function<void()> check) const {
     using namespace available_local_detail;
     const auto parent = *this; const auto pin = parent.state_; const auto authority = context; const auto callback = std::move(check); parent.admit(authority, callback);
-    Guard guard(limits, callback); auto result = pin->native.apply(native_rhs(pin->rhs), pin->node, limits, [&] { guard.step(); });
+    Guard guard(limits, callback); auto result = pin->native.apply(solve_rhs(pin->rhs), pin->node, limits, [&] { guard.step(); });
     numeric::RationalVector patch_values; patch_values.reserve(pin->prepared_readout.coordinates.size());
     for (const auto i : pin->prepared_readout.coordinates) { guard.step(); patch_values.push_back(result.field().values().coefficient(i)); }
     auto patch = tensor(patch_values, guard); auto visible = act(pin->readout.view.accession, patch, guard);

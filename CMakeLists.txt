@@ -462,6 +462,12 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
     add_test(NAME rfc_relational_field_evidence_fraction COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/learning/check_relational_field_evidence.py $<TARGET_FILE:rfc_relational_field_evidence_tests>)
 
+    add_executable(rfc_relational_field_extension_tests tests/inference/test_relational_field_extension.cpp)
+    target_link_libraries(rfc_relational_field_extension_tests PRIVATE rfc::learning Threads::Threads)
+    add_test(NAME rfc_relational_field_extension COMMAND rfc_relational_field_extension_tests)
+    add_test(NAME rfc_relational_field_extension_fraction COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_relational_field_extension.py $<TARGET_FILE:rfc_relational_field_extension_tests>)
+
     add_executable(rfc_relational_field_solve_tests tests/local/test_relational_field_solve.cpp)
     target_link_libraries(rfc_relational_field_solve_tests PRIVATE rfc::learning Threads::Threads)
     add_test(NAME rfc_relational_field_solve COMMAND rfc_relational_field_solve_tests)

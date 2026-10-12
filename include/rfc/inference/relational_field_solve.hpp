@@ -1,6 +1,7 @@
 #pragma once
 
-#include "rfc/inference/relational_field_interface.hpp"
+#include "rfc/inference/relational_field_extension.hpp"
+#include <variant>
 #include "rfc/local/interior_interface_solve.hpp"
 
 namespace rfc::inference {
@@ -101,6 +102,7 @@ inline numeric::RationalVector dense(const Tensor& input, std::size_t n, Guard& 
 }
 } // namespace relational_solve_detail
 
+using RelationalFieldSolveRhs = std::variant<OwnedAccessionFieldResult, RelationalExtensionEvaluation>;
 class RelationalFieldSolveResult;
 class PreparedRelationalFieldSolve {
     struct State {
@@ -142,20 +144,27 @@ public:
     std::size_t retained_entries() const { return state_->retained(); }
     RelationalFieldSolveResult apply(OwnedAccessionFieldResult rhs, std::uint64_t node,
         numeric::ExactActionLimits limits = {}, std::function<void()> check = {}) const;
+    RelationalFieldSolveResult apply(RelationalExtensionEvaluation rhs, std::uint64_t node,
+        numeric::ExactActionLimits limits = {}, std::function<void()> check = {}) const;
+    RelationalFieldSolveResult apply(RelationalFieldSolveRhs rhs, std::uint64_t node,
+        numeric::ExactActionLimits limits = {}, std::function<void()> check = {}) const;
 private:
     std::shared_ptr<const State> state_;
 };
 class RelationalFieldSolveResult {
     struct State {
         PreparedRelationalFieldSolve problem;
-        OwnedAccessionFieldResult rhs;
+        RelationalFieldSolveRhs rhs;
         std::uint64_t node{};
         numeric::RationalVector augmented_rhs, reconstructed, interface_response, interface_rhs, residual;
         numeric::SparseRationalTensor field;
     };
 public:
     PreparedRelationalFieldSolve problem() const { return state_->problem; }
-    OwnedAccessionFieldResult rhs() const { return state_->rhs; }
+    OwnedAccessionFieldResult rhs() const { return std::get<OwnedAccessionFieldResult>(state_->rhs); }
+    std::optional<RelationalExtensionEvaluation> extension_rhs() const {
+        const auto* p = std::get_if<RelationalExtensionEvaluation>(&state_->rhs); return p ? std::optional<RelationalExtensionEvaluation>{*p} : std::nullopt;
+    }
     std::uint64_t node() const { return state_->node; }
     const numeric::SparseRationalTensor& field() const & { return state_->field; }
     const numeric::RationalVector& augmented_rhs() const & { return state_->augmented_rhs; }
@@ -174,15 +183,16 @@ private:
     explicit RelationalFieldSolveResult(State state) : state_(std::make_shared<const State>(std::move(state))) {}
     std::shared_ptr<const State> state_;
 };
-inline RelationalFieldSolveResult PreparedRelationalFieldSolve::apply(OwnedAccessionFieldResult rhs, std::uint64_t node,
+inline RelationalFieldSolveResult PreparedRelationalFieldSolve::apply(RelationalFieldSolveRhs rhs, std::uint64_t node,
     numeric::ExactActionLimits limits, std::function<void()> check) const {
     using namespace relational_solve_detail;
     const auto parent = *this; const auto pin = parent.state_; const auto input = std::move(rhs); Guard guard(limits, std::move(check)); guard.step();
     guard.entries(pin->retained());
-    const auto actual_program = input.result().program();
+    const auto native = std::visit([](const auto& value) { return value.result(); }, input);
+    const auto actual_program = native.program();
     require(actual_program.fibers().same_owner(pin->program.fibers()), "relational solve RHS requires the actual program owner");
     require(field_interface_detail::node(pin->program, node).output_grade == pin->declaration.grade, "relational solve RHS grade");
-    const auto native = input.result(); const auto j = dense(native.field(node), pin->op.metric.cols(), guard);
+    const auto j = dense(native.field(node), pin->op.metric.cols(), guard);
     const auto mj = numeric::checked_apply(pin->op.metric, j, guard); numeric::RationalVector full_rhs(pin->op.layout.size);
     for (std::size_t i = 0; i < mj.size(); ++i) full_rhs[add(pin->op.layout.x, i)] = mj[i];
     auto full = pin->solve.apply(full_rhs, limits, [&] { guard.step(); });
@@ -195,4 +205,8 @@ inline RelationalFieldSolveResult PreparedRelationalFieldSolve::apply(OwnedAcces
     auto field = field_interface_detail::tensor(x, guard); guard.step();
     return RelationalFieldSolveResult({parent, input, node, std::move(full_rhs), std::move(full), std::move(response), std::move(reduced_rhs), std::move(residual), std::move(field)});
 }
+inline RelationalFieldSolveResult PreparedRelationalFieldSolve::apply(OwnedAccessionFieldResult rhs, std::uint64_t node,
+    numeric::ExactActionLimits limits, std::function<void()> check) const { return apply(RelationalFieldSolveRhs{std::move(rhs)}, node, limits, std::move(check)); }
+inline RelationalFieldSolveResult PreparedRelationalFieldSolve::apply(RelationalExtensionEvaluation rhs, std::uint64_t node,
+    numeric::ExactActionLimits limits, std::function<void()> check) const { return apply(RelationalFieldSolveRhs{std::move(rhs)}, node, limits, std::move(check)); }
 } // namespace rfc::inference

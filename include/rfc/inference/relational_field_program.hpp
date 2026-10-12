@@ -245,6 +245,18 @@ public:
     storage::NativeSeriesEndpoint publication() const { return state_->publication; }
     const local::OwnedLinearFiberSystem& fibers() const & { return state_->fibers; }
     const local::OwnedLinearFiberSystem& fibers() const && = delete;
+    // Owning prepared actions retain the exact same node and occurrence maps
+    // used by execute; callers can compose whole fields without rebuilding them.
+    std::optional<numeric::PreparedSparseExactMap> node_action(std::uint64_t key) const {
+        for (std::size_t i = 0; i < state_->declaration.nodes.size(); ++i)
+            if (state_->declaration.nodes[i].key == key) return state_->actions[i].assembled;
+        throw std::out_of_range("field program prepared node");
+    }
+    std::optional<numeric::PreparedSparseExactMap> occurrence_action(std::uint64_t key) const {
+        for (std::size_t i = 0; i < state_->declaration.nodes.size(); ++i)
+            if (state_->declaration.nodes[i].key == key) return state_->actions[i].occurrences;
+        throw std::out_of_range("field program prepared occurrence node");
+    }
     OwnedRelationalFieldResult execute(std::vector<RelationalFieldInput> input, numeric::ExactActionLimits limits = {},
                                       std::function<void()> check = {}) const;
 private:

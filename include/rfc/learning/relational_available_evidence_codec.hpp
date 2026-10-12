@@ -109,6 +109,28 @@ inline AvailableRelationalAffineResult replay_family(const PassiveFamily& parsed
     auto result = evidence.execute(std::move(input), context, cap, check);
     canonical(parsed.native, encode_relational_affine_result(result.result())); return result;
 }
+struct PassiveEvaluation {
+    PassiveFamily family;
+    numeric::RationalVector free;
+    Origin setting;
+    Bytes native;
+};
+inline PassiveEvaluation preflight_evaluation(std::span<const std::byte> bytes, const Context& context,
+    const storage::TemporalReadLimits& policy, numeric::ExactActionLimits limits, const std::function<void()>& check = {}) {
+    Reader r(bytes, policy); header(r, bytes, choice_magic);
+    auto family = preflight_family(r.blob(), context, policy, limits, check);
+    auto free = relational_affine_codec_detail::vector(r); const auto key = r.u64(); const auto receipt = r.blob();
+    const auto payload = relational_parameter_setting_payload(family.evidence.native, family.evidence.obligations, free);
+    auto setting = context.require(key, Role::Prospective, payload); canonical(receipt, setting.receipt());
+    const auto witness = r.blob(); inference::value_admission_detail::require(!r.remaining(), "trailing available evaluation bytes");
+    return {std::move(family), std::move(free), std::move(setting), Bytes(witness.begin(), witness.end())};
+}
+inline AvailableRelationalAffineEvaluation replay_evaluation(const PassiveEvaluation& parsed, const Context& context,
+    const storage::TemporalReadLimits& policy, numeric::ExactActionLimits limits, const std::function<void()>& check = {}) {
+    const auto replayed = replay_family(parsed.family, context, policy, limits, check);
+    auto out = replayed.evaluate(parsed.free, parsed.setting.key(), context, limits, check);
+    canonical(parsed.native, encode_relational_affine_evaluation(out.result())); return out;
+}
 } // namespace available_evidence_codec_detail
 
 inline std::vector<std::byte> encode_available_relational_evidence(const PreparedAvailableRelationalEvidence& evidence) {
@@ -171,15 +193,8 @@ inline AvailableRelationalAffineEvaluation decode_available_relational_affine_ev
     inference::value_admission_detail::bound(bytes.size(), policy.max_file_bytes);
     const std::vector<std::byte> frozen(bytes.begin(), bytes.end()); const auto authority = context; const auto callback = std::move(check);
     if (callback) callback();
-    Reader r(frozen, policy); header(r, frozen, choice_magic);
-    const auto family = preflight_family(r.blob(), authority, policy, limits, callback);
-    const auto free = relational_affine_codec_detail::vector(r); const auto key = r.u64(); const auto receipt = r.blob();
-    const auto payload = relational_parameter_setting_payload(family.evidence.native, family.evidence.obligations, free);
-    const auto actual = authority.require(key, Role::Prospective, payload); canonical(receipt, actual.receipt());
-    const auto witness = r.blob(); inference::value_admission_detail::require(!r.remaining(), "trailing available evaluation bytes");
-    // Every evidence, held-input and setting dependency is admitted before fit.
-    const auto replayed = replay_family(family, authority, policy, limits, callback);
-    auto out = replayed.evaluate(free, key, authority, limits, callback);
-    canonical(witness, encode_relational_affine_evaluation(out.result())); canonical(frozen, encode_available_relational_affine_evaluation(out)); return out;
+    const auto parsed = preflight_evaluation(frozen, authority, policy, limits, callback);
+    auto out = replay_evaluation(parsed, authority, policy, limits, callback);
+    canonical(frozen, encode_available_relational_affine_evaluation(out)); return out;
 }
 } // namespace rfc::learning

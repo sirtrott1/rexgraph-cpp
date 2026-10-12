@@ -60,7 +60,7 @@ inline AvailableRelationalLocalResult decode_available_relational_local_result(s
     const std::vector<std::byte> frozen(bytes.begin(), bytes.end()); const auto authority = context; const auto callback = std::move(check);
     if (callback) callback();
     Reader r(frozen, policy); inference::field_program_codec_detail::header(r, frozen, magic);
-    const auto kind = r.u8(); require(kind <= 1, "local solve RHS kind"); const auto raw_rhs = r.blob(); const auto node = r.u64();
+    const auto kind = r.u8(); require(kind <= 2, "local solve RHS kind"); const auto raw_rhs = r.blob(); const auto node = r.u64();
     const auto d = declaration(r); const auto read = readout(r); const RelationalSolveOrigins keys{r.u64(), r.u64(), r.u64(), r.u64()};
     std::vector<std::vector<std::byte>> receipts; const auto n = r.count(8);
     for (std::size_t i = 0; i < n; ++i) { const auto receipt = r.blob(); receipts.emplace_back(receipt.begin(), receipt.end()); }
@@ -69,7 +69,9 @@ inline AvailableRelationalLocalResult decode_available_relational_local_result(s
     std::optional<inference::value_admission_codec_detail::PassiveAvailableResult> fixed;
     std::optional<available_evidence_codec_detail::PassiveFamily> family;
     numeric::RationalVector free; std::optional<Origin> setting; std::vector<std::byte> choice_witness;
+    std::optional<available_extension_codec_detail::PassiveEvaluation> extension;
     if (!kind) fixed = inference::value_admission_codec_detail::preflight_result(raw_rhs, authority, policy, callback);
+    else if (kind == 2) extension = available_extension_codec_detail::preflight_evaluation(raw_rhs, authority, policy, limits, callback);
     else {
         Reader q(raw_rhs, policy); inference::field_program_codec_detail::header(q, raw_rhs, available_evidence_codec_detail::choice_magic);
         family = available_evidence_codec_detail::preflight_family(q.blob(), authority, policy, limits, callback);
@@ -83,6 +85,7 @@ inline AvailableRelationalLocalResult decode_available_relational_local_result(s
     for (std::size_t i = 0; i < actual.size(); ++i) { if (callback) callback(); canonical(receipts[i], actual[i].receipt()); }
     auto rhs = [&]() -> AvailableRelationalSolveRhs {
         if (fixed) return inference::value_admission_codec_detail::replay_result(*fixed, authority, policy, limits, callback);
+        if (extension) return available_extension_codec_detail::replay_evaluation(*extension, authority, policy, limits, callback);
         const auto f = available_evidence_codec_detail::replay_family(*family, authority, policy, limits, callback);
         auto choice = f.evaluate(free, setting->key(), authority, limits, callback);
         canonical(choice_witness, encode_relational_affine_evaluation(choice.result())); return choice;
