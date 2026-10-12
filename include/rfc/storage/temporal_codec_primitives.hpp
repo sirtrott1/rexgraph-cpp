@@ -15,6 +15,9 @@ struct TemporalReadLimits {
     bool require_canonical{true};
     composite::DeclarationLimits declarations{};
     SourceDeclarationLimits source_declarations{};
+    // Keep checked seed coefficient lanes in one immutable channel buffer.
+    // Contiguous numerical consumers may materialize their requested fields.
+    bool retain_encoded_values{false};
     // Zero retains the maximum dimension as the logical tensor size bound.
     std::size_t max_logical_size{};
 };
@@ -28,8 +31,10 @@ using temporal_endpoint_detail::index;
 // nested collections; full support stays implicit instead of being enumerated.
 class Reader {
 public:
-    Reader(std::span<const std::byte> bytes, const TemporalReadLimits& limits)
-        : r_(bytes), size_(bytes.size()), limits_(limits), budget_(limits.max_records) {
+    Reader(std::span<const std::byte> bytes, const TemporalReadLimits& limits,
+           bool seed_values = false)
+        : owner_(freeze(bytes, limits, seed_values)), bytes_(owner_ ? std::span<const std::byte>(*owner_) : bytes),
+          r_(bytes_), size_(bytes.size()), limits_(limits), budget_(limits.max_records) {
         require(size_ <= limits.max_file_bytes, "temporal image exceeds byte limit");
     }
     std::uint8_t u8() { return r_.u8(); }
@@ -40,6 +45,8 @@ public:
     std::size_t remaining() const { return size_ - r_.position(); }
     std::size_t position() const noexcept { return r_.position(); }
     const TemporalReadLimits& limits() const noexcept { return limits_; }
+    std::shared_ptr<const std::vector<std::byte>> retained_owner() const noexcept { return owner_; }
+    numeric::SparseRationalVector read_values(std::size_t size);
     std::span<const std::byte> blob() {
         const auto n = u64();
         require(n <= remaining() && n <= limits_.max_file_bytes, "truncated/oversized temporal blob");
@@ -97,10 +104,70 @@ public:
         return out;
     }
 private:
+    static std::shared_ptr<const std::vector<std::byte>> freeze(
+        std::span<const std::byte> bytes, const TemporalReadLimits& limits, bool seed_values) {
+        require(bytes.size() <= limits.max_file_bytes, "temporal image exceeds byte limit");
+        if (!seed_values || !limits.retain_encoded_values) return {};
+        return std::make_shared<const std::vector<std::byte>>(bytes.begin(), bytes.end());
+    }
+    std::shared_ptr<const std::vector<std::byte>> owner_;
+    std::span<const std::byte> bytes_;
     rfcx_detail::Reader r_;
     std::size_t size_;
     const TemporalReadLimits& limits_;
     std::size_t budget_;
+};
+
+// The lane is the existing count, coordinate and rational encoding. Construction
+// follows complete Reader admission; all cursors borrow its immutable byte owner.
+class RetainedTemporalValues final : public numeric::RetainedSparseRationalSource {
+    friend class Reader;
+    std::shared_ptr<const std::vector<std::byte>> owner_;
+    std::span<const std::byte> bytes_;
+    TemporalReadLimits limits_;
+    std::size_t count_;
+    RetainedTemporalValues(std::shared_ptr<const std::vector<std::byte>> owner,
+                           std::span<const std::byte> bytes, TemporalReadLimits limits, std::size_t count)
+        : owner_(std::move(owner)), bytes_(bytes), limits_(std::move(limits)), count_(count) {}
+    class Cursor final : public numeric::SparseRationalCursor {
+        std::shared_ptr<const std::vector<std::byte>> owner;
+        TemporalReadLimits limits;
+        Reader reader;
+        std::size_t remaining;
+    public:
+        explicit Cursor(const RetainedTemporalValues& source)
+            : owner(source.owner_), limits(source.limits_), reader(source.bytes_.subspan(8), limits),
+              remaining(source.count_) {}
+        bool next(numeric::SparseRationalEntry& entry) override {
+            if (!remaining) return false;
+            entry.index = static_cast<std::size_t>(reader.u64());
+            entry.value = reader.rational();
+            --remaining;
+            return true;
+        }
+    };
+public:
+    std::size_t nonzeros() const noexcept override { return count_; }
+    std::unique_ptr<numeric::SparseRationalCursor> open() const override { return std::make_unique<Cursor>(*this); }
+    std::span<const std::byte> encoded_bytes() const noexcept { return bytes_; }
+    std::shared_ptr<const std::vector<std::byte>> owner() const noexcept { return owner_; }
+    void indices(const std::function<void(std::size_t)>& function) const override {
+        Reader r(bytes_.subspan(8), limits_);
+        for (std::size_t i = 0; i < count_; ++i) {
+            function(static_cast<std::size_t>(r.u64()));
+            (void)r.integer_bytes(); (void)r.integer_bytes();
+        }
+    }
+    numeric::Rational coefficient(std::size_t index) const override {
+        Reader r(bytes_.subspan(8), limits_);
+        for (std::size_t i = 0; i < count_; ++i) {
+            const auto coordinate = r.u64();
+            if (coordinate == index) return r.rational();
+            if (coordinate > index) break;
+            (void)r.integer_bytes(); (void)r.integer_bytes();
+        }
+        return numeric::Rational{0};
+    }
 };
 
 inline void string(Writer& w, const std::string& value) {
@@ -123,21 +190,30 @@ inline void domain(Writer& w, const numeric::IndexDomain& value) {
     w.u64(value.rank()); for (const auto n : value.extents()) w.u64(n);
 }
 inline void values(Writer& w, const numeric::SparseRationalVector& value) {
+    if (const auto source = std::dynamic_pointer_cast<const RetainedTemporalValues>(value.retained_source())) {
+        w.raw(source->encoded_bytes()); return;
+    }
     w.u64(value.nonzeros());
     for (const auto& v : value.entries()) { w.u64(v.index); rational(w, v.value); }
 }
-inline numeric::SparseRationalVector values(Reader& r, std::size_t size) {
-    const auto n = r.count(18);
+inline numeric::SparseRationalVector Reader::read_values(std::size_t size) {
+    const auto begin = position();
+    const auto n = count(18);
     std::vector<numeric::SparseRationalEntry> entries;
-    entries.reserve(n);
+    if (!owner_) entries.reserve(n);
     std::optional<std::size_t> last;
     for (std::size_t i = 0; i < n; ++i) {
-        const auto idx = r.u64(); require(idx < size && (!last || idx > *last), "unordered/out-of-domain sparse coordinate");
-        auto value = r.rational(); require(value != 0, "explicit numerical zero in sparse lane");
-        entries.push_back({static_cast<std::size_t>(idx), std::move(value)}); last = static_cast<std::size_t>(idx);
+        const auto idx = u64(); require(idx < size && (!last || idx > *last), "unordered/out-of-domain sparse coordinate");
+        auto value = rational(); require(value != 0, "explicit numerical zero in sparse lane");
+        if (!owner_) entries.push_back({static_cast<std::size_t>(idx), std::move(value)});
+        last = static_cast<std::size_t>(idx);
     }
+    if (owner_) return numeric::SparseRationalVector::admitted(size,
+        std::shared_ptr<const RetainedTemporalValues>(new RetainedTemporalValues(
+            owner_, bytes_.subspan(begin, position() - begin), limits_, n)));
     return numeric::SparseRationalVector(size, std::move(entries));
 }
+inline numeric::SparseRationalVector values(Reader& r, std::size_t size) { return r.read_values(size); }
 inline void tensor(Writer& w, const numeric::SparseRationalTensor& value) {
     domain(w, value.domain());
     const bool full = value.support().count() == value.domain().logical_size();

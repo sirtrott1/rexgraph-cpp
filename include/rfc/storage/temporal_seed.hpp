@@ -32,6 +32,7 @@ inline Encoding encode(const TemporalEndpoint& endpoint, const StableSourceIndex
 struct Decoded {
     TemporalEndpoint endpoint;
     Encoding encoding;
+    std::shared_ptr<const std::vector<std::byte>> retained_channels;
 };
 } // namespace temporal_seed_detail
 
@@ -55,7 +56,9 @@ inline Decoded decode(core::RelationalComplex source,
     require((flags & ~(finite_systems_flag | relational_codes_flag | declarations_flag))==0,"unsupported endpoint sidecar flags");
     require(header.u64()==bytes.size(),"endpoint sidecar length mismatch");
     require(header.u64()==rfcx_detail::fnv1a64(bytes.subspan(32)),"endpoint sidecar integrity mismatch");
-    Reader r(bytes.subspan(32),limits);
+    Reader r(bytes, limits, true);
+    // Retain the complete component, including its unchanged envelope.
+    (void)r.u64(); (void)r.u32(); (void)r.u32(); (void)r.u64(); (void)r.u64();
     TemporalEndpoint endpoint(std::move(source),r.u64());
     auto image = encode_rfcx(endpoint.source);
     require(r.u64() == image.stats.payload_hash,"endpoint sidecar base RFCX payload mismatch");
@@ -80,7 +83,7 @@ inline Decoded decode(core::RelationalComplex source,
                 std::equal(canonical.channels.begin(),canonical.channels.end(),bytes.begin()),
                 "noncanonical endpoint sidecar encoding");
     }
-    return {std::move(endpoint), std::move(canonical)};
+    return {std::move(endpoint), std::move(canonical), r.retained_owner()};
 }
 } // namespace temporal_seed_detail
 

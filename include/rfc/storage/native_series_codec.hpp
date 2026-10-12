@@ -68,7 +68,20 @@ inline NativeTemporalSeries decode_native_series(std::span<const std::byte> byte
     auto policy = native_series_detail::policy(limits); policy.max_file_bytes = limits.max_archive_bytes;
     temporal_codec_detail::Reader r(bytes.subspan(32), policy);
     const auto ns = r.u64(); const auto source = r.blob(); const auto channels = r.blob();
-    NativeTemporalSeries out(decode_snapshot(source, channels, limits).endpoint, ns, limits);
+    require(ns != 0, "series namespace required");
+    auto decoded = decode_snapshot(source, channels, limits);
+    // decode_snapshot certifies both canonical components and creates fresh
+    // endpoint storage. Freeze that actual reader-owned result once. A host
+    // endpoint constructor continues to copy/redecode its mutable input.
+    auto state = std::make_shared<native_series_detail::State>();
+    state->name_space = ns; state->limits = limits;
+    state->base = std::make_shared<const native_series_detail::Snapshot>(native_series_detail::Snapshot{
+        std::make_shared<const TemporalEndpoint>(std::move(decoded.endpoint)),
+        std::move(decoded.encoding.source.bytes), decoded.retained_channels ? std::move(decoded.retained_channels)
+            : std::make_shared<const native_series_detail::Bytes>(std::move(decoded.encoding.channels))});
+    state->tail = state->base->endpoint;
+    state->archive_bytes = native_series_detail::archive_size(*state);
+    NativeTemporalSeries out(std::move(state));
     const auto n = r.count(8); bound(n, limits.max_segments, "series frame count budget");
     for (std::size_t i = 0; i < n; ++i) out.append_encoded(r.blob());
     const auto cps = r.count(24); bound(cps, limits.max_checkpoints, "series checkpoint count budget");
@@ -88,9 +101,14 @@ inline NativeTemporalSeries decode_native_series(std::span<const std::byte> byte
         out.checkpoint(seq);
     }
     require(r.remaining() == 0, "trailing series data");
-    const auto canonical = encode_native_series(out);
-    require(canonical.size() == bytes.size() && std::equal(canonical.begin(), canonical.end(), bytes.begin()),
-            "noncanonical series archive");
+    std::size_t compared = 0;
+    stream_native_series(out, [&](auto chunk) {
+        require(chunk.size() <= bytes.size() - compared &&
+                std::equal(chunk.begin(), chunk.end(), bytes.data() + compared),
+                "noncanonical series archive");
+        compared += chunk.size();
+    });
+    require(compared == bytes.size(), "noncanonical series archive");
     return out;
 }
 inline NativeTemporalSeries read_native_series(const std::filesystem::path& path, const NativeSeriesLimits& limits = {}) {

@@ -50,7 +50,8 @@ inline TemporalReadLimits policy(const NativeSeriesLimits& limits) {
 }
 struct Snapshot {
     std::shared_ptr<const TemporalEndpoint> endpoint;
-    Bytes source, channels;
+    Bytes source;
+    std::shared_ptr<const Bytes> channels;
 };
 inline std::shared_ptr<const Snapshot> snapshot(const TemporalEndpoint& e, const NativeSeriesLimits& limits) {
     auto source = encode_rfcx(e.source).bytes;
@@ -61,9 +62,11 @@ inline std::shared_ptr<const Snapshot> snapshot(const TemporalEndpoint& e, const
     // Decode into fresh storage rather than moving caller-owned vectors: old
     // mutable references must not be able to change an immutable publication.
     MappedRfcx mapped{std::span<const std::byte>(source)};
-    auto endpoint = decode_temporal_endpoint(mapped.materialize(), channels, p);
+    auto decoded = temporal_seed_detail::decode(mapped.materialize(), channels, p);
+    auto retained = decoded.retained_channels ? std::move(decoded.retained_channels)
+        : std::make_shared<const Bytes>(std::move(channels));
     return std::make_shared<const Snapshot>(Snapshot{
-        std::make_shared<const TemporalEndpoint>(std::move(endpoint)), std::move(source), std::move(channels)});
+        std::make_shared<const TemporalEndpoint>(std::move(decoded.endpoint)), std::move(source), std::move(retained)});
 }
 struct Frame {
     TemporalSegment segment;
@@ -84,7 +87,7 @@ inline std::size_t add_blob(std::size_t total, std::size_t n) {
 }
 inline std::size_t archive_size(const State& s) {
     std::size_t n = 32 + 8 + 8 + 8; // envelope, namespace, frame/checkpoint counts
-    n = add_blob(n, s.base->source.size()); n = add_blob(n, s.base->channels.size());
+    n = add_blob(n, s.base->source.size()); n = add_blob(n, s.base->channels->size());
     n = machine::checked_size_add(n, s.frame_bytes);
     n = machine::checked_size_add(n, s.checkpoint_bytes);
     bound(n, s.limits.max_archive_bytes, "series aggregate archive byte budget");
@@ -413,20 +416,33 @@ public:
     std::size_t segment_count() const { return state().frames.size(); }
     std::size_t archive_bytes() const { return state().archive_bytes; }
     NativeSeriesLimits limits() const { return state().limits; }
+    // Visit the base and each retained endpoint in order, replaying each frame
+    // once. Pins and the selected history survive callback publication changes.
+    template<class Function> void visit_endpoints(Function&& function) const {
+        (void)state(); const auto owner = state_;
+        auto current = owner->base->endpoint;
+        function(NativeSeriesEndpoint{current, owner->name_space, {current->sequence, 0, false}});
+        owner->frames.for_each([&](const auto& frame) {
+            const auto previous = current->sequence;
+            current = std::make_shared<const TemporalEndpoint>(replay_temporal_segment(
+                *current, frame->segment, owner->limits.temporal.source_declarations));
+            function(NativeSeriesEndpoint{current, owner->name_space, {previous, 1, false}});
+        });
+    }
     // Components retain their immutable owner independently of the series and
     // callback. Their sequence/kind identity is separate from a physical digest.
     template<class Function> void visit_components(Function&& function) const {
         (void)state();const auto owner=state_;
         const auto base=owner->base;
         function(NativeSeriesComponent{NativeSeriesComponentKind::BaseSource,owner->name_space,base->endpoint->sequence,{base,&base->source}});
-        function(NativeSeriesComponent{NativeSeriesComponentKind::BaseChannels,owner->name_space,base->endpoint->sequence,{base,&base->channels}});
+        function(NativeSeriesComponent{NativeSeriesComponentKind::BaseChannels,owner->name_space,base->endpoint->sequence,base->channels});
         auto sequence=base->endpoint->sequence;
         owner->frames.for_each([&](const auto& frame) {
             function(NativeSeriesComponent{NativeSeriesComponentKind::Segment,owner->name_space,++sequence,{frame,&frame->bytes}});
         });
         for(const auto& [seq,checkpoint]:*owner->checkpoints) {
             function(NativeSeriesComponent{NativeSeriesComponentKind::CheckpointSource,owner->name_space,seq,{checkpoint,&checkpoint->source}});
-            function(NativeSeriesComponent{NativeSeriesComponentKind::CheckpointChannels,owner->name_space,seq,{checkpoint,&checkpoint->channels}});
+            function(NativeSeriesComponent{NativeSeriesComponentKind::CheckpointChannels,owner->name_space,seq,checkpoint->channels});
         }
     }
     NativeSeriesStorageStats storage_stats() const {
@@ -436,7 +452,7 @@ public:
     }
     bool same_history(const NativeTemporalSeries& other) const {
         const auto& a = state(); const auto& b = other.state();
-        if (a.name_space != b.name_space || a.base->source != b.base->source || a.base->channels != b.base->channels ||
+        if (a.name_space != b.name_space || a.base->source != b.base->source || *a.base->channels != *b.base->channels ||
             a.frames.size() != b.frames.size()) return false;
         for (std::size_t i = 0; i < a.frames.size(); ++i) if (a.frames.at(i)->bytes != b.frames.at(i)->bytes) return false;
         return true; // checkpoint schedules are physical, not temporal identity
@@ -461,6 +477,22 @@ public:
         return {state_, first, last};
     }
     void append(const TemporalSegment& segment) { append_encoded(encode_temporal_segment(segment)); }
+    // Build against the owned tail, decode the canonical frame and replay it
+    // before publication. A failed append retains the complete previous state.
+    void append_target(const TemporalEndpoint& target,
+            std::vector<TemporalCorrespondence> correspondences = {},
+            std::vector<RelationalCodeTransport> code_transports = {},
+            RelationalCodeEncoding code_encoding = RelationalCodeEncoding::Automatic,
+            std::optional<SourceDeclarationMigration> source_migration = {},
+            std::optional<TemporalDeclarationUpdate> declaration_update = {}) {
+        const auto& old = state();
+        native_series_detail::bound(machine::checked_size_add(old.frames.size(), 1),
+                                   old.limits.max_segments, "series segment count budget");
+        auto segment = temporal_segment_detail::build_temporal_segment(*old.tail, target,
+            std::move(correspondences), std::move(code_transports), code_encoding,
+            std::move(source_migration), std::move(declaration_update), old.limits.temporal.source_declarations);
+        append(segment);
+    }
     void append_encoded(std::span<const std::byte> frame) {
         using namespace native_series_detail;
         const auto& old = state();
@@ -515,15 +547,20 @@ public:
             const auto& cp = *checkpoints->at(seq);
             next->checkpoint_bytes = machine::checked_size_add(next->checkpoint_bytes, 8);
             next->checkpoint_bytes = add_blob(next->checkpoint_bytes, cp.source.size());
-            next->checkpoint_bytes = add_blob(next->checkpoint_bytes, cp.channels.size());
+            next->checkpoint_bytes = add_blob(next->checkpoint_bytes, cp.channels->size());
             next->archive_bytes = archive_size(*next);
         }
         next->checkpoints = std::move(checkpoints);
         next->archive_bytes = archive_size(*next); state_ = std::move(next);
     }
 private:
+    friend class NativeSeriesPrefix;
     friend std::vector<std::byte> encode_native_series(const NativeTemporalSeries&);
     friend NativeTemporalSeries decode_native_series(std::span<const std::byte>, const NativeSeriesLimits&);
+    // Only the canonical reader adopts storage it freshly decoded and owns.
+    // Public host endpoints still pass through the independently freezing path.
+    explicit NativeTemporalSeries(std::shared_ptr<const native_series_detail::State> state)
+        : state_(std::move(state)) {}
     const native_series_detail::State& state() const {
         native_series_detail::require(static_cast<bool>(state_), "moved-from temporal series"); return *state_;
     }

@@ -78,7 +78,7 @@ void tensors() {
     check(reader.value(0) == Q{0} && reader.value(huge - 1) == large, "large domain or integer truncated");
     std::vector<std::future<Q>> workers;
     for (std::size_t i = 0; i < 8; ++i)
-        workers.push_back(std::async(std::launch::async, [reader, huge] { return *reader.value(huge - 1); }));
+        workers.push_back(std::async(std::launch::async, [reader] { return *reader.value(huge - 1); }));
     for (auto& worker : workers) check(worker.get() == large, "parallel immutable read differs");
     auto moved = reader;
     auto destination = std::move(moved);

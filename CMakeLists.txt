@@ -669,6 +669,21 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
   add_executable(rfc_low_rank_update_tests tests/field/test_low_rank_update.cpp)
   target_link_libraries(rfc_low_rank_update_tests PRIVATE rfc::field)
   add_test(NAME rfc_low_rank_green_update COMMAND rfc_low_rank_update_tests)
+  add_executable(rfc_sparse_selected_solve_tests tests/numeric/test_sparse_selected_solve.cpp)
+  target_link_libraries(rfc_sparse_selected_solve_tests PRIVATE rfc::numeric Threads::Threads)
+  add_test(NAME rfc_sparse_selected_solve COMMAND rfc_sparse_selected_solve_tests)
+  add_test(NAME rfc_sparse_selected_solve_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/numeric/check_sparse_selected_solve.py $<TARGET_FILE:rfc_sparse_selected_solve_tests>)
+  add_executable(rfc_ordered_exact_solve_tests tests/numeric/test_ordered_exact_solve.cpp)
+  target_link_libraries(rfc_ordered_exact_solve_tests PRIVATE rfc::field Threads::Threads)
+  add_test(NAME rfc_ordered_exact_solve COMMAND rfc_ordered_exact_solve_tests)
+  add_test(NAME rfc_ordered_exact_solve_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/numeric/check_ordered_exact_solve.py $<TARGET_FILE:rfc_ordered_exact_solve_tests>)
+  add_executable(rfc_sparse_exact_map_tests tests/numeric/test_sparse_exact_map.cpp)
+  target_link_libraries(rfc_sparse_exact_map_tests PRIVATE rfc::numeric)
+  add_test(NAME rfc_sparse_exact_map COMMAND rfc_sparse_exact_map_tests)
+  add_test(NAME rfc_sparse_exact_map_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/numeric/check_sparse_exact_map.py $<TARGET_FILE:rfc_sparse_exact_map_tests>)
 endif()
 
 if(RFC_BUILD_BENCHMARKS)

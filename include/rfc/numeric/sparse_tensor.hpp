@@ -22,9 +22,9 @@ public:
         : domain_(std::move(domain)), support_(std::move(support)), values_(std::move(values)) {
         if (support_.size() != domain_.logical_size()) throw std::invalid_argument("tensor support/domain size mismatch");
         if (values_.size() != domain_.logical_size()) throw std::invalid_argument("tensor values/domain size mismatch");
-        for (const auto& entry : values_.entries()) {
-            if (!support_.contains(entry.index)) throw std::invalid_argument("tensor value lies outside structural support");
-        }
+        if (support_.count() != support_.size()) values_.for_each_index([&](std::size_t index) {
+            if (!support_.contains(index)) throw std::invalid_argument("tensor value lies outside structural support");
+        });
     }
 
     [[nodiscard]] static SparseRationalTensor zero(IndexDomain domain,
@@ -44,11 +44,16 @@ public:
         if (!support_.contains(index)) return std::nullopt;
         const auto& entries = values_.entries();
         const auto it = std::lower_bound(entries.begin(), entries.end(), index,
-                                         [](const SparseRationalEntry& entry, std::size_t key) {
-                                             return entry.index < key;
-                                         });
-        if (it == entries.end() || it->index != index) return Rational{0};
-        return it->value;
+            [](const SparseRationalEntry& entry, std::size_t key) { return entry.index < key; });
+        return it == entries.end() || it->index != index ? Rational{0} : it->value;
+    }
+
+    // An explicit single coordinate scan avoids a coefficient family. Use a
+    // sorted selection reader for several coordinates, or state() for repeated
+    // indexed access to a materialized field.
+    [[nodiscard]] std::optional<Rational> streamed_state(std::size_t index) const {
+        if (!support_.contains(index)) return std::nullopt;
+        return values_.coefficient(index);
     }
 
 private:
