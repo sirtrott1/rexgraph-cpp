@@ -144,6 +144,7 @@ struct RelationalInputSubmission {
     std::uint64_t use{};
     numeric::SparseRationalTensor source_field;
 };
+struct RelationalAvailableInputSubmission { RelationalInputSubmission input; RelationalInputOrigins origins; };
 
 namespace value_admission_detail {
 inline std::vector<OwnedRelationalValueOrigin> program_origins(const OwnedRelationalFieldProgram& program,
@@ -209,6 +210,28 @@ public:
     void admit(const RelationalAvailabilityContext& context, std::function<void()> check = {}) const {
         const auto pin = state_; const auto authority = context; const auto callback = std::move(check);
         for (const auto& origin : pin->obligations) { if (callback) callback(); authority.recheck(origin); }
+    }
+    void check_inputs(std::vector<RelationalAvailableInputSubmission> inputs,
+        const RelationalAvailabilityContext& context, std::function<void()> check = {}) const {
+        const auto pin = state_; const auto frozen = std::move(inputs); const auto authority = context; const auto callback = std::move(check);
+        for (const auto& origin : pin->obligations) { if (callback) callback(); authority.recheck(origin); }
+        const auto program = encode_relational_field_program(pin->program);
+        for (const auto& row : frozen) {
+            if (callback) callback();
+            const auto& input = row.input; const auto asset = encode_relational_input_use_asset(input.asset);
+            const auto value = relational_input_value_payload(asset, input.declaration, input.use, input.source_field);
+            const auto accession = relational_input_accession_payload(program, asset, input.declaration, input.use, input.source_field);
+            std::vector<OwnedRelationalValueOrigin> checked;
+            value_admission_detail::input_origins(checked, row.origins, asset, value, accession, authority);
+        }
+    }
+    AvailableRelationalFieldResult execute_inputs(std::vector<RelationalAvailableInputSubmission> inputs,
+        const RelationalAvailabilityContext& context, numeric::ExactActionLimits limits = {}, std::function<void()> check = {}) const {
+        const auto pin = *this; const auto frozen = std::move(inputs); const auto authority = context; const auto callback = std::move(check);
+        pin.check_inputs(frozen, authority, callback);
+        std::vector<RelationalAvailableInput> admitted;
+        for (const auto& row : frozen) admitted.push_back(pin.admit_input(row.input, row.origins, authority, limits, callback));
+        return pin.execute(std::move(admitted), authority, limits, callback);
     }
     RelationalAvailableInput admit_input(RelationalInputSubmission submission, RelationalInputOrigins keys,
         const RelationalAvailabilityContext& context, numeric::ExactActionLimits limits = {},

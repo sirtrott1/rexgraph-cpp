@@ -462,6 +462,12 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
     add_test(NAME rfc_relational_field_evidence_fraction COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/learning/check_relational_field_evidence.py $<TARGET_FILE:rfc_relational_field_evidence_tests>)
 
+    add_executable(rfc_relational_available_evidence_tests tests/learning/test_relational_available_evidence.cpp)
+    target_link_libraries(rfc_relational_available_evidence_tests PRIVATE rfc::learning Threads::Threads)
+    add_test(NAME rfc_relational_available_evidence COMMAND rfc_relational_available_evidence_tests)
+    add_test(NAME rfc_relational_available_evidence_fraction COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/learning/check_relational_available_evidence.py $<TARGET_FILE:rfc_relational_available_evidence_tests>)
+
     add_executable(rfc_transport_field_objective_tests tests/learning/test_transport_field_objective.cpp)
     target_link_libraries(rfc_transport_field_objective_tests PRIVATE rfc::learning Threads::Threads)
     add_test(NAME rfc_transport_field_objective COMMAND rfc_transport_field_objective_tests)
