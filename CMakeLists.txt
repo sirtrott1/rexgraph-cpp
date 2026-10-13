@@ -468,6 +468,12 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
     add_test(NAME rfc_relational_finite_operator_fraction COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/learning/check_relational_finite_operator.py $<TARGET_FILE:rfc_relational_finite_operator_tests>)
 
+    add_executable(rfc_relational_available_finite_operator_tests tests/learning/test_relational_available_finite_operator.cpp)
+    target_link_libraries(rfc_relational_available_finite_operator_tests PRIVATE rfc::learning Threads::Threads)
+    add_test(NAME rfc_relational_available_finite_operator COMMAND rfc_relational_available_finite_operator_tests)
+    add_test(NAME rfc_relational_available_finite_operator_fraction COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/learning/check_relational_finite_operator.py $<TARGET_FILE:rfc_relational_available_finite_operator_tests>)
+
     add_executable(rfc_relational_available_finite_field_tests tests/learning/test_relational_available_finite_field.cpp)
     target_link_libraries(rfc_relational_available_finite_field_tests PRIVATE rfc::learning Threads::Threads)
     add_test(NAME rfc_relational_available_finite_field COMMAND rfc_relational_available_finite_field_tests)
