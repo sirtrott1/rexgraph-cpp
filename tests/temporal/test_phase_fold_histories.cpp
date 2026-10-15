@@ -24,7 +24,7 @@ static rfc::core::RelationalComplex panels() {
     const auto edge=signature.add_type("panel_edge",rfc::core::BoundaryPolicy::DeclaredExact,2,2);
     const auto face=signature.add_attaching_loop_type("panel",3,0);
     rfc::core::RelationalComplexBuilder builder(signature);
-    for (const auto [a,b]:std::vector<std::pair<int,int>>{{10,20},{20,30},{30,10},{10,40},{40,20},{10,50},{50,40}})
+    for (const auto& [a,b]:std::vector<std::pair<int,int>>{{10,20},{20,30},{30,10},{10,40},{40,20},{10,50},{50,40}})
         builder.add_grade_one(edge,{{static_cast<rfc::core::IdentityKey>(a),true,true,false,1},
                                    {static_cast<rfc::core::IdentityKey>(b),true,false,false,1}});
     for (const auto& word:std::vector<std::vector<int>>{{1,2,3},{-1,4,5},{-4,6,7}}) {

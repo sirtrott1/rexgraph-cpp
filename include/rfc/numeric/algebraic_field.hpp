@@ -4,6 +4,8 @@
 #include <concepts>
 #include <cstdint>
 #include <initializer_list>
+#include <limits>
+#include <map>
 #include <memory>
 #include <variant>
 
@@ -21,7 +23,14 @@ struct EisensteinShift {
     template<class A,class B> requires (std::floating_point<A> || std::floating_point<B>)
     EisensteinShift(A,B)=delete;
 };
-using AlgebraicIrreducibility = std::variant<IrreducibleReduction,EisensteinShift>;
+// Identifies the exact cyclotomic polynomial, rather than requiring an inert
+// prime. Some cyclotomic fields (for example Phi_12) have no such prime.
+struct CyclotomicIrreducibility {
+    std::uint64_t order;
+    explicit CyclotomicIrreducibility(std::uint64_t value) : order(value) {}
+    template<std::floating_point T> CyclotomicIrreducibility(T)=delete;
+};
+using AlgebraicIrreducibility = std::variant<IrreducibleReduction,EisensteinShift,CyclotomicIrreducibility>;
 struct AlgebraicFieldLimits {
     std::size_t max_degree{32}, max_input_coefficients{256}, max_integer_bits{16384};
     std::size_t max_scalar_steps{1000000}, max_matrix_coordinates{4096};
@@ -131,10 +140,38 @@ inline ModPolynomial gcd(ModPolynomial a,ModPolynomial b,std::uint32_t p,Work& w
     while (!b.empty()) {auto r=remainder(a,b,p,work); a=std::move(b); b=std::move(r);}
     return a; // Only its degree matters to the certificate.
 }
+inline Polynomial cyclotomic(std::uint64_t order,Work& work) {
+    if(!order)throw std::invalid_argument("positive cyclotomic order required");
+    // The largest intermediate is x^order-1. Admit it before allocation or
+    // divisor enumeration; all coefficient operations use the existing guard.
+    if(order>=std::numeric_limits<std::size_t>::max() || order>=work.limits.max_input_coefficients)
+        throw std::length_error("cyclotomic polynomial coefficient budget");
+    std::map<std::uint64_t,Polynomial> factors;
+    for(std::uint64_t d=1;d<=order;++d) {
+        work.charge();if(order%d)continue;
+        Polynomial polynomial(static_cast<std::size_t>(d)+1);
+        polynomial.front()=-1;polynomial.back()=1;
+        for(const auto& [divisor,factor]:factors) {
+            work.charge();if(d%divisor)continue;
+            auto quotient=divide(std::move(polynomial),factor,work);
+            if(!quotient.second.empty())throw std::logic_error("cyclotomic exact division invariant");
+            polynomial=std::move(quotient.first);
+        }
+        for(const auto& q:polynomial) {
+            work.charge();work.admit(q);
+            if(q.get_den()!=1)throw std::logic_error("cyclotomic integral coefficient invariant");
+        }
+        factors.emplace(d,std::move(polynomial));
+    }
+    return std::move(factors.at(order));
+}
 inline void certify(const Polynomial& f,const AlgebraicIrreducibility& certificate,Work& work) {
     std::visit([&](const auto& selected) {
-        const auto p=prime(selected.prime);
-        if constexpr (std::same_as<std::decay_t<decltype(selected)>,IrreducibleReduction>) {
+        if constexpr (std::same_as<std::decay_t<decltype(selected)>,CyclotomicIrreducibility>) {
+            if(f!=cyclotomic(selected.order,work))
+                throw std::invalid_argument("polynomial differs from its declared cyclotomic certificate");
+        } else if constexpr (std::same_as<std::decay_t<decltype(selected)>,IrreducibleReduction>) {
+            const auto p=prime(selected.prime);
             ModPolynomial reduced; reduced.reserve(f.size());
             for (const auto& q:f) {
                 const auto den=static_cast<std::uint32_t>(mpz_fdiv_ui(mpq_denref(q.get_mpq_t()),p));
@@ -156,6 +193,7 @@ inline void certify(const Polynomial& f,const AlgebraicIrreducibility& certifica
                     throw std::invalid_argument("polynomial fails its declared Frobenius certificate");
             }
         } else {
+            const auto p=prime(selected.prime);
             if (mpz_sizeinbase(selected.shift.get_mpz_t(),2)>work.limits.max_integer_bits)
                 throw std::length_error("Eisenstein shift integer bit budget");
             Polynomial shifted;
@@ -189,6 +227,12 @@ struct FieldState {
     }
 };
 } // namespace algebraic_detail
+
+inline RationalVector cyclotomic_polynomial(std::uint64_t order,AlgebraicFieldLimits limits={}) {
+    algebraic_detail::Work work{limits};return algebraic_detail::cyclotomic(order,work);
+}
+template<std::floating_point T>
+RationalVector cyclotomic_polynomial(T,AlgebraicFieldLimits={})=delete;
 
 class CertifiedAlgebraicField;
 // Fixed power-basis coefficients with a pinned, actually declared field owner.
@@ -293,6 +337,14 @@ public:
         return CertifiedAlgebraicField(std::make_shared<const algebraic_detail::FieldState>(
             algebraic_detail::FieldState{std::move(polynomial),std::move(certificate),limits}));
     }
+    static CertifiedAlgebraicField declare_cyclotomic(std::uint64_t order,AlgebraicFieldLimits limits={}) {
+        algebraic_detail::Work work{limits};auto polynomial=algebraic_detail::cyclotomic(order,work);
+        if(polynomial.size()-1>limits.max_degree)throw std::length_error("algebraic field degree budget");
+        return CertifiedAlgebraicField(std::make_shared<const algebraic_detail::FieldState>(
+            algebraic_detail::FieldState{std::move(polynomial),CyclotomicIrreducibility{order},limits}));
+    }
+    template<std::floating_point T>
+    static CertifiedAlgebraicField declare_cyclotomic(T,AlgebraicFieldLimits={})=delete;
     template<std::floating_point T>
     static CertifiedAlgebraicField declare(std::initializer_list<T>,AlgebraicIrreducibility,AlgebraicFieldLimits={})=delete;
     bool same_owner(const CertifiedAlgebraicField& other) const noexcept { return state_==other.state_; }

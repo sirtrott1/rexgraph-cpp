@@ -28,13 +28,23 @@ using algebra::owned_gluing_detail::mul;
 inline M product(const M& a,const M& b,Guard& guard,std::size_t resident) {
     if(a.cols()!=b.rows()) throw std::logic_error("context view product dimensions");
     guard.matrix(a);guard.matrix(b);
-    const auto scratch=add(resident,add(b.rows(),mul(b.nonzeros(),2)));guard.entries(scratch);
-    std::vector<std::vector<std::pair<std::size_t,Q>>> rows(b.rows());
-    for(const auto& [key,q]:b.entries()) {guard.step();rows[key.first].emplace_back(key.second,q);}
+    // A common frame may have a large declared carrier and only a few
+    // represented directions. Index those directions without one row bucket
+    // per ambient coordinate. Keep original row identities in the sparse map.
+    std::map<std::size_t,std::vector<std::pair<std::size_t,Q>>> rows;
+    std::size_t scratch=resident;guard.entries(scratch);
+    for(const auto& [key,q]:b.entries()) {
+        guard.step();const bool new_row=!rows.contains(key.first);
+        const auto next=add(scratch,new_row?3u:2u);guard.entries(next);
+        rows[key.first].emplace_back(key.second,q);scratch=next;
+    }
     M out(a.rows(),b.cols());
-    for(const auto& [key,q]:a.entries()) for(const auto& [j,v]:rows[key.second]) {
-        guard.entries(add(scratch,add(out.nonzeros(),1)));
-        out.set(key.first,j,guard.add(out.get(key.first,j),guard.mul(q,v)));
+    for(const auto& [key,q]:a.entries()) {
+        guard.step();const auto row=rows.find(key.second);if(row==rows.end())continue;
+        for(const auto& [j,v]:row->second) {
+            guard.entries(add(scratch,add(out.nonzeros(),1)));
+            out.set(key.first,j,guard.add(out.get(key.first,j),guard.mul(q,v)));
+        }
     }
     return out;
 }

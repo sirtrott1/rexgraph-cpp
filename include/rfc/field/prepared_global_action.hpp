@@ -4,6 +4,7 @@
 #include "rfc/field/operator_contract.hpp"
 #include "rfc/core/relational_complex.hpp"
 #include "rfc/numeric/checked_exact_actions.hpp"
+#include <initializer_list>
 #include <memory>
 #include <optional>
 
@@ -198,6 +199,44 @@ public:
     numeric::RationalVector apply(const numeric::RationalVector& input,
             numeric::ExactActionLimits limits = {}, std::function<void()> check = {}) const {
         numeric::ExactActionGuard guard(limits, std::move(check)); return apply(input, guard);
+    }
+    numeric::RationalVector apply(std::initializer_list<numeric::Rational> input,
+            numeric::ExactActionGuard& guard) const {
+        return apply(numeric::RationalVector(input),guard);
+    }
+    numeric::RationalVector apply(std::initializer_list<numeric::Rational> input,
+            numeric::ExactActionLimits limits = {}, std::function<void()> check = {}) const {
+        numeric::ExactActionGuard guard(limits,std::move(check));
+        return apply(numeric::RationalVector(input),guard);
+    }
+    numeric::SparseRationalVector apply(const numeric::SparseRationalVector& input,numeric::ExactActionGuard& guard) const {
+        const auto pin=state_;guard.step();
+        if(input.size()!=pin->width)throw std::invalid_argument("prepared sparse global action input dimension");
+        guard.entries(machine::checked_size_add(pin->retained_entries,input.nonzeros()));guard.dimension(pin->dimension);guard.sparse_vector(input);
+        if(pin->operation.kind==OperatorKind::HarmonicProjector){
+            guard.matrix(pin->frame);if(!pin->solve)return numeric::SparseRationalVector(pin->width);
+            return numeric::checked_apply(pin->frame,pin->solve->apply(numeric::checked_apply(pin->dual,input,guard),guard),guard);
+        }
+        if(!pin->solve)return input;
+        const auto measured=numeric::checked_apply(pin->metric,input,guard);
+        std::vector<numeric::SparseRationalEntry> entries;entries.reserve(measured.nonzeros());
+        for(const auto& entry:measured.entries()){
+            guard.step();entries.push_back({machine::checked_size_add(pin->rhs_offset,entry.index),entry.value});
+            guard.entries(machine::checked_size_add(pin->retained_entries,machine::checked_size_add(measured.nonzeros(),entries.size())));
+        }
+        const auto solution=pin->solve->apply(numeric::SparseRationalVector(pin->dimension,std::move(entries)),guard);
+        const auto end=machine::checked_size_add(pin->output_offset,pin->output_width);
+        if(end>solution.size())throw std::logic_error("prepared sparse action output range");
+        std::vector<numeric::SparseRationalEntry> selected;
+        for(const auto& entry:solution.entries()){
+            guard.step();if(entry.index>=pin->output_offset && entry.index<end)selected.push_back({entry.index-pin->output_offset,entry.value});
+            guard.entries(machine::checked_size_add(pin->retained_entries,machine::checked_size_add(solution.nonzeros(),selected.size())));
+        }
+        return numeric::SparseRationalVector(pin->output_width,std::move(selected));
+    }
+    numeric::SparseRationalVector apply(const numeric::SparseRationalVector& input,
+            numeric::ExactActionLimits limits={},std::function<void()> check={}) const {
+        numeric::ExactActionGuard guard(limits,std::move(check));return apply(input,guard);
     }
 private:
     friend class PreparedExactExecutionTower;

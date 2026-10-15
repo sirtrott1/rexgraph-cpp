@@ -71,7 +71,10 @@ endif()
     configure(source, no_learning, '-DRFC_BUILD_LEARNING=OFF')
     output = run([cmake, '--build', str(no_learning), '--target', 'help'])
     for name in ('rfc_binary_learning_tests', 'rfc_integer_learning_demo',
-                 'rfc_integer_relational_bench', 'rfc_prepared_consumer_tests'):
+                 'rfc_integer_relational_bench', 'rfc_prepared_consumer_tests',
+                 'rfc_affine_transport_completion_tests', 'rfc_transport_family_gluing_tests',
+                 'rfc_assertion_diagnosis_tests', 'rfc_multiplicative_relation_tests',
+                 'rfc_transport_family_gluing_demo'):
         if name in output:
             raise RuntimeError('Disabled learning artifact remains: ' + name)
 

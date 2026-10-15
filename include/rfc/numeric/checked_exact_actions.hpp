@@ -1,8 +1,10 @@
 #pragma once
 
 #include "rfc/numeric/exact_matrix.hpp"
+#include "rfc/numeric/sparse_vector.hpp"
 #include "rfc/machine/checked_size.hpp"
 #include <functional>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -30,6 +32,10 @@ public:
     }
     void vector(const RationalVector& v) {
         dimension(v.size());for(const auto& q:v){step();value(q);}
+    }
+    void sparse_vector(const SparseRationalVector& v) {
+        dimension(v.size());entries(v.nonzeros());
+        for(const auto& entry:v.entries()){step();value(entry.value);}
     }
     RationalVector canonical_input(const RationalVector& v) {
         vector(v);RationalVector out;out.reserve(v.size());
@@ -64,13 +70,71 @@ inline RationalVector checked_transpose_apply(const ExactMatrix& a,const Rationa
     for(const auto& [key,q]:a.entries())out[key.second]=guard.add(out[key.second],guard.mul(q,input[key.first]));
     return out;
 }
+inline RationalVector checked_apply(const ExactMatrix& a,std::initializer_list<Rational> x,ExactActionGuard& guard) {
+    return checked_apply(a,RationalVector(x),guard);
+}
+inline RationalVector checked_transpose_apply(const ExactMatrix& a,std::initializer_list<Rational> x,ExactActionGuard& guard) {
+    return checked_transpose_apply(a,RationalVector(x),guard);
+}
+namespace checked_sparse_detail {
+using Coordinates=std::map<std::size_t,Rational>;
+inline Rational get(const Coordinates& values,std::size_t i) {
+    const auto at=values.find(i);return at==values.end()?Rational{0}:at->second;
+}
+inline void set(Coordinates& values,std::size_t i,Rational q,ExactActionGuard& guard,std::size_t retained=0) {
+    guard.value(q);q.canonicalize();
+    if(q==0)values.erase(i);else values[i]=std::move(q);
+    guard.entries(machine::checked_size_add(retained,values.size()));
+}
+inline Coordinates coordinates(const SparseRationalVector& x,ExactActionGuard& guard) {
+    guard.sparse_vector(x);Coordinates out;
+    for(const auto& entry:x.entries())out.emplace(entry.index,entry.value);
+    return out;
+}
+inline SparseRationalVector vector(std::size_t size,Coordinates values,ExactActionGuard& guard) {
+    guard.dimension(size);guard.entries(machine::checked_size_mul(values.size(),2));
+    std::vector<SparseRationalEntry> out;out.reserve(values.size());
+    for(auto& [i,q]:values){guard.step();out.push_back({i,std::move(q)});}
+    return SparseRationalVector(size,std::move(out));
+}
+inline void swap(Coordinates& values,std::size_t a,std::size_t b,ExactActionGuard& guard,std::size_t retained) {
+    if(a==b)return;
+    const auto x=get(values,a),y=get(values,b);set(values,a,y,guard,retained);set(values,b,x,guard,retained);
+}
+}
+inline SparseRationalVector checked_apply(const ExactMatrix& a,const SparseRationalVector& x,ExactActionGuard& guard) {
+    if(x.size()!=a.cols())throw std::invalid_argument("checked sparse action carrier mismatch");
+    guard.matrix(a);const auto input=checked_sparse_detail::coordinates(x,guard);
+    checked_sparse_detail::Coordinates out;
+    const auto retained=machine::checked_size_add(a.nonzeros(),x.nonzeros());
+    for(const auto& [key,q]:a.entries()){
+        guard.step();const auto at=input.find(key.second);if(at==input.end())continue;
+        checked_sparse_detail::set(out,key.first,guard.add(checked_sparse_detail::get(out,key.first),guard.mul(q,at->second)),guard,retained);
+    }
+    return checked_sparse_detail::vector(a.rows(),std::move(out),guard);
+}
+inline SparseRationalVector checked_transpose_apply(const ExactMatrix& a,const SparseRationalVector& x,ExactActionGuard& guard) {
+    if(x.size()!=a.rows())throw std::invalid_argument("checked sparse transpose carrier mismatch");
+    guard.matrix(a);const auto input=checked_sparse_detail::coordinates(x,guard);
+    checked_sparse_detail::Coordinates out;
+    const auto retained=machine::checked_size_add(a.nonzeros(),x.nonzeros());
+    for(const auto& [key,q]:a.entries()){
+        guard.step();const auto at=input.find(key.first);if(at==input.end())continue;
+        checked_sparse_detail::set(out,key.second,guard.add(checked_sparse_detail::get(out,key.second),guard.mul(q,at->second)),guard,retained);
+    }
+    return checked_sparse_detail::vector(a.cols(),std::move(out),guard);
+}
 inline ExactMatrix checked_multiply(const ExactMatrix& a,const ExactMatrix& b,ExactActionGuard& guard) {
     if(a.cols()!=b.rows())throw std::invalid_argument("checked matrix product dimensions");
     guard.matrix(a);guard.matrix(b);ExactMatrix out(a.rows(),b.cols());
-    std::vector<std::vector<std::pair<std::size_t,Rational>>> rows(b.rows());
+    std::map<std::size_t,std::vector<std::pair<std::size_t,Rational>>> rows;
     for(const auto& [key,q]:b.entries())rows[key.first].emplace_back(key.second,q);
-    for(const auto& [key,q]:a.entries())for(const auto& [j,v]:rows[key.second]) {
-        out.set(key.first,j,guard.add(out.get(key.first,j),guard.mul(q,v)));guard.entries(out.nonzeros());
+    for(const auto& [key,q]:a.entries()) {
+        const auto row=rows.find(key.second);
+        if(row==rows.end())continue;
+        for(const auto& [j,v]:row->second) {
+            out.set(key.first,j,guard.add(out.get(key.first,j),guard.mul(q,v)));guard.entries(out.nonzeros());
+        }
     }
     return out;
 }
@@ -155,6 +219,12 @@ class PreparedExactSolve {
             if(ordering)guard.step();
             if(original.rows()!=original.cols())throw std::invalid_argument("prepared solve requires a square declared operator");
             guard.matrix(original);
+            // A nonsingular square map needs at least one stored entry per
+            // row. Reject an impossible sparse declaration before allocating
+            // its factor indexes, even when the dimension allowance is huge.
+            if(original.nonzeros()<original.rows())
+                throw std::invalid_argument("singular operator has fewer nonzeros than its declared dimension");
+            guard.entries(original.rows());
             upper.resize(original.rows());
             // Derived execution support only. The original declared map is kept
             // separately, and the same minimum-row-size/tie pivot rule is used.
@@ -310,11 +380,107 @@ public:
         if(checked_transpose_apply(pin->original,z,guard)!=input)throw std::logic_error("prepared transpose has nonzero exact residual");
         return z;
     }
+    SparseRationalVector apply(const SparseRationalVector& rhs,ExactActionGuard& guard) const {
+        const auto pin=state_;guard.step();
+        if(rhs.size()!=pin->original.rows())throw std::invalid_argument("prepared sparse solve right-hand side dimension");
+        validate(*pin,guard);auto work=checked_sparse_detail::coordinates(rhs,guard);
+        const auto retained=machine::checked_size_add(pin->stored_entries,rhs.nonzeros());
+        if(pin->ordering){
+            checked_sparse_detail::Coordinates ordered;
+            for(std::size_t i=0;i<rhs.size();++i){
+                guard.step();const auto at=work.find(pin->ordering->rows[i]);
+                if(at!=work.end())ordered.emplace(i,at->second);
+            }
+            work=std::move(ordered);
+        }
+        for(std::size_t k=0;k<pin->pivots.size();++k){
+            guard.step();const auto& p=pin->pivots[k];checked_sparse_detail::swap(work,k,p.row,guard,retained);
+            const auto at=work.find(k);if(at==work.end())continue;const auto value=at->second;
+            for(const auto& [i,ratio]:p.eliminate)
+                checked_sparse_detail::set(work,i,guard.sub(checked_sparse_detail::get(work,i),guard.mul(ratio,value)),guard,retained);
+        }
+        checked_sparse_detail::Coordinates solution;
+        while(!work.empty()){
+            const auto at=std::prev(work.end());const auto i=at->first;
+            const auto value=guard.div(at->second,pin->upper[i].at(i));work.erase(at);solution.emplace(i,value);
+            for(const auto j:pin->upper_columns[i])
+                checked_sparse_detail::set(work,j,guard.sub(checked_sparse_detail::get(work,j),guard.mul(pin->upper[j].at(i),value)),guard,
+                    machine::checked_size_add(retained,solution.size()));
+        }
+        if(pin->ordering){
+            checked_sparse_detail::Coordinates original;
+            for(auto& [i,q]:solution){guard.step();original.emplace(pin->ordering->columns[i],std::move(q));}
+            solution=std::move(original);
+        }
+        const auto result=checked_sparse_detail::vector(rhs.size(),std::move(solution),guard);
+        if(checked_apply(pin->original,result,guard).entries()!=rhs.entries())throw std::logic_error("prepared sparse solve residual is nonzero");
+        return result;
+    }
+    SparseRationalVector apply_transpose(const SparseRationalVector& rhs,ExactActionGuard& guard) const {
+        const auto pin=state_;guard.step();
+        if(rhs.size()!=pin->original.rows())throw std::invalid_argument("prepared sparse transpose right-hand side dimension");
+        validate(*pin,guard);auto work=checked_sparse_detail::coordinates(rhs,guard);
+        const auto retained=machine::checked_size_add(pin->stored_entries,rhs.nonzeros());
+        if(pin->ordering){
+            checked_sparse_detail::Coordinates ordered;
+            for(std::size_t i=0;i<rhs.size();++i){
+                guard.step();const auto at=work.find(pin->ordering->columns[i]);
+                if(at!=work.end())ordered.emplace(i,at->second);
+            }
+            work=std::move(ordered);
+        }
+        checked_sparse_detail::Coordinates solution;
+        while(!work.empty()){
+            const auto at=work.begin();const auto i=at->first;
+            const auto value=guard.div(at->second,pin->upper[i].at(i));work.erase(at);solution.emplace(i,value);
+            for(const auto& [j,q]:pin->upper[i])if(j>i)
+                checked_sparse_detail::set(work,j,guard.sub(checked_sparse_detail::get(work,j),guard.mul(q,value)),guard,
+                    machine::checked_size_add(retained,solution.size()));
+        }
+        // Transpose the complete elimination sequence, including dynamic row
+        // swaps. Only nonzero coordinates are stored or multiplied.
+        for(std::size_t k=pin->pivots.size();k-- >0;){
+            guard.step();const auto& p=pin->pivots[k];auto value=checked_sparse_detail::get(solution,k);
+            for(const auto& [i,ratio]:p.eliminate){
+                const auto at=solution.find(i);if(at!=solution.end())value=guard.sub(value,guard.mul(ratio,at->second));
+            }
+            checked_sparse_detail::set(solution,k,std::move(value),guard,retained);
+            checked_sparse_detail::swap(solution,k,p.row,guard,retained);
+        }
+        if(pin->ordering){
+            checked_sparse_detail::Coordinates original;
+            for(auto& [i,q]:solution){guard.step();original.emplace(pin->ordering->rows[i],std::move(q));}
+            solution=std::move(original);
+        }
+        const auto result=checked_sparse_detail::vector(rhs.size(),std::move(solution),guard);
+        if(checked_transpose_apply(pin->original,result,guard).entries()!=rhs.entries())throw std::logic_error("prepared sparse transpose residual is nonzero");
+        return result;
+    }
+    SparseRationalVector apply(const SparseRationalVector& rhs,ExactActionLimits limits={},std::function<void()> check={}) const {
+        ExactActionGuard guard(limits,std::move(check));return apply(rhs,guard);
+    }
+    SparseRationalVector apply_transpose(const SparseRationalVector& rhs,ExactActionLimits limits={},std::function<void()> check={}) const {
+        ExactActionGuard guard(limits,std::move(check));return apply_transpose(rhs,guard);
+    }
     RationalVector apply_transpose(const RationalVector& rhs,ExactActionLimits limits={},std::function<void()> check={}) const {
         ExactActionGuard guard(limits,std::move(check));return apply_transpose(rhs,guard);
     }
     RationalVector apply(const RationalVector& rhs,ExactActionLimits limits={},std::function<void()> check={}) const {
         ExactActionGuard guard(limits,std::move(check));return apply(rhs,guard);
+    }
+    // Preserve the established full-coordinate meaning of apply({1}) and
+    // apply({}) when the sparse-vector overloads are also visible.
+    RationalVector apply(std::initializer_list<Rational> rhs,ExactActionGuard& guard) const {
+        return apply(RationalVector(rhs),guard);
+    }
+    RationalVector apply_transpose(std::initializer_list<Rational> rhs,ExactActionGuard& guard) const {
+        return apply_transpose(RationalVector(rhs),guard);
+    }
+    RationalVector apply(std::initializer_list<Rational> rhs,ExactActionLimits limits={},std::function<void()> check={}) const {
+        return apply(RationalVector(rhs),limits,std::move(check));
+    }
+    RationalVector apply_transpose(std::initializer_list<Rational> rhs,ExactActionLimits limits={},std::function<void()> check={}) const {
+        return apply_transpose(RationalVector(rhs),limits,std::move(check));
     }
     const ExactMatrix& matrix() const & {return state_->original;}
     const ExactMatrix& matrix() const &&=delete;
@@ -401,12 +567,11 @@ class PreparedSelectedExactSolve {
             // A complete output request uses the existing primal solve, so the
             // selection path cannot silently prepare a complete inverse matrix.
             if(!full)for(const auto i:unique){
-                RationalVector basis(solve.matrix().rows());basis[i]=1;
-                const auto z=solve.apply_transpose(basis,guard);
+                const auto z=solve.apply_transpose(SparseRationalVector::basis(solve.matrix().rows(),i),guard);
                 duals.emplace_back();
-                for(std::size_t j=0;j<z.size();++j)if(z[j]!=0){
+                for(const auto& entry:z.entries()){
                     guard.step();retained_entries=machine::checked_size_add(retained_entries,1);guard.entries(retained_entries);
-                    duals.back().emplace_back(j,z[j]);
+                    duals.back().emplace_back(entry.index,entry.value);
                 }
             }
             preparation_steps=guard.steps()-start;
@@ -439,12 +604,11 @@ public:
         const auto input=guard.canonical_input(rhs);RationalVector values;
         if(pin->full)values=pin->solve.apply(input,guard);
         else for(std::size_t col=0;col<pin->unique.size();++col){
-            RationalVector z(input.size());
-            for(const auto& [j,q]:pin->duals[col]){guard.step();guard.value(q);z[j]=q;}
-            const auto witness=checked_transpose_apply(pin->solve.matrix(),z,guard);
-            for(std::size_t j=0;j<witness.size();++j){
-                guard.step();if(witness[j]!=Rational{j==pin->unique[col]?1:0})throw std::logic_error("selected dual certificate residual");
-            }
+            std::vector<SparseRationalEntry> entries;
+            for(const auto& [j,q]:pin->duals[col]){guard.step();guard.value(q);entries.push_back({j,q});}
+            const auto witness=checked_transpose_apply(pin->solve.matrix(),SparseRationalVector(input.size(),std::move(entries)),guard);
+            if(witness.entries()!=SparseRationalVector::basis(input.size(),pin->unique[col]).entries())
+                throw std::logic_error("selected dual certificate residual");
             Rational result;
             for(const auto& [j,q]:pin->duals[col])result=guard.add(result,guard.mul(q,input[j]));
             values.push_back(std::move(result));
@@ -456,8 +620,40 @@ public:
         }
         return out;
     }
+    RationalVector apply(const SparseRationalVector& rhs,ExactActionGuard& guard) const {
+        const auto pin=state_;guard.step();
+        if(rhs.size()!=input_size())throw std::invalid_argument("selected sparse solve carrier mismatch");
+        pin->solve.validate(guard);guard.dimension(pin->outputs.size());guard.entries(pin->retained_entries);
+        guard.entries(pin->outputs.size());guard.entries(pin->unique.size());
+        const auto input=checked_sparse_detail::coordinates(rhs,guard);
+        checked_sparse_detail::Coordinates values;
+        if(pin->full)values=checked_sparse_detail::coordinates(pin->solve.apply(rhs,guard),guard);
+        else for(std::size_t col=0;col<pin->unique.size();++col){
+            std::vector<SparseRationalEntry> entries;Rational value{0};
+            for(const auto& [j,q]:pin->duals[col]){
+                guard.step();guard.value(q);entries.push_back({j,q});
+                const auto at=input.find(j);if(at!=input.end())value=guard.add(value,guard.mul(q,at->second));
+            }
+            const auto witness=checked_transpose_apply(pin->solve.matrix(),SparseRationalVector(rhs.size(),std::move(entries)),guard);
+            if(witness.entries()!=SparseRationalVector::basis(rhs.size(),pin->unique[col]).entries())
+                throw std::logic_error("selected sparse dual certificate residual");
+            checked_sparse_detail::set(values,pin->unique[col],std::move(value),guard,pin->retained_entries);
+        }
+        RationalVector out;out.reserve(pin->outputs.size());
+        for(const auto i:pin->outputs){guard.step();out.push_back(checked_sparse_detail::get(values,i));}
+        return out;
+    }
+    RationalVector apply(const SparseRationalVector& rhs,ExactActionLimits limits={},std::function<void()> check={}) const {
+        ExactActionGuard guard(limits,std::move(check));return apply(rhs,guard);
+    }
     RationalVector apply(const RationalVector& rhs,ExactActionLimits limits={},std::function<void()> check={}) const {
         ExactActionGuard guard(limits,std::move(check));return apply(rhs,guard);
+    }
+    RationalVector apply(std::initializer_list<Rational> rhs,ExactActionGuard& guard) const {
+        return apply(RationalVector(rhs),guard);
+    }
+    RationalVector apply(std::initializer_list<Rational> rhs,ExactActionLimits limits={},std::function<void()> check={}) const {
+        return apply(RationalVector(rhs),limits,std::move(check));
     }
 private:
     friend class PreparedExactSolve;

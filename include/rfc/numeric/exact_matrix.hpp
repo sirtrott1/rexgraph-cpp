@@ -119,10 +119,12 @@ public:
         ExactMatrix out(rows_, other.cols_);
         // Sparse row/column index. This is a transparent exact reference kernel,
         // not the production sparse backend.
-        std::vector<std::vector<std::pair<std::size_t,Rational>>> right_rows(other.rows_);
+        std::map<std::size_t,std::vector<std::pair<std::size_t,Rational>>> right_rows;
         for (const auto& [key, value] : other.entries_) right_rows[key.first].push_back({key.second, value});
         for (const auto& [key, left] : entries_) {
-            for (const auto& [j, right] : right_rows[key.second]) {
+            const auto row=right_rows.find(key.second);
+            if(row==right_rows.end())continue;
+            for (const auto& [j, right] : row->second) {
                 const auto current = out.get(key.first, j);
                 out.set(key.first, j, current + left * right);
             }

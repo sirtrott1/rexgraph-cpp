@@ -59,21 +59,42 @@ private:
 
 class PolynomialMatrix {
 public:
-    PolynomialMatrix(std::size_t rows,std::size_t cols,std::size_t variables):rows_(rows),cols_(cols),variables_(variables),entries_(rows*cols,ExactPolynomial(variables)){}
+    using Key = std::pair<std::size_t,std::size_t>;
+    PolynomialMatrix(std::size_t rows,std::size_t cols,std::size_t variables)
+        :rows_(rows),cols_(cols),variables_(variables),zero_(variables){}
     [[nodiscard]] std::size_t rows()const noexcept{return rows_;}
     [[nodiscard]] std::size_t cols()const noexcept{return cols_;}
     [[nodiscard]] std::size_t variable_count()const noexcept{return variables_;}
-    [[nodiscard]] const ExactPolynomial& get(std::size_t i,std::size_t j)const{if(i>=rows_||j>=cols_)throw std::out_of_range("polynomial matrix index");return entries_[i*cols_+j];}
-    void set(std::size_t i,std::size_t j,ExactPolynomial value){if(i>=rows_||j>=cols_||value.variable_count()!=variables_)throw std::invalid_argument("polynomial matrix set mismatch");entries_[i*cols_+j]=std::move(value);}
+    [[nodiscard]] std::size_t nonzeros()const noexcept{return entries_.size();}
+    [[nodiscard]] const std::map<Key,ExactPolynomial>& entries()const noexcept{return entries_;}
+    [[nodiscard]] const ExactPolynomial& get(std::size_t i,std::size_t j)const{
+        if(i>=rows_||j>=cols_)throw std::out_of_range("polynomial matrix index");
+        const auto it=entries_.find({i,j});
+        return it==entries_.end()?zero_:it->second;
+    }
+    void set(std::size_t i,std::size_t j,ExactPolynomial value){
+        if(i>=rows_||j>=cols_||value.variable_count()!=variables_)throw std::invalid_argument("polynomial matrix set mismatch");
+        if(value.is_zero())entries_.erase({i,j});
+        else entries_.insert_or_assign(Key{i,j},std::move(value));
+    }
     [[nodiscard]] PolynomialMatrix multiply(const PolynomialMatrix& other)const{
         if(cols_!=other.rows_||variables_!=other.variables_)throw std::invalid_argument("polynomial matrix multiply mismatch");
         PolynomialMatrix out(rows_,other.cols_,variables_);
-        for(std::size_t i=0;i<rows_;++i)for(std::size_t k=0;k<cols_;++k){const auto& a=get(i,k);if(a.is_zero())continue;for(std::size_t j=0;j<other.cols_;++j){const auto& b=other.get(k,j);if(b.is_zero())continue;out.set(i,j,out.get(i,j).add(a.multiply(b)));}}
+        // Join only retained coefficients through a shared intermediate index.
+        // Neither storage nor traversal forms the ambient rows*cols rectangle.
+        for(const auto& [ik,a]:entries_){
+            auto it=other.entries_.lower_bound(Key{ik.second,0u});
+            for(;it!=other.entries_.end()&&it->first.first==ik.second;++it){
+                const auto j=it->first.second;
+                out.set(ik.first,j,out.get(ik.first,j).add(a.multiply(it->second)));
+            }
+        }
         return out;
     }
 private:
     std::size_t rows_{},cols_{},variables_{};
-    std::vector<ExactPolynomial> entries_;
+    ExactPolynomial zero_;
+    std::map<Key,ExactPolynomial> entries_;
 };
 
 using PolynomialIdealGenerators = std::vector<ExactPolynomial>;
@@ -81,7 +102,9 @@ using PolynomialIdealGenerators = std::vector<ExactPolynomial>;
 inline PolynomialIdealGenerators chain_ideal_generators(const PolynomialMatrix& lower,
                                                         const PolynomialMatrix& upper){
     const auto defect=lower.multiply(upper); PolynomialIdealGenerators out;
-    for(std::size_t i=0;i<defect.rows();++i)for(std::size_t j=0;j<defect.cols();++j)if(!defect.get(i,j).is_zero())out.push_back(defect.get(i,j));
+    out.reserve(defect.nonzeros());
+    // The ordered sparse keys retain the former row-major generator order.
+    for(const auto& [key,polynomial]:defect.entries())out.push_back(polynomial);
     return out;
 }
 

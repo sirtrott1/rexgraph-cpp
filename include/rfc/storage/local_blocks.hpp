@@ -129,14 +129,34 @@ inline void canonicalize_local_block(LocalBlockDefinition& block) {
     block.cells.erase(std::unique(block.cells.begin(), block.cells.end()), block.cells.end());
     std::sort(block.occurrences.begin(), block.occurrences.end());
     block.occurrences.erase(std::unique(block.occurrences.begin(), block.occurrences.end()), block.occurrences.end());
-    std::sort(block.payloads.begin(), block.payloads.end(), [](const auto& a, const auto& b) {
+    // Sort lightweight indices, not nested variant payloads. The payloads are
+    // move-constructed exactly once in canonical order, avoiding cross-alternative
+    // move assignments during std::sort. Work depends on retained payload count,
+    // never on a tensor's logical extent; an already canonical lane allocates nothing.
+    const auto less = [](const auto& a, const auto& b) {
         return a.payload_key < b.payload_key;
-    });
-    for (std::size_t i = 1; i < block.payloads.size(); ++i) {
-        if (block.payloads[i - 1].payload_key == block.payloads[i].payload_key) {
-            throw std::invalid_argument("duplicate local payload key");
+    };
+    if (std::is_sorted(block.payloads.begin(), block.payloads.end(), less)) {
+        for (std::size_t i = 1; i < block.payloads.size(); ++i) {
+            if (block.payloads[i - 1].payload_key == block.payloads[i].payload_key)
+                throw std::invalid_argument("duplicate local payload key");
         }
+        return;
     }
+    std::vector<std::size_t> order;
+    order.reserve(block.payloads.size());
+    for (std::size_t i = 0; i < block.payloads.size(); ++i) order.push_back(i);
+    std::sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
+        return less(block.payloads[a], block.payloads[b]);
+    });
+    for (std::size_t i = 1; i < order.size(); ++i) {
+        if (block.payloads[order[i - 1]].payload_key == block.payloads[order[i]].payload_key)
+            throw std::invalid_argument("duplicate local payload key");
+    }
+    std::vector<LocalExactTensorPayload> ordered;
+    ordered.reserve(block.payloads.size());
+    for (const auto i : order) ordered.push_back(std::move(block.payloads[i]));
+    block.payloads.swap(ordered);
 }
 
 [[nodiscard]] inline LocalBlockDefinition make_strict_local_block(const core::RelationalComplex& source,

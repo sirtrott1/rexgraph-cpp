@@ -121,7 +121,7 @@ void obstructions(bool records) {
     for(std::uint16_t k=2;k<c.grade_count();++k)for(std::size_t p=0;p<c.grade(grade(k)).incidence_count();++p)
         if(!c.incidence_coefficient(grade(k),p))choices.emplace_back(grade(k),p);
     check(!choices.empty(),"no structural obstruction fixture");
-    for(const auto twist:choices) {
+    for(const auto& twist:choices) {
         const auto f=fixture(0,0,twist); // The covering and initial morphism are valid.
         rejects([&]{Plan::prepare(f.original,f.cover,f.request,f.available);},"incidence obstruction hidden by realized zero");
         if(records) {

@@ -151,6 +151,9 @@ public:
             lease.policy().backend!=runtime::ExecutionBackend::ExactCpu}));
     }
     Pin publication() const {return state_->publication;}
+    const NativeHodgeFrameRequest& request() const & {return state_->request;}
+    const NativeHodgeFrameRequest& request() const &&=delete;
+    runtime::WorkAvailability preparation_availability() const noexcept {return state_->availability;}
     const field::PreparedHodgeFrames& numeric_plan() const & {return state_->frames;}
     const field::PreparedHodgeFrames& numeric_plan() const &&=delete;
     std::uint64_t carrier() const noexcept {return state_->carriers[state_->request.grade.value]->key;}

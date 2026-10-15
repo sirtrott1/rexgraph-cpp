@@ -19,12 +19,36 @@ inline numeric::ExactMatrix metric_adjoint_variation(
        target_metric_delta.rows()!=target_metric.size() || target_metric_delta.cols()!=target_metric.size()) {
         throw std::invalid_argument("metric adjoint variation dimension mismatch");
     }
-    const auto Msi=source_metric.materialize().inverse();
-    const auto Bdag=Msi.multiply(boundary.transpose()).multiply(target_metric.materialize());
-    const auto term1=Msi.multiply(source_metric_delta).multiply(Bdag).scale(numeric::Rational{-1});
-    const auto term2=Msi.multiply(boundary_delta.transpose()).multiply(target_metric.materialize());
-    const auto term3=Msi.multiply(boundary.transpose()).multiply(target_metric_delta);
-    return term1.add(term2).add(term3);
+    numeric::ExactMatrix result(boundary.cols(),boundary.rows());
+    const auto boundary_transpose=boundary.transpose(),delta_transpose=boundary_delta.transpose();
+    // Apply the exact product rule columnwise using the existing metric solve.
+    // Certified external metric actions need no coordinate materializer.
+    for(std::size_t j=0;j<boundary.rows();++j){
+        if(target_metric.supports_sparse_apply() && source_metric.supports_sparse_solve()){
+            const auto basis=numeric::SparseRationalVector::basis(boundary.rows(),j);
+            const auto measured=target_metric.apply(basis.view()),dual=boundary_transpose.apply_sparse(measured.view());
+            const auto adjoint=source_metric.solve(dual.view());
+            const auto first=delta_transpose.apply_sparse(measured.view()),second=source_metric_delta.apply_sparse(adjoint.view());
+            const auto target_change=target_metric_delta.apply_sparse(basis.view()),third=boundary_transpose.apply_sparse(target_change.view());
+            auto entries=first.entries();
+            for(const auto& entry:second.entries())entries.push_back({entry.index,-entry.value});
+            for(const auto& entry:third.entries())entries.push_back(entry);
+            const numeric::SparseRationalVector rhs(boundary.cols(),std::move(entries));
+            const auto column=source_metric.solve(rhs.view());
+            for(const auto& entry:column.entries())result.set(entry.index,j,entry.value);
+        }else{
+            // This branch preserves explicitly declared external full-vector
+            // callbacks; all owned metrics use the sparse action above.
+            numeric::RationalVector basis(boundary.rows());basis[j]=1;
+            const auto measured=target_metric.apply(basis);
+            const auto adjoint=source_metric.solve(boundary_transpose.apply(measured));
+            const auto rhs=numeric::add(numeric::sub(delta_transpose.apply(measured),
+                source_metric_delta.apply(adjoint)),boundary_transpose.apply(target_metric_delta.apply(basis)));
+            const auto column=source_metric.solve(rhs);
+            for(std::size_t i=0;i<column.size();++i)result.set(i,j,column[i]);
+        }
+    }
+    return result;
 }
 
 struct GreenDifferential {

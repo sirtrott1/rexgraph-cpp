@@ -22,7 +22,8 @@ inline numeric::IntegerMatrix integral_boundary_matrix(const core::RelationalCom
     const auto exists_id = complex.signature().existence_aspect();
     for (std::size_t slot = 0; slot < upper.incidence_count(); ++slot) {
         if (!upper.aspects.get(exists_id, slot)) continue;
-        out.at(upper.lower_index[slot], upper.upper_index[slot]) += upper.lattice_coefficient[slot];
+        const auto row = upper.lower_index[slot], col = upper.upper_index[slot];
+        out.set(row, col, out.get(row, col) + upper.lattice_coefficient[slot]);
     }
     return out;
 }
@@ -33,19 +34,14 @@ inline numeric::IntegerMatrix integer_identity(std::size_t n) {
 
 inline numeric::IntegerMatrix unimodular_inverse(const numeric::IntegerMatrix& matrix) {
     if (matrix.rows() != matrix.cols()) throw std::invalid_argument("unimodular inverse requires square matrix");
-    numeric::ExactMatrix rational(matrix.rows(), matrix.cols());
-    for (std::size_t i = 0; i < matrix.rows(); ++i)
-        for (std::size_t j = 0; j < matrix.cols(); ++j)
-            if (matrix.get(i,j) != 0) rational.set(i,j,numeric::Rational{matrix.get(i,j)});
-    const auto inv = rational.inverse();
-    numeric::IntegerMatrix out(matrix.rows(), matrix.cols());
-    for (std::size_t i = 0; i < matrix.rows(); ++i) {
-        for (std::size_t j = 0; j < matrix.cols(); ++j) {
-            const auto value = inv.get(i,j);
-            if (numeric::denominator(value) != 1) throw std::logic_error("matrix is not unimodular");
-            out.set(i,j,numeric::numerator(value));
-        }
-    }
+    const auto smith = numeric::smith_normal_form_actions(matrix);
+    if (smith.rank != matrix.rows()) throw std::logic_error("matrix is not unimodular");
+    for (const auto& invariant : smith.invariant_factors)
+        if (invariant != 1) throw std::logic_error("matrix is not unimodular");
+    // A complete inverse is explicitly requested here.  U*A*V=I gives
+    // A^{-1}=V*U using integral elementary actions, with no rational solves.
+    auto out = smith.right_inverse.apply_inverse(
+        smith.left.apply(numeric::IntegerMatrix::identity(matrix.rows())));
     if (!(matrix * out == numeric::IntegerMatrix::identity(matrix.rows())) ||
         !(out * matrix == numeric::IntegerMatrix::identity(matrix.rows()))) {
         throw std::logic_error("unimodular inverse certificate failed");
@@ -56,22 +52,22 @@ inline numeric::IntegerMatrix unimodular_inverse(const numeric::IntegerMatrix& m
 inline numeric::IntegerMatrix select_columns(const numeric::IntegerMatrix& matrix,
                                              std::size_t begin_column,
                                              std::size_t count) {
-    if (begin_column + count > matrix.cols()) throw std::out_of_range("integer select columns");
+    if (begin_column > matrix.cols() || count > matrix.cols() - begin_column) throw std::out_of_range("integer select columns");
     numeric::IntegerMatrix out(matrix.rows(), count);
-    for (std::size_t i = 0; i < matrix.rows(); ++i)
-        for (std::size_t j = 0; j < count; ++j)
-            out.set(i,j,matrix.get(i,begin_column+j));
+    for (const auto& [key, value] : matrix.entries())
+        if (key.second >= begin_column && key.second - begin_column < count && value != 0)
+            out.set(key.first, key.second - begin_column, value);
     return out;
 }
 
 inline numeric::IntegerMatrix select_rows(const numeric::IntegerMatrix& matrix,
                                           std::size_t begin_row,
                                           std::size_t count) {
-    if (begin_row + count > matrix.rows()) throw std::out_of_range("integer select rows");
+    if (begin_row > matrix.rows() || count > matrix.rows() - begin_row) throw std::out_of_range("integer select rows");
     numeric::IntegerMatrix out(count, matrix.cols());
-    for (std::size_t i = 0; i < count; ++i)
-        for (std::size_t j = 0; j < matrix.cols(); ++j)
-            out.set(i,j,matrix.get(begin_row+i,j));
+    for (const auto& [key, value] : matrix.entries())
+        if (key.first >= begin_row && key.first - begin_row < count && value != 0)
+            out.set(key.first - begin_row, key.second, value);
     return out;
 }
 
@@ -116,7 +112,7 @@ inline IntegralChainCertificate integral_chain_certificate(
 
     const auto dkp1 = integral_boundary_matrix(
         complex, core::Grade{static_cast<std::uint16_t>(grade.value + 1u)});
-    const auto snf = numeric::smith_normal_form(dkp1);
+    const auto snf = numeric::smith_normal_form_actions(dkp1);
     const auto transformed = snf.left.apply(chain);
 
     std::vector<numeric::Integer> smith_preimage(dkp1.cols(), numeric::Integer{0});
@@ -136,7 +132,7 @@ inline IntegralChainCertificate integral_chain_certificate(
     }
     if (!boundary) return IntegralChainCertificate{grade, true, false, {}};
 
-    auto preimage = snf.right.apply(smith_preimage);
+    auto preimage = snf.right_inverse.apply_inverse(smith_preimage);
     if (dkp1.apply(preimage) != chain) {
         throw std::logic_error("integral boundary preimage certificate failed");
     }
@@ -171,17 +167,17 @@ inline IntegralHomologyGroup integral_homology(const core::RelationalComplex& co
         throw std::logic_error("integral homology requires an integral chain complex");
     }
 
-    const auto dk_snf = numeric::smith_normal_form(dk);
+    const auto dk_snf = numeric::smith_normal_form_actions(dk);
     const std::size_t kernel_rank = n - dk_snf.rank;
-    const auto cycle_basis = select_columns(dk_snf.right, dk_snf.rank, kernel_rank);
-    const auto right_inverse = unimodular_inverse(dk_snf.right);
-    const auto dkp1_new = right_inverse * dkp1;
+    const auto cycle_basis = dk_snf.right_columns(dk_snf.rank, kernel_rank);
+    const auto dkp1_new = dk_snf.right_inverse.apply(dkp1);
 
-    for (std::size_t i = 0; i < dk_snf.rank; ++i)
-        for (std::size_t j = 0; j < dkp1_new.cols(); ++j)
-            if (dkp1_new.get(i,j) != 0) throw std::logic_error("boundary does not lie in integral cycle lattice");
+    for (const auto& [key, value] : dkp1_new.entries())
+        if (key.first < dk_snf.rank && value != 0) throw std::logic_error("boundary does not lie in integral cycle lattice");
 
     const auto boundary_coordinates = select_rows(dkp1_new, dk_snf.rank, kernel_rank);
+    if (!(cycle_basis * boundary_coordinates == dkp1))
+        throw std::logic_error("integral cycle-coordinate reconstruction certificate failed");
     const auto boundary_snf = numeric::smith_normal_form(boundary_coordinates);
     std::vector<numeric::Integer> torsion;
     for (const auto& d : boundary_snf.invariant_factors) if (d > 1) torsion.push_back(d);

@@ -81,26 +81,29 @@ inline TemporalDeclarationState declaration_state(Reader& r) {
     auto n=r.count(58); std::size_t nodes=0,allocated=machine::checked_size_mul(n,sizeof(TemporalDeclaredValue));
     require(allocated<=r.limits().declarations.max_materialized_bytes,"declared root-value decode budget");
     s.values.reserve(n);
-    std::optional<composite::PreparedLayoutRegistry> registry;
-    std::optional<composite::CompiledLayout> value_layout;
-    for(std::size_t i=0;i<n;++i) {
-        TemporalDeclaredValue v; v.key=r.u64(); v.type=declaration_id(r); v.block=r.u64(); v.branch=r.u64();
-        if(r.flag()) v.cell=cell(r);
-        if(r.flag()) v.occurrence=occurrence(r);
-        if(!value_layout || value_layout->root()!=v.type) {
-            if(!registry)registry.emplace(s.registry,r.limits().declarations);
-            value_layout.emplace(*registry,v.type,s.profile);
+    // The registry is needed only for a nonempty value lane. Keep its shared
+    // owner in a normal lexical lifetime instead of an optional nested payload.
+    if(n != 0) {
+        const composite::PreparedLayoutRegistry registry(s.registry,r.limits().declarations);
+        std::optional<composite::CompiledLayout> value_layout;
+        for(std::size_t i=0;i<n;++i) {
+            TemporalDeclaredValue v; v.key=r.u64(); v.type=declaration_id(r); v.block=r.u64(); v.branch=r.u64();
+            if(r.flag()) v.cell=cell(r);
+            if(r.flag()) v.occurrence=occurrence(r);
+            if(!value_layout || value_layout->root()!=v.type) {
+                value_layout.emplace(registry,v.type,s.profile);
+            }
+            // Limit each subsequent allocation by the remaining aggregate allowance.
+            auto policy=r.limits().declarations;
+            require(nodes<policy.max_value_nodes && allocated<=policy.max_materialized_bytes,"aggregate declaration decode budget");
+            policy.max_value_nodes-=nodes; policy.max_materialized_bytes-=allocated;
+            const auto bit_count=machine::checked_size(r.u64());const auto bytes=r.blob();
+            v.value=decode_declared_bits(*value_layout,bytes,bit_count,policy.max_value_nodes,policy.max_materialized_bytes);
+            const auto use=value_layout->allocation(v.value);
+            nodes=machine::checked_size_add(nodes,use.value_nodes); allocated=machine::checked_size_add(allocated,use.materialized_bytes);
+            require(nodes<=r.limits().declarations.max_value_nodes && allocated<=r.limits().declarations.max_materialized_bytes,"aggregate declared value decode budget");
+            s.values.push_back(std::move(v));
         }
-        // Limit each subsequent allocation by the remaining aggregate allowance.
-        auto policy=r.limits().declarations;
-        require(nodes<policy.max_value_nodes && allocated<=policy.max_materialized_bytes,"aggregate declaration decode budget");
-        policy.max_value_nodes-=nodes; policy.max_materialized_bytes-=allocated;
-        const auto bit_count=machine::checked_size(r.u64());const auto bytes=r.blob();
-        v.value=decode_declared_bits(*value_layout,bytes,bit_count,policy.max_value_nodes,policy.max_materialized_bytes);
-        const auto use=value_layout->allocation(v.value);
-        nodes=machine::checked_size_add(nodes,use.value_nodes); allocated=machine::checked_size_add(allocated,use.materialized_bytes);
-        require(nodes<=r.limits().declarations.max_value_nodes && allocated<=r.limits().declarations.max_materialized_bytes,"aggregate declared value decode budget");
-        s.values.push_back(std::move(v));
     }
     n=r.count(59); for(std::size_t i=0;i<n;++i)s.branches.push_back(branch_declaration(r));
     n=r.count(40); for(std::size_t i=0;i<n;++i){

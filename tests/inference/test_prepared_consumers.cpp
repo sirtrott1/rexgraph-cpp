@@ -284,6 +284,70 @@ void finite_admission_scaling(){
                 check(batch.values()[i*8+s] == scalar.values()[i], "finite local growth envelope violated exact batch parity");
     }
 }
+void retained_empty_grade_tests(){
+    auto empty=native_accession_fixture::endpoint(2);
+    empty.carriers.push_back({3,TemporalCarrierKind::SourceGrade,core::Grade{2},{},0,numeric::IndexDomain::linear(0)});
+    empty.tensors.push_back(native_accession_fixture::field(104,3,0,0));
+    const auto width=empty.source.grade(core::Grade{1}).cell_count();
+    for(const auto key:{std::uint64_t{203},std::uint64_t{204}}){
+        TemporalTensor metric;metric.key=key;metric.role=TemporalTensorRole::Metric;
+        metric.input=metric.output=key==203?1:3;
+        metric.tensor=temporal_matrix_tensor(numeric::ExactMatrix::identity(key==203?width:0));
+        empty.tensors.push_back(std::move(metric));
+    }
+    const auto canonical=encode_temporal_endpoint(empty);
+    NativeAccessionDirectory directory(empty,800);
+    const auto input=directory.pin(tensor_request(NativeAccessionKind::Field,104));
+    const auto lower_input=directory.pin(tensor_request(NativeAccessionKind::Field,101));
+    for(const auto profile:{field::PreparedExactProfile::FiniteActions,field::PreparedExactProfile::GlobalActions}){
+        for(const auto selection:{inference::NativeMetricSelection::NamedUnit,inference::NativeMetricSelection::DeclaredDiagonal,
+                                 inference::NativeMetricSelection::DeclaredPositive}){
+            if(profile==field::PreparedExactProfile::FiniteActions && selection==inference::NativeMetricSelection::DeclaredPositive)continue;
+            inference::NativeExactTowerRequest req;req.grade_carriers={2,1,3};req.metrics=selection;req.profile=profile;
+            if(selection!=inference::NativeMetricSelection::NamedUnit)
+                for(const auto key:{std::uint64_t{202},std::uint64_t{203},std::uint64_t{204}})
+                    req.metric_tensors.push_back(directory.pin(tensor_request(NativeAccessionKind::Tensor,key)));
+            const auto prepared=inference::PreparedNativeExactTower::prepare(lower_input,req);
+            check(prepared.tower().source().get()==&input.endpoint()->source && prepared.tower().source()->grade_count()==3,
+                  "empty grade lost its actual source owner or retained grade position");
+            check(prepared.grade_carrier(core::Grade{2})==3 && prepared.grade_size(core::Grade{2})==0 &&
+                  prepared.tower().metrics().size()==3 && prepared.tower().metrics()[2].size()==0,
+                  "empty grade carrier or zero-dimensional metric discarded");
+            check(prepared.input_values(input,core::Grade{2}).empty(),"declared empty field lost its carrier");
+            const auto keys=selection==inference::NativeMetricSelection::NamedUnit?std::vector<std::uint64_t>{}:
+                std::vector<std::uint64_t>{202,203,204};
+            check(prepared.metric_selection()==selection && prepared.metric_keys()==keys,
+                  "empty grade changed the selected metric contract");
+            if(!keys.empty())check(prepared.metric_pins()[2].tensor_declaration().get()==req.metric_tensors[2].tensor_declaration().get() &&
+                                  prepared.metric_pins()[2].endpoint().get()==input.endpoint().get(),
+                                  "empty declared metric lost its actual publication pin");
+            for(const auto kind:{K::HodgeDown,K::HodgeUp,K::Hodge}){
+                const auto result=prepared.execute({kind,core::Grade{2},0},input);
+                check(result.values().empty() && result.publication().endpoint().get()==input.endpoint().get() &&
+                      result.provenance().input_field==104 && result.provenance().input_carrier==3 &&
+                      result.provenance().output_carrier==3 && result.provenance().metrics==keys,
+                      "empty same-grade action lost native carrier or metric provenance");
+            }
+            const auto boundary=prepared.execute({K::Boundary,core::Grade{2},0},input);
+            check(boundary.values()==numeric::RationalVector(width,Q{0}) && boundary.provenance().input_carrier==3 &&
+                  boundary.provenance().output_carrier==1,"empty boundary lost its nonempty codomain");
+            const auto adjoint=prepared.execute({K::Adjoint,core::Grade{2},0},lower_input);
+            check(adjoint.values().empty() && adjoint.provenance().input_carrier==1 && adjoint.provenance().output_carrier==3,
+                  "empty adjoint lost its declared output carrier");
+            if(profile==field::PreparedExactProfile::GlobalActions)
+                for(const auto kind:{K::Green,K::HarmonicProjector,K::HarmonicInverse}){
+                    const auto action=prepared.prepare_action({kind,core::Grade{2},kind==K::Green?Q{2,7}:Q{0}});
+                    const auto result=action.execute(input);
+                    check(result.values().empty() && result.provenance().output_carrier==3 && result.provenance().metrics==keys,
+                          "reusable global action discarded the empty grade");
+                }
+            rejects([&]{prepared.execute({K::Hodge,core::Grade{2},0},lower_input);},"empty grade accepted a different field carrier");
+            req.grade_carriers.pop_back();
+            rejects([&]{inference::PreparedNativeExactTower::prepare(lower_input,req);},"empty SourceGrade declaration was optional");
+        }
+    }
+    check(encode_temporal_endpoint(*input.endpoint())==canonical,"empty-grade preparation changed its source publication");
+}
 void admission_lifetime(){
     NativeAccessionDirectory d(endpoint(7),88);const auto pub=anchor(d);const auto req=request(d);
     const auto prepared=inference::PreparedNativeExactTower::prepare(pub,req);
@@ -329,11 +393,6 @@ void admission_lifetime(){
     NativeAccessionDirectory scaled(endpoint(22),88);const auto scaled_input=anchor(scaled);
     policy={};policy.limits.integer_bits=10;
     rejects([&]{inference::PreparedNativeExactTower::prepare(scaled_input,request(scaled),policy);},"retained lattice factor growth cap ignored");
-    auto empty=native_accession_fixture::endpoint();
-    empty.carriers.push_back({3,TemporalCarrierKind::SourceGrade,core::Grade{2},{},0,numeric::IndexDomain::linear(0)});
-    NativeAccessionDirectory empty_directory(empty,800);inference::NativeExactTowerRequest empty_request;
-    empty_request.grade_carriers={2,1,3};
-    rejects([&]{inference::PreparedNativeExactTower::prepare(empty_directory.pin(tensor_request(NativeAccessionKind::Field,101)),empty_request);},"empty grade silently discarded");
     const auto kept=[&]{NativeAccessionDirectory temporary(endpoint(7),88);const auto p=anchor(temporary);
         return std::pair{learning::PreparedNativeMetricLayer(inference::PreparedNativeExactTower::prepare(p,request(temporary)),core::Grade{1},channels(),
             temporary.pin(tensor_request(NativeAccessionKind::Field,3000)),temporary.pin(tensor_request(NativeAccessionKind::Field,3001)),{"lifetime",900,901}),p};}();
@@ -774,5 +833,5 @@ void packed_tests(){
 int main(int argc,char** argv){try{
     if(argc>1 && std::string_view(argv[1])=="--global-oracle"){global_tests(true);return 0;}
     const bool emit=argc>1 && std::string_view(argv[1])=="--oracle";
-    exact_tests(emit);if(!emit){rational_batch_tests();finite_admission_scaling();admission_lifetime();global_tests(false);reusable_global_tests();training_tests();prepared_training_tests();checkpoint_capacity_tests();packed_tests();std::cout<<"checks="<<checks<<"\n";}return 0;
+    exact_tests(emit);if(!emit){rational_batch_tests();finite_admission_scaling();admission_lifetime();retained_empty_grade_tests();global_tests(false);reusable_global_tests();training_tests();prepared_training_tests();checkpoint_capacity_tests();packed_tests();std::cout<<"checks="<<checks<<"\n";}return 0;
 }catch(const std::exception& e){std::cerr<<"FAIL after "<<checks<<": "<<e.what()<<'\n';return 1;}}

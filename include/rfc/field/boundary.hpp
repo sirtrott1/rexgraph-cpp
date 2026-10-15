@@ -118,8 +118,8 @@ public:
     [[nodiscard]] numeric::SparseRationalVector adjoint(numeric::SparseRationalView lower_value,
                                                         const ExactMetric& lower_metric,
                                                         const ExactMetric& upper_metric) const {
-        if (!lower_metric.is_diagonal() || !upper_metric.supports_sparse_solve()) {
-            throw std::logic_error("sparse boundary adjoint requires identity/diagonal exact metrics");
+        if (!lower_metric.supports_sparse_apply() || !upper_metric.supports_sparse_solve()) {
+            throw std::logic_error("sparse boundary adjoint requires declared sparse metric actions");
         }
         if (lower_metric.size() != codomain_size() || upper_metric.size() != domain_size()) {
             throw std::invalid_argument("sparse exact boundary adjoint metric size mismatch");

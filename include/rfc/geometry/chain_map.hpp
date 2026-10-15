@@ -2,6 +2,7 @@
 #include "rfc/core/relational_complex.hpp"
 #include "rfc/geometry/contract.hpp"
 #include "rfc/numeric/exact.hpp"
+#include "rfc/numeric/sparse_vector.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -61,6 +62,35 @@ public:
             }
         }
         return result;
+    }
+
+    // Transport only active numerical support. Retained source/target cells and
+    // their occurrence identities remain owned by the two relational carriers;
+    // cancellation here removes a stored amplitude, never a primary cell.
+    [[nodiscard]] numeric::SparseRationalVector push_field(
+        core::Grade grade, numeric::SparseRationalView source_field) const {
+        if (source_field.size() != source_->grade(grade).cell_count())
+            throw std::invalid_argument("sparse linear morphism field size mismatch");
+        const auto& images = grade_maps_.at(grade.value);
+        std::map<std::size_t, numeric::Rational> accumulated;
+        for (const auto& entry : source_field.entries()) {
+            const auto& image = images.at(entry.index);
+            if (entry.value == 0) continue;
+            for (const auto& term : image) {
+                if (term.coefficient == 0) continue;
+                numeric::Rational value = accumulated[term.target] +
+                                          entry.value * term.coefficient;
+                value.canonicalize();
+                if (value == 0) accumulated.erase(term.target);
+                else accumulated[term.target] = std::move(value);
+            }
+        }
+        std::vector<numeric::SparseRationalEntry> entries;
+        entries.reserve(accumulated.size());
+        for (auto& [index, value] : accumulated)
+            entries.push_back({index, std::move(value)});
+        return numeric::SparseRationalVector(target_->grade(grade).cell_count(),
+                                              std::move(entries));
     }
 
     [[nodiscard]] bool is_chain_map() const {

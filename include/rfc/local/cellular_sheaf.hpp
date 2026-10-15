@@ -66,6 +66,17 @@ public:
         return numeric::ExactMatrix::identity(upper_dim);
     }
 
+    // Inspect a declared rho without materializing the default identity or
+    // copying a sparse map. Unlike downward transport overrides, rho is not
+    // already multiplied by the retained incidence coefficient.
+    [[nodiscard]] const std::optional<numeric::ExactMatrix>& restriction_override(
+        core::Grade upper_grade, std::size_t incidence_slot) const & {
+        validate_flag(upper_grade, incidence_slot);
+        return restrictions_[upper_grade.value][incidence_slot];
+    }
+    const std::optional<numeric::ExactMatrix>& restriction_override(
+        core::Grade, std::size_t) const && = delete;
+
     [[nodiscard]] std::size_t cochain_dimension(core::Grade grade) const {
         if (grade.value >= complex().grade_count()) throw std::out_of_range("sheaf cochain grade");
         return stalks_->total_dimension(grade);
@@ -122,7 +133,7 @@ public:
         return true;
     }
 
-    [[nodiscard]] bool is_local_system() const {
+    [[nodiscard]] bool has_invertible_restrictions() const {
         const auto exists_id = complex().signature().existence_aspect();
         for (std::size_t k = 1; k < complex().grade_count(); ++k) {
             const auto grade = core::Grade{static_cast<std::uint16_t>(k)};
@@ -134,6 +145,14 @@ public:
             }
         }
         return true;
+    }
+
+    // This additive retained-incidence contract requires invertible adjacent
+    // restrictions and the paper's exact cochain coherence delta^2 = 0.  It
+    // does not identify distinct occurrence routes or require trivial holonomy
+    // around a noncontractible loop.
+    [[nodiscard]] bool is_local_system() const {
+        return has_invertible_restrictions() && is_cochain_complex();
     }
 
     [[nodiscard]] numeric::ExactMatrix global_section_frame() const {

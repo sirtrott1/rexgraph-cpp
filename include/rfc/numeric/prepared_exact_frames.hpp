@@ -12,9 +12,20 @@ class PreparedExactFrames {
         std::size_t retained{}, preparation{};
         State(ExactMatrix a, ExactActionGuard& guard):original(std::move(a)) {
             const auto start=guard.steps();guard.step();guard.matrix(original);
-            std::vector<std::map<std::size_t,Rational>> rows(original.rows());
+            // Reduction row coordinates are temporary basis coordinates. Keep
+            // only represented source rows; the original carrier and both
+            // certificate maps below retain their declared full dimensions.
+            // This API explicitly returns every kernel/free-column axis, so
+            // admit that index family before allocating it.
+            guard.entries(original.cols());
+            std::vector<std::map<std::size_t,Rational>> rows;
+            std::optional<std::size_t> previous_row;
             std::size_t entries=original.nonzeros();
-            for(const auto& [key,value]:original.entries()){guard.step();rows[key.first].emplace(key.second,value);}
+            for(const auto& [key,value]:original.entries()){
+                guard.step();
+                if(!previous_row || *previous_row!=key.first){rows.emplace_back();previous_row=key.first;}
+                rows.back().emplace(key.second,value);
+            }
             guard.entries(machine::checked_size_add(original.nonzeros(),entries));
             for(std::size_t j=0,k=0;j<original.cols() && k<rows.size();++j){
                 guard.step();std::size_t pivot=rows.size(),best=std::numeric_limits<std::size_t>::max();
