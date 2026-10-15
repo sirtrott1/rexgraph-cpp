@@ -37,6 +37,11 @@ public:
           r_(bytes_), size_(bytes.size()), limits_(limits), budget_(limits.max_records) {
         require(size_ <= limits.max_file_bytes, "temporal image exceeds byte limit");
     }
+    // An encoder can transfer its fresh immutable component without another
+    // full byte copy. Borrowed public inputs still use the freezing constructor.
+    Reader(std::shared_ptr<const std::vector<std::byte>> owner, const TemporalReadLimits& limits)
+        : owner_(std::move(owner)), bytes_(owned_bytes(owner_, limits)), r_(bytes_),
+          size_(bytes_.size()), limits_(limits), budget_(limits.max_records) {}
     Reader(ByteRange bytes, const TemporalReadLimits& limits)
         : r_(std::move(bytes)), size_(r_.remaining()), limits_(limits), budget_(limits.max_records) {
         require(size_ <= limits.max_file_bytes, "temporal image exceeds byte limit");
@@ -113,6 +118,12 @@ public:
         return out;
     }
 private:
+    static std::span<const std::byte> owned_bytes(
+        const std::shared_ptr<const std::vector<std::byte>>& owner, const TemporalReadLimits& limits) {
+        require(static_cast<bool>(owner), "temporal component owner required");
+        require(owner->size() <= limits.max_file_bytes, "temporal image exceeds byte limit");
+        return *owner;
+    }
     static std::shared_ptr<const std::vector<std::byte>> freeze(
         std::span<const std::byte> bytes, const TemporalReadLimits& limits, bool seed_values) {
         require(bytes.size() <= limits.max_file_bytes, "temporal image exceeds byte limit");
@@ -208,16 +219,17 @@ inline void values(Writer& w, const numeric::SparseRationalVector& value) {
 inline numeric::SparseRationalVector Reader::read_values(std::size_t size) {
     const auto begin = position();
     const auto n = count(18);
+    const bool retain = owner_ && limits_.retain_encoded_values;
     std::vector<numeric::SparseRationalEntry> entries;
-    if (!owner_) entries.reserve(n);
+    if (!retain) entries.reserve(n);
     std::optional<std::size_t> last;
     for (std::size_t i = 0; i < n; ++i) {
         const auto idx = u64(); require(idx < size && (!last || idx > *last), "unordered/out-of-domain sparse coordinate");
         auto value = rational(); require(value != 0, "explicit numerical zero in sparse lane");
-        if (!owner_) entries.push_back({static_cast<std::size_t>(idx), std::move(value)});
+        if (!retain) entries.push_back({static_cast<std::size_t>(idx), std::move(value)});
         last = static_cast<std::size_t>(idx);
     }
-    if (owner_) return numeric::SparseRationalVector::admitted(size,
+    if (retain) return numeric::SparseRationalVector::admitted(size,
         std::shared_ptr<const RetainedTemporalValues>(new RetainedTemporalValues(
             owner_, bytes_.subspan(begin, position() - begin), limits_, n)));
     return numeric::SparseRationalVector(size, std::move(entries));

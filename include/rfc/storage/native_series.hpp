@@ -62,7 +62,7 @@ inline std::shared_ptr<const Snapshot> snapshot(const TemporalEndpoint& e, const
     // Decode into fresh storage rather than moving caller-owned vectors: old
     // mutable references must not be able to change an immutable publication.
     MappedRfcx mapped{std::span<const std::byte>(source)};
-    auto decoded = temporal_seed_detail::decode(mapped.materialize(), channels, p);
+    auto decoded = temporal_seed_detail::decode_owned(mapped.materialize(), std::move(channels), p);
     auto retained = decoded.retained_channels ? std::move(decoded.retained_channels)
         : std::make_shared<const Bytes>(std::move(channels));
     return std::make_shared<const Snapshot>(Snapshot{

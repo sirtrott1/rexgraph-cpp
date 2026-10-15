@@ -22,6 +22,40 @@ std::vector<std::byte> stream(const PaperHistory& h) {
 }
 void basics(const std::filesystem::path& out) {
     PaperHistory h; NativeTemporalSeries s(h.a, 700);
+    {
+        auto channels = encode_temporal_endpoint(h.a);
+        const auto* allocation = channels.data();
+        auto limits = TemporalReadLimits{};
+        limits.retain_encoded_values = true;
+        auto decoded = temporal_seed_detail::decode_owned(h.a.source, std::move(channels), limits);
+        check(decoded.retained_channels && decoded.retained_channels->data() == allocation,
+              "fresh encoded seed copied its complete channel allocation");
+        check(decoded.encoding.channels == *decoded.retained_channels,
+              "owned seed omitted complete canonical reencoding");
+        const auto retained = std::dynamic_pointer_cast<const temporal_codec_detail::RetainedTemporalValues>(
+            decoded.endpoint.tensors[0].tensor.values().retained_source());
+        check(retained && retained->owner() == decoded.retained_channels,
+              "decoded coefficient lane lost the actual immutable component owner");
+        equal(decoded.endpoint, h.a);
+        auto unrelated = std::make_shared<const std::vector<std::byte>>(decoded.encoding.channels);
+        rejects([&] {
+            (void)temporal_seed_detail::decode_component(h.a.source, *decoded.retained_channels, limits, unrelated);
+        }, "seed accepted a different claimed component allocation");
+        rejects([&] {
+            (void)temporal_codec_detail::Reader(std::shared_ptr<const std::vector<std::byte>>{}, limits);
+        }, "seed reader accepted a null component owner");
+        auto damaged = decoded.encoding.channels;
+        damaged.back() ^= std::byte{1};
+        rejects([&] { (void)temporal_seed_detail::decode_owned(h.a.source, std::move(damaged), limits); },
+                "owned seed bypassed its original integrity check");
+        limits.retain_encoded_values = false;
+        const auto materialized = temporal_seed_detail::decode_owned(
+            h.a.source, encode_temporal_endpoint(h.a), limits);
+        for (const auto& tensor : materialized.endpoint.tensors)
+            check(!tensor.tensor.values().retained_source(),
+                  "owned seed changed the requested materialized coefficient policy");
+        equal(materialized.endpoint, h.a);
+    }
     check(s.first_sequence() == 40 && s.last_sequence() == 40 && s.segment_count() == 0, "nonzero origin sequence");
     auto pin = s.tail(); h.a.tensors[0] = field_tensor(10, 1, {90, 91});
     check(pin.endpoint().tensors[0].tensor.state(0) == Q{1}, "caller alias reached series");

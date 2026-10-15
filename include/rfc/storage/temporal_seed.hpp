@@ -44,9 +44,10 @@ inline std::vector<std::byte> encode_temporal_endpoint(const TemporalEndpoint& e
     return std::move(encoded.channels);
 }
 namespace temporal_seed_detail {
-inline Decoded decode(core::RelationalComplex source,
+inline Decoded decode_component(core::RelationalComplex source,
                       std::span<const std::byte> bytes,
-                      const TemporalReadLimits& limits) {
+                      const TemporalReadLimits& limits,
+                      std::shared_ptr<const std::vector<std::byte>> encoded_owner) {
     using namespace temporal_codec_detail;
     require(bytes.size()>=32 && bytes.size()<=limits.max_file_bytes,"invalid endpoint sidecar size");
     rfcx_detail::Reader header(bytes);
@@ -56,7 +57,9 @@ inline Decoded decode(core::RelationalComplex source,
     require((flags & ~(finite_systems_flag | relational_codes_flag | declarations_flag))==0,"unsupported endpoint sidecar flags");
     require(header.u64()==bytes.size(),"endpoint sidecar length mismatch");
     require(header.u64()==rfcx_detail::fnv1a64(bytes.subspan(32)),"endpoint sidecar integrity mismatch");
-    Reader r(bytes, limits, true);
+    require(!encoded_owner || (encoded_owner->data() == bytes.data() && encoded_owner->size() == bytes.size()),
+            "endpoint sidecar owner differs from its complete component");
+    Reader r = encoded_owner ? Reader(std::move(encoded_owner), limits) : Reader(bytes, limits, true);
     // Retain the complete component, including its unchanged envelope.
     (void)r.u64(); (void)r.u32(); (void)r.u32(); (void)r.u64(); (void)r.u64();
     TemporalEndpoint endpoint(std::move(source),r.u64());
@@ -84,6 +87,18 @@ inline Decoded decode(core::RelationalComplex source,
                 "noncanonical endpoint sidecar encoding");
     }
     return {std::move(endpoint), std::move(canonical), r.retained_owner()};
+}
+inline Decoded decode(core::RelationalComplex source, std::span<const std::byte> bytes,
+                      const TemporalReadLimits& limits) {
+    return decode_component(std::move(source), bytes, limits, {});
+}
+inline Decoded decode_owned(core::RelationalComplex source, std::vector<std::byte>&& bytes,
+                            const TemporalReadLimits& limits) {
+    // This path consumes a freshly encoded component. It does not adopt a
+    // mutable endpoint or waive canonical reencoding and complete validation.
+    auto owner = std::make_shared<const std::vector<std::byte>>(std::move(bytes));
+    const auto view = std::span<const std::byte>(*owner);
+    return decode_component(std::move(source), view, limits, std::move(owner));
 }
 } // namespace temporal_seed_detail
 
