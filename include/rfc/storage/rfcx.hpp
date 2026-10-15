@@ -79,6 +79,13 @@ public:
         return offset;
     }
 
+    // The returned exclusive region is valid until the writer grows again.
+    // Its bytes are initialized before a nested encoder fills the region.
+    std::span<std::byte> append_zeroed(std::size_t count) {
+        const auto offset = reserve(count);
+        return std::span<std::byte>(bytes_).subspan(offset, count);
+    }
+
     void raw(std::span<const std::byte> bytes) {
         bytes_.insert(bytes_.end(), bytes.begin(), bytes.end());
     }

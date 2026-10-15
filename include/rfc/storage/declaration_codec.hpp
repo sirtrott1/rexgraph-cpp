@@ -17,7 +17,7 @@ using composite::CompiledLayout;
 using composite::declaration_detail::require;
 using composite::declaration_detail::budget;
 
-inline void put_var(machine::BitWriter& out, std::uint64_t value) {
+template<class Output> inline void put_var(Output& out, std::uint64_t value) {
     do {
         const auto digit = value & 127u; value >>= 7u;
         out.put(digit | (value ? 128u : 0u), 8);
@@ -50,14 +50,15 @@ struct DecodeBudget {
     }
 };
 
-inline void put_magnitude(machine::BitWriter& out, const numeric::Integer& x) {
+template<class Output> inline void put_magnitude(Output& out, const numeric::Integer& x) {
     const auto n = machine::ceil_div(composite::declaration_detail::integer_bits(x), 8);
     put_var(out, n);
     if (!n) return;
-    std::vector<unsigned char> bytes(n); std::size_t written = 0;
-    mpz_export(bytes.data(), &written, -1, 1, 0, 0, x.get_mpz_t());
-    if (written != n) throw std::logic_error("integer layout/export disagreement");
-    out.put_octets(std::as_bytes(std::span(bytes)));
+    out.put_generated_octets(n, [&](std::span<std::byte> bytes) {
+        std::size_t written = 0;
+        mpz_export(bytes.data(), &written, -1, 1, 0, 0, x.get_mpz_t());
+        if (written != n) throw std::logic_error("integer layout/export disagreement");
+    });
 }
 inline numeric::Integer get_magnitude(machine::BitReader& in, DecodeBudget& use) {
     const auto n = get_size(in);
@@ -71,7 +72,7 @@ inline numeric::Integer get_magnitude(machine::BitReader& in, DecodeBudget& use)
     budget(composite::declaration_detail::integer_bits(value), use.limits.max_integer_bits, "integer bit budget");
     return value;
 }
-inline void put_integer(machine::BitWriter& out, const numeric::Integer& x) {
+template<class Output> inline void put_integer(Output& out, const numeric::Integer& x) {
     out.put(x < 0 ? 1 : 0, 1); put_magnitude(out, x);
 }
 inline numeric::Integer get_integer(machine::BitReader& in, DecodeBudget& use) {
@@ -81,7 +82,7 @@ inline numeric::Integer get_integer(machine::BitReader& in, DecodeBudget& use) {
     if (negative) x = -x;
     return x;
 }
-inline void put_rational(machine::BitWriter& out, const numeric::Rational& x) {
+template<class Output> inline void put_rational(Output& out, const numeric::Rational& x) {
     put_integer(out, x.get_num()); put_magnitude(out, x.get_den());
 }
 inline numeric::Rational get_rational(machine::BitReader& in, DecodeBudget& use) {
@@ -94,7 +95,7 @@ inline numeric::Rational get_rational(machine::BitReader& in, DecodeBudget& use)
     numeric::Rational q(n, d); return q;
 }
 
-inline void put_value(machine::BitWriter& out, const CompiledLayout& layout,
+template<class Output> inline void put_value(Output& out, const CompiledLayout& layout,
                       DeclarationId id, const DeclaredValue& value) {
     const auto& d = layout.declarations().at(id);
     switch (d.kind) {
@@ -139,6 +140,15 @@ inline void put_value(machine::BitWriter& out, const CompiledLayout& layout,
         }
         default: throw std::invalid_argument("unknown encoded value constructor");
     }
+}
+
+inline void put_var(machine::BitWriter& out, std::uint64_t value) { put_var<machine::BitWriter>(out,value); }
+inline void put_magnitude(machine::BitWriter& out, const numeric::Integer& value) { put_magnitude<machine::BitWriter>(out,value); }
+inline void put_integer(machine::BitWriter& out, const numeric::Integer& value) { put_integer<machine::BitWriter>(out,value); }
+inline void put_rational(machine::BitWriter& out, const numeric::Rational& value) { put_rational<machine::BitWriter>(out,value); }
+inline void put_value(machine::BitWriter& out, const CompiledLayout& layout,
+                      DeclarationId id, const DeclaredValue& value) {
+    put_value<machine::BitWriter>(out,layout,id,value);
 }
 
 inline DeclaredValue get_value(machine::BitReader& in, const CompiledLayout& layout,
@@ -216,6 +226,20 @@ inline machine::EncodedBits encode_declared_bits(const composite::CompiledLayout
     machine::BitWriter out(allocation.bits, layout.limits().max_encoded_bytes);
     declaration_codec_detail::put_value(out, layout, layout.root(), value);
     return std::move(out).finish();
+}
+// Preflight before requesting an exclusive output region from the caller.
+// The destination remains stable for this complete encoding call.
+template<class Destination> inline void encode_declared_bits_to(
+    const composite::CompiledLayout& layout, const composite::DeclaredValue& value,
+    Destination&& destination) {
+    const auto allocation = layout.allocation(value);
+    const auto bytes = machine::ceil_div(allocation.bits, 8);
+    if (bytes > layout.limits().max_encoded_bytes)
+        throw std::length_error("bit writer allocation budget");
+    auto target = std::forward<Destination>(destination)(allocation.bits,bytes);
+    machine::BitSpanWriter out(target,allocation.bits,layout.limits().max_encoded_bytes);
+    declaration_codec_detail::put_value(out,layout,layout.root(),value);
+    out.finish();
 }
 // Reuse an owning layout while tightening only this payload's remaining
 // value-node/materialization allowances. Schema, profile and scalar limits stay

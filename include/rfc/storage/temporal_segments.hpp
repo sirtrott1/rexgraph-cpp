@@ -373,6 +373,37 @@ inline TemporalSegment canonical_segment(TemporalSegment s) {
     sort_by(s.finite_systems, [](const auto &x) { return x.target.key; });
     return s;
 }
+// An already canonical frame can be encoded without copying its unrelated
+// declaration, code and migration payloads. Unordered input keeps normalization.
+inline bool has_canonical_segment_order(const TemporalSegment& s) {
+    const auto ordered = [](const auto& values, auto key) {
+        for (std::size_t i=1;i<values.size();++i)
+            if (!(key(values[i-1]) < key(values[i]))) return false;
+        return true;
+    };
+    const auto identity = [](const auto& value) { return value; };
+    if (!ordered(s.source.grades,[](const auto& g){return g.grade;})) return false;
+    for (const auto& g:s.source.grades) {
+        if (!ordered(g.removed_cells,identity) || !ordered(g.removed_occurrences,identity) ||
+            !ordered(g.cells,[](const auto& x){return x.key;}) ||
+            !ordered(g.born_occurrences,[](const auto& x){return x.key;}) ||
+            !ordered(g.occurrences,[](const auto& x){return x.key;}) ||
+            !ordered(g.fibers,[](const auto& x){return x.parent;}) ||
+            !ordered(g.aspect_xor,[](const auto& x){return std::pair{x.aspect,x.word_index};})) return false;
+    }
+    if (!ordered(s.removed_blocks,identity) || !ordered(s.removed_carriers,identity) ||
+        !ordered(s.removed_tensors,identity) || !ordered(s.removed_finite_systems,identity)) return false;
+    for (const auto& b:s.blocks) {
+        if ((b.target.kind!=LocalBlockKind::StrictSubcomplex && b.target.kind!=LocalBlockKind::PartialChart) ||
+            !ordered(b.target.cells,identity) || !ordered(b.target.occurrences,identity) ||
+            !ordered(b.target.payloads,[](const auto& x){return x.payload_key;})) return false;
+    }
+    return ordered(s.blocks,[](const auto& x){return x.target.block_key;}) &&
+        ordered(s.carriers,[](const auto& x){return x.target.key;}) &&
+        ordered(s.tensors,[](const auto& x){return x.target.key;}) &&
+        ordered(s.correspondences,[](const auto& x){return x.carrier;}) &&
+        ordered(s.finite_systems,[](const auto& x){return x.target.key;});
+}
 inline bool has_finite_extension(const TemporalSegment &s) {
     return !s.removed_finite_systems.empty() || !s.finite_systems.empty();
 }
@@ -504,10 +535,11 @@ inline std::vector<std::byte> encode_temporal_segment(const TemporalSegment &seg
           (segment.source_migration ? temporal_codec_detail::source_migration_flag : 0u));
     w.u64(0);
     w.u64(0);
-    write_body(w, canonical_segment(segment));
+    if (has_canonical_segment_order(segment)) write_body(w, segment);
+    else write_body(w, canonical_segment(segment));
     w.patch_u64(16, w.size());
     w.patch_u64(24, rfcx_detail::fnv1a64(std::span<const std::byte>(w.bytes()).subspan(header_size)));
-    return w.bytes();
+    return std::move(w).take_bytes();
 }
 inline TemporalSegment decode_temporal_segment(std::span<const std::byte> bytes,
                                                const TemporalReadLimits &limits = {}) {

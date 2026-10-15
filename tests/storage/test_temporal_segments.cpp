@@ -110,6 +110,28 @@ void coupled_roundtrip(const std::filesystem::path& dir) {
     check(update_at(s,2).innovation.nonzeros()==1,"stalk innovation was not sparse");
     check(update_at(s,3).target.tensor.domain()==numeric::IndexDomain({1,3}),"new map direction omitted");
     const auto bytes=encode_temporal_segment(s);
+    auto normalized=temporal_segment_detail::canonical_segment(s);
+    check(temporal_segment_detail::has_canonical_segment_order(normalized),"normalized frame not recognized");
+    check(encode_temporal_segment(normalized)==bytes,"canonical source changed bytes");
+    auto unordered=normalized;
+    std::reverse(unordered.source.grades.begin(),unordered.source.grades.end());
+    std::reverse(unordered.blocks.begin(),unordered.blocks.end());
+    std::reverse(unordered.carriers.begin(),unordered.carriers.end());
+    std::reverse(unordered.tensors.begin(),unordered.tensors.end());
+    for(auto& grade:unordered.source.grades) {
+        std::reverse(grade.cells.begin(),grade.cells.end());
+        std::reverse(grade.occurrences.begin(),grade.occurrences.end());
+        std::reverse(grade.fibers.begin(),grade.fibers.end());
+        std::reverse(grade.aspect_xor.begin(),grade.aspect_xor.end());
+    }
+    for(auto& block:unordered.blocks) {
+        std::reverse(block.target.cells.begin(),block.target.cells.end());
+        std::reverse(block.target.occurrences.begin(),block.target.occurrences.end());
+    }
+    check(!temporal_segment_detail::has_canonical_segment_order(unordered),"unordered frame bypassed normalization");
+    check(encode_temporal_segment(unordered)==bytes,"unordered frame changed canonical bytes");
+    auto invalid=normalized;invalid.blocks.front().target.kind=static_cast<LocalBlockKind>(255);
+    rejects([&]{(void)encode_temporal_segment(invalid);},"invalid block kind bypassed normalization refusal");
     const auto decoded=decode_temporal_segment(bytes);
     check(encode_temporal_segment(decoded)==bytes,"temporal encoding is not canonical roundtrip");
     const auto restored=replay_temporal_segment(old,decoded);

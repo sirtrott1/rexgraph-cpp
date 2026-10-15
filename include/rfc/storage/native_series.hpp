@@ -476,7 +476,13 @@ public:
         native_series_detail::require(first <= last, "reverse difference requires declared inverse history");
         return {state_, first, last};
     }
-    void append(const TemporalSegment& segment) { append_encoded(encode_temporal_segment(segment)); }
+    void append(const TemporalSegment& segment) {
+        // Only this fresh encoder result can transfer its allocation. Public
+        // borrowed frames retain their defensive copy after full admission.
+        auto bytes=encode_temporal_segment(segment);
+        const auto view=std::span<const std::byte>(bytes);
+        append_frame(view,std::move(bytes));
+    }
     // Build against the owned tail, decode the canonical frame and replay it
     // before publication. A failed append retains the complete previous state.
     void append_target(const TemporalEndpoint& target,
@@ -493,8 +499,12 @@ public:
             std::move(source_migration), std::move(declaration_update), old.limits.temporal.source_declarations);
         append(segment);
     }
-    void append_encoded(std::span<const std::byte> frame) {
+    void append_encoded(std::span<const std::byte> frame) { append_frame(frame,{}); }
+private:
+    void append_frame(std::span<const std::byte> frame,std::optional<native_series_detail::Bytes> owned) {
         using namespace native_series_detail;
+        require(!owned || (owned->data()==frame.data() && owned->size()==frame.size()),
+                "fresh frame owner differs from its complete component");
         const auto& old = state();
         bound(machine::checked_size_add(old.frames.size(), 1), old.limits.max_segments, "series segment count budget");
         bound(add_blob(old.archive_bytes, frame.size()), old.limits.max_archive_bytes, "series append byte budget");
@@ -502,12 +512,13 @@ public:
         auto next_endpoint = std::make_shared<const TemporalEndpoint>(replay_temporal_segment(
             *old.tail, decoded, old.limits.temporal.source_declarations));
         auto next = std::make_shared<State>(old);
-        next->frames = old.frames.appended(std::make_shared<const Frame>(Frame{std::move(decoded), Bytes(frame.begin(), frame.end())}));
+        next->frames = old.frames.appended(std::make_shared<const Frame>(Frame{std::move(decoded), owned?std::move(*owned):Bytes(frame.begin(), frame.end())}));
         next->frame_bytes = add_blob(old.frame_bytes, frame.size());
         next->tail = std::move(next_endpoint); next->archive_bytes = archive_size(*next);
         state_ = std::move(next);
     }
     // Validate an entire concatenated RFCXT stream before publishing any prefix.
+public:
     void append_stream(std::span<const std::byte> bytes, std::size_t chunk_bytes = 65536) {
         using namespace native_series_detail;
         require(chunk_bytes != 0, "series stream chunk size must be positive");

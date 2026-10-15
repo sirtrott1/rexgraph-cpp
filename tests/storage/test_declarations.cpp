@@ -42,6 +42,16 @@ Bytes load(const fs::path& path) {
 void roundtrip(const CompiledLayout& layout, const V& value, bool archive = false) {
     const auto before = layout.allocation(value); const auto bits = encode_declared_bits(layout, value);
     check(before.bits == bits.bit_count && before.bytes == bits.bytes.size(), "allocation/codec disagreement");
+    rfcx_detail::Writer destination; destination.u8(0xa5);
+    encode_declared_bits_to(layout,value,[&](std::size_t count,std::size_t bytes) {
+        check(count==bits.bit_count && bytes==bits.bytes.size(),"destination extent changed");
+        destination.u64(count); destination.u64(bytes); return destination.append_zeroed(bytes);
+    });
+    destination.u8(0x3c);
+    rfcx_detail::Reader direct(destination.bytes());
+    check(direct.u8()==0xa5 && direct.u64()==bits.bit_count && direct.u64()==bits.bytes.size(),"destination prefix changed");
+    const auto direct_bytes=direct.slice(bits.bytes.size());
+    check(std::equal(direct_bytes.begin(),direct_bytes.end(),bits.bytes.begin()) && direct.u8()==0x3c,"direct encoding changed wire or suffix");
     const auto decoded = decode_declared_bits(layout, bits);
     check(declared_value_equal(value, decoded), "D(E(v)) != v");
     check(encode_declared_bits(layout, decoded) == bits, "E(D(b)) != b");
@@ -141,16 +151,27 @@ void cursor_tests() {
         const auto budget=machine::ceil_div(extent,8);
         machine::BitWriter bulk(extent,budget),reference(extent,budget);
         bulk.put(prefix,offset);reference.put(prefix,offset);
-        bulk.put_octets(bytes);
+        bulk.put_generated_octets(bytes.size(),[&](auto target) {std::copy(bytes.begin(),bytes.end(),target.begin());});
+        Bytes framed(budget+2,std::byte{0xa5});
+        machine::BitSpanWriter direct{std::span(framed).subspan(1,budget),extent,budget};
+        direct.put(prefix,offset);direct.put_generated_octets(bytes.size(),[&](auto target) {std::copy(bytes.begin(),bytes.end(),target.begin());});direct.put(~std::uint64_t{0},64);direct.finish();
         for(const auto byte:bytes)reference.put(std::to_integer<unsigned>(byte),8);
         bulk.put(~std::uint64_t{0},64);reference.put(~std::uint64_t{0},64);
         const auto written=std::move(bulk).finish();
         check(written==std::move(reference).finish(),"bulk octets changed canonical bits");
+        check(framed.front()==std::byte{0xa5} && framed.back()==std::byte{0xa5} &&
+            std::equal(written.bytes.begin(),written.bytes.end(),framed.begin()+1),"borrowed destination changed bytes or guards");
         machine::BitReader reader(written.bytes,written.bit_count,budget);
         check(reader.get(offset)==prefix,"bulk octets changed prefix");
         check(reader.get_octets(count)==bytes,"bulk octet read changed original bytes");
         check(reader.get(64)==~std::uint64_t{0},"bulk octets changed suffix");reader.finish();
     }
+    Bytes guarded(3,std::byte{0xa5}); bool called=false;
+    rejects([&]{machine::BitSpanWriter invalid{std::span(guarded).subspan(1,1),16,1};},"short borrowed output accepted");
+    check(guarded==Bytes(3,std::byte{0xa5}),"failed borrowed constructor changed output");
+    machine::BitSpanWriter admitted{std::span(guarded).subspan(1,1),7,1};
+    rejects([&]{admitted.put_generated_octets(1,[&](auto){called=true;});},"short generated output accepted");
+    check(!called && guarded[0]==std::byte{0xa5} && guarded[2]==std::byte{0xa5},"failed generated write escaped extent");
     const Bytes octet{std::byte{255}};
     machine::BitWriter short_writer(7,1);
     rejects([&]{short_writer.put_octets(octet);},"truncated bulk writer accepted");
@@ -471,6 +492,9 @@ void remaining_budget_tests() {
     auto limits=layout.limits();limits.max_integer_bits=4;
     const CompiledLayout strict(layout.declarations(),layout.root(),layout.profile(),limits);
     rejects([&]{(void)decode_declared_bits(strict,bits.bytes,bits.bit_count,100,100);},"remaining allowance loosened compiled scalar policy");
+    bool allocated=false;
+    rejects([&]{encode_declared_bits_to(strict,value,[&](std::size_t,std::size_t) {allocated=true;return std::span<std::byte>{};});},"invalid integer reached destination");
+    check(!allocated,"destination was allocated before scalar admission");
 }
 } // namespace
 int main(int argc,char** argv) {

@@ -15,7 +15,9 @@ inline composite::DeclarationId declaration_id(Reader& r) {
 }
 inline void declaration_blob(Writer& w, std::span<const std::byte> bytes) { w.u64(bytes.size()); w.raw(bytes); }
 inline void declared_payload(Writer& w, const composite::CompiledLayout& layout, const composite::DeclaredValue& v) {
-    const auto bits = encode_declared_bits(layout,v); w.u64(bits.bit_count); declaration_blob(w,bits.bytes);
+    encode_declared_bits_to(layout,v,[&](std::size_t bits,std::size_t bytes) {
+        w.u64(bits); w.u64(bytes); return w.append_zeroed(bytes);
+    });
 }
 inline composite::DeclaredValue declared_payload(Reader& r, const composite::CompiledLayout& layout) {
     const auto count = machine::checked_size(r.u64()); const auto bytes = r.blob();
