@@ -5,8 +5,8 @@
 
 namespace rfc::storage {
 namespace temporal_codec_detail {
-// Serialize the retained channels once. Hash extensions keep their original
-// domain separators, while the sidecar keeps its original contiguous records.
+// Serialize the retained channels with their original domain separators.
+// A measuring writer reports only extent; its returned digest is unused.
 inline std::uint64_t endpoint_body(Writer& w, const TemporalEndpoint& endpoint,
                                    const StableSourceIndex& source_index,
                                    std::uint64_t source_hash) {
@@ -23,13 +23,15 @@ inline std::uint64_t endpoint_body(Writer& w, const TemporalEndpoint& endpoint,
     w.u64(cs.size()); for (const auto& [key, c] : cs) { (void)key; carrier(w, *c); }
     const auto ts = temporal_endpoint_detail::tensors(endpoint);
     w.u64(ts.size()); for (const auto& [key, t] : ts) { (void)key; tensor_record(w, *t); }
-    hash = rfcx_detail::fnv1a64_update(hash, std::span<const std::byte>(w.bytes()).subspan(begin));
+    if (!w.is_measuring())
+        hash = rfcx_detail::fnv1a64_update(hash, std::span<const std::byte>(w.bytes()).subspan(begin));
     const auto extension = [&](std::uint64_t tag, auto&& write) {
         Writer separator; separator.u64(tag);
         hash = rfcx_detail::fnv1a64_update(hash, separator.bytes());
         const auto offset = w.size();
         write();
-        hash = rfcx_detail::fnv1a64_update(hash, std::span<const std::byte>(w.bytes()).subspan(offset));
+        if (!w.is_measuring())
+            hash = rfcx_detail::fnv1a64_update(hash, std::span<const std::byte>(w.bytes()).subspan(offset));
     };
     if (!endpoint.finite_systems.empty())
         extension(0x314554494e494658ULL, [&] { finite_systems(w, endpoint.finite_systems); });
@@ -43,6 +45,11 @@ inline std::uint64_t endpoint_body(Writer& w, const TemporalEndpoint& endpoint,
 inline std::uint64_t endpoint_hash(const TemporalEndpoint& endpoint,
                                    const StableSourceIndex& source_index, std::uint64_t source_hash) {
     Writer w;
+    if (endpoint.declarations) {
+        auto measured=Writer::measure_only();
+        (void)endpoint_body(measured,endpoint,source_index,source_hash);
+        w=Writer(measured.size());
+    }
     return endpoint_body(w, endpoint, source_index, source_hash);
 }
 } // namespace temporal_codec_detail

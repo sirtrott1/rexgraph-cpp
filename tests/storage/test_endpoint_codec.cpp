@@ -100,6 +100,11 @@ void equivalence() {
             numeric::SparseRationalVector(42,{{0,value},{41,numeric::Rational{-3,7}}}));
         e.tensors.push_back(std::move(t));
         const auto original=reference_encoding(e);
+        auto measured=rfcx_detail::Writer::measure_only();
+        const auto wire_source=encode_rfcx(e.source);
+        (void)temporal_codec_detail::endpoint_body(measured,e,StableSourceIndex(e.source),rfcx_detail::fnv1a64(wire_source.bytes));
+        check(measured.bytes().empty() && measured.size()==original.size()-64,
+              "measured channels differ from original wire extent");
         check(temporal_endpoint_hash(e)==reference_hash(e),"channel hash differs from original serialization");
         check(encode_temporal_endpoint(e)==original,"canonical sidecar differs from original serialization");
         auto decoded=temporal_seed_detail::decode(e.source,original,{});
@@ -232,6 +237,21 @@ void byte_writer() {
     std::uint64_t hash=1469598103934665603ull;
     for(const auto b:bytes) hash=rfcx_detail::fnv1a64_update(hash,std::span<const std::byte>(&b,1));
     check(hash==rfcx_detail::fnv1a64(bytes),"incremental byte hash differs");
+    const auto exercise=[](auto& out) {
+        out.u8(7);out.align(8);const auto offset=out.reserve(8);
+        out.u16(9);out.u32(17);out.u64(22);out.i64(-101);
+        out.string(std::string_view("a\0b",3));out.patch_byte(0,std::byte{4});
+        out.patch_u32(offset,3);out.patch_u64(offset,33);
+        rfcx_detail::write_bigint(out,numeric::Integer{0});
+        rfcx_detail::write_bigint(out,numeric::Integer{-7781});
+        rfcx_detail::write_rational(out,numeric::Rational{-173,41});
+    };
+    rfcx_detail::Writer actual;auto measured=rfcx_detail::Writer::measure_only();exercise(actual);exercise(measured);
+    check(measured.size()==actual.size() && measured.bytes().empty(),"writer measured bytes differ");
+    rejects([&]{(void)measured.append_zeroed(1);},"measuring writer exposed a payload region");
+    auto overflow=rfcx_detail::Writer::measure_only();(void)overflow.reserve(std::numeric_limits<std::size_t>::max());
+    rejects([&]{overflow.u8(1);},"measured extent overflow accepted");
+    check(overflow.size()==std::numeric_limits<std::size_t>::max(),"failed extent measurement changed position");
 }
 } // namespace
 int main() {

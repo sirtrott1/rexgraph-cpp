@@ -65,32 +65,42 @@ public:
     Writer() = default;
     explicit Writer(std::size_t capacity) { bytes_.reserve(capacity); }
     [[nodiscard]] std::vector<std::byte> take_bytes() && noexcept { return std::move(bytes_); }
-    [[nodiscard]] std::size_t size() const noexcept { return bytes_.size(); }
+    // A measuring writer counts the same admitted wire without a payload buffer.
+    static Writer measure_only() { Writer out; out.measuring_=true; return out; }
+    [[nodiscard]] bool is_measuring() const noexcept { return measuring_; }
+    [[nodiscard]] std::size_t size() const noexcept { return measuring_ ? measured_ : bytes_.size(); }
     [[nodiscard]] const std::vector<std::byte>& bytes() const noexcept { return bytes_; }
 
     void align(std::size_t alignment) {
         if (alignment == 0) return;
+        if (measuring_) { (void)reserve((alignment-size()%alignment)%alignment); return; }
         while (bytes_.size() % alignment != 0) bytes_.push_back(std::byte{0});
     }
 
     std::size_t reserve(std::size_t count) {
-        const auto offset = bytes_.size();
-        bytes_.resize(machine::checked_size_add(bytes_.size(), count), std::byte{0});
+        const auto offset = size();
+        if (measuring_) measured_=machine::checked_size_add(measured_,count);
+        else bytes_.resize(machine::checked_size_add(bytes_.size(), count), std::byte{0});
         return offset;
     }
 
     // The returned exclusive region is valid until the writer grows again.
     // Its bytes are initialized before a nested encoder fills the region.
     std::span<std::byte> append_zeroed(std::size_t count) {
+        if (measuring_) throw std::logic_error("measuring writer has no output region");
         const auto offset = reserve(count);
         return std::span<std::byte>(bytes_).subspan(offset, count);
     }
 
     void raw(std::span<const std::byte> bytes) {
-        bytes_.insert(bytes_.end(), bytes.begin(), bytes.end());
+        if (measuring_) measured_=machine::checked_size_add(measured_,bytes.size());
+        else bytes_.insert(bytes_.end(), bytes.begin(), bytes.end());
     }
 
-    void u8(std::uint8_t v) { bytes_.push_back(static_cast<std::byte>(v)); }
+    void u8(std::uint8_t v) {
+        if (measuring_) measured_=machine::checked_size_add(measured_,1);
+        else bytes_.push_back(static_cast<std::byte>(v));
+    }
     void u16(std::uint16_t v) {
         u8(static_cast<std::uint8_t>(v & 0xffu));
         u8(static_cast<std::uint8_t>((v >> 8u) & 0xffu));
@@ -105,14 +115,17 @@ public:
 
     void patch_byte(std::size_t offset, std::byte v) {
         require_patch(offset, 1);
+        if (measuring_) return;
         bytes_[offset] = v;
     }
     void patch_u32(std::size_t offset, std::uint32_t v) {
         require_patch(offset, 4);
+        if (measuring_) return;
         for (unsigned i = 0; i < 4; ++i) bytes_[offset + i] = static_cast<std::byte>((v >> (8u * i)) & 0xffu);
     }
     void patch_u64(std::size_t offset, std::uint64_t v) {
         require_patch(offset, 8);
+        if (measuring_) return;
         for (unsigned i = 0; i < 8; ++i) bytes_[offset + i] = static_cast<std::byte>((v >> (8u * i)) & 0xffu);
     }
 
@@ -124,9 +137,11 @@ public:
 
 private:
     void require_patch(std::size_t offset, std::size_t count) const {
-        if (offset > bytes_.size() || count > bytes_.size() - offset) throw std::out_of_range("RFCX patch");
+        if (offset > size() || count > size() - offset) throw std::out_of_range("RFCX patch");
     }
     std::vector<std::byte> bytes_;
+    std::size_t measured_{};
+    bool measuring_{};
 };
 
 class Reader {
@@ -203,6 +218,14 @@ private:
 };
 
 inline void write_bigint(Writer& w, const numeric::Integer& input) {
+    if (w.is_measuring()) {
+        const auto count=input==0 ? std::size_t{0} : machine::ceil_div(
+            static_cast<std::size_t>(mpz_sizeinbase(input.get_mpz_t(),2)),8u);
+        if (count>std::numeric_limits<std::uint32_t>::max())
+            throw std::overflow_error("RFCX integer byte count overflow");
+        w.u8(input<0 ? 1u : 0u); w.u32(static_cast<std::uint32_t>(count));
+        (void)w.reserve(count); return;
+    }
     numeric::Integer magnitude = input < 0 ? -input : input;
     std::size_t count = 0;
     std::vector<std::byte> bytes;

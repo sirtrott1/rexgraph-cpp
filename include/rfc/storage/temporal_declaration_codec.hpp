@@ -15,6 +15,13 @@ inline composite::DeclarationId declaration_id(Reader& r) {
 }
 inline void declaration_blob(Writer& w, std::span<const std::byte> bytes) { w.u64(bytes.size()); w.raw(bytes); }
 inline void declared_payload(Writer& w, const composite::CompiledLayout& layout, const composite::DeclaredValue& v) {
+    if (w.is_measuring()) {
+        const auto allocation=layout.allocation(v);
+        const auto bytes=machine::ceil_div(allocation.bits,8);
+        if (bytes>layout.limits().max_encoded_bytes)
+            throw std::length_error("bit writer allocation budget");
+        w.u64(allocation.bits); w.u64(bytes); (void)w.reserve(bytes); return;
+    }
     encode_declared_bits_to(layout,v,[&](std::size_t bits,std::size_t bytes) {
         w.u64(bits); w.u64(bytes); return w.append_zeroed(bytes);
     });
