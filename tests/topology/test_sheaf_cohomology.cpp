@@ -41,6 +41,7 @@ int main() {
         local::StalkBundle disk_stalks(filled);
         local::LinearCellularSheaf constant_disk(disk_stalks);
         require(constant_disk.is_cochain_complex(), "constant disk sheaf is not a cochain complex");
+        require(constant_disk.is_local_system(), "constant disk should be a coherent local system");
         const auto HD0 = topology::sheaf_cohomology(constant_disk, core::Grade{0});
         const auto HD1 = topology::sheaf_cohomology(constant_disk, core::Grade{1});
         const auto HD2 = topology::sheaf_cohomology(constant_disk, core::Grade{2});
@@ -92,8 +93,19 @@ int main() {
         for (std::size_t slot = fb; slot < fe; ++slot) if (filled_edges.lower_index[slot] == 0u) filled_head_slot = slot;
         obstructed.set_restriction(core::Grade{1}, filled_head_slot, numeric::ExactMatrix::from_rows({{R{2}}}));
         require(!obstructed.is_cochain_complex(), "incompatible filled-face local system obstruction was not detected");
+        require(obstructed.has_invertible_restrictions(), "the obstruction should not be a singular restriction");
+        require(!obstructed.is_local_system(), "invertible incoherent restrictions received a local-system certificate");
         require(obstructed.two_step_defect(core::Grade{0}).nonzeros() != 0u,
                 "incompatible local system should have a nonzero exact cochain defect");
+        bool rejected_cohomology=false;
+        try { (void)topology::sheaf_cohomology(obstructed,core::Grade{1}); }
+        catch(const std::invalid_argument&) { rejected_cohomology=true; }
+        require(rejected_cohomology,"cohomology accepted incoherent restrictions");
+
+        local::LinearCellularSheaf singular(cycle_stalks);
+        singular.set_restriction(core::Grade{1},0u,numeric::ExactMatrix(1u,1u));
+        require(singular.is_cochain_complex() && !singular.has_invertible_restrictions() && !singular.is_local_system(),
+                "cochain coherence alone should not certify a local system");
 
         std::cout << "sheaf/local-system cohomology tests passed\n";
         return EXIT_SUCCESS;

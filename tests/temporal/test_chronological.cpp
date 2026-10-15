@@ -31,6 +31,50 @@ try{
     require(earliest.reachable && earliest.arrival==2 && earliest.contacts==2,"earliest arrival objective mismatch");
     require(fewest.reachable && fewest.contacts==1 && fewest.arrival==5,"fewest contacts objective mismatch");
 
+    const auto require_route=[](const rfc::temporal::TemporalRoute& route,
+                                const std::vector<rfc::temporal::ScheduledContact>& schedule,
+                                std::uint32_t source,std::uint32_t target,Rational start) {
+        require(route.reachable,"expected a reachable route");
+        require(route.contacts==route.contact_indices.size(),"route count disagrees with its witness");
+        auto current=source;
+        for(const auto index:route.contact_indices) {
+            require(index<schedule.size(),"route witness has an invalid contact index");
+            const auto& contact=schedule[index];
+            require(contact.source==current && start<=contact.departure && contact.departure<=contact.arrival,
+                    "route witness violates its source or chronology");
+            current=contact.target;
+            start=contact.arrival;
+        }
+        require(current==target && route.arrival==start,"route endpoint or arrival disagrees with its witness");
+    };
+    const std::vector<rfc::temporal::ScheduledContact> improving_parent{
+        {0,1,0,1},{1,2,2,3},{2,3,10,11},{0,2,0,2}
+    };
+    const auto repaired=rfc::temporal::earliest_arrival(4,improving_parent,0,3);
+    require_route(repaired,improving_parent,0,3,0);
+    require(repaired.arrival==11 && repaired.contacts==2,"equal-arrival descendant did not refresh its witness");
+    const std::vector<rfc::temporal::ScheduledContact> simultaneous{
+        {2,3,0,0},{1,2,0,0},{0,1,0,0},{2,1,0,0}
+    };
+    require_route(rfc::temporal::earliest_arrival(4,simultaneous,0,3),simultaneous,0,3,0);
+    require_route(rfc::temporal::fewest_contacts(4,simultaneous,0,3),simultaneous,0,3,0);
+    require_route(rfc::temporal::earliest_arrival(1,{},0,0,Rational{7}),{},0,0,Rational{7});
+    require_route(rfc::temporal::fewest_contacts(1,{},0,0,Rational{7}),{},0,0,Rational{7});
+    require(!rfc::temporal::earliest_arrival(2,{},0,1).reachable &&
+            !rfc::temporal::fewest_contacts(2,{},0,1).reachable,"empty disconnected schedule should be unreachable");
+    for(const auto& invalid:std::vector<rfc::temporal::ScheduledContact>{{0,1,5,4},{2,1,0,1},{0,2,0,1}}) {
+        for(const bool earliest_objective:{false,true}) {
+            for(const std::uint32_t target:{0u,1u}) {
+                bool rejected=false;
+                try {
+                    if(earliest_objective) (void)rfc::temporal::earliest_arrival(2,{invalid},0,target);
+                    else (void)rfc::temporal::fewest_contacts(2,{invalid},0,target);
+                } catch(const std::invalid_argument&) { rejected=true; }
+                require(rejected,"route objective accepted an invalid scheduled contact");
+            }
+        }
+    }
+
     const auto Inj=ExactMatrix::from_rows({{1},{0},{0}});
     const auto Obs=ExactMatrix::from_rows({{0,0,1}});
     const auto channel=rfc::temporal::terminal_channel({R0,R1},0,Inj,Obs);

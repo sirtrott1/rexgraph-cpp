@@ -21,12 +21,14 @@ class PreparedTransportEvidence {
         std::shared_ptr<const PreparedTransportObservations> model;
         numeric::ExactActionLimits limits;
         std::shared_ptr<const M> fixed_equations;
+        std::shared_ptr<const V> fixed_target;
         using Observation=std::variant<TransportObservation,TransportColumnObservation>;
         std::vector<Observation> history;
         std::shared_ptr<const PreparedColumnTransportObservations> columns;
         mutable std::once_flag materialization;
         mutable std::vector<TransportObservation> whole_fields;
         mutable std::atomic<std::size_t> materialized_entries{},materialization_steps{};
+
         TransportObservationSystem system;
         std::map<std::size_t,Row> rows, observation_rows;
         V particular;
@@ -45,6 +47,7 @@ class PreparedTransportEvidence {
                     particular.size(),kernel.nonzeros(),pivots.size(),free_columns.size()}) count=add(count,n);
             if(fixed_equations) {
                 count=add(count,add(fixed_equations->nonzeros(),add(observation_row_entries,observation_rows.size())));
+                count=add(count,fixed_target->size());
             }
             return count;
         }
@@ -60,15 +63,17 @@ class PreparedTransportEvidence {
             guard.matrix(system.design);guard.matrix(system.augmented);guard.vector(system.target);
             workspace(guard);
         }
-        State(std::shared_ptr<const PreparedTransportObservations> owner,Guard& guard,std::shared_ptr<const M> fixed={})
-            :model(std::move(owner)),limits(guard.limits()),fixed_equations(std::move(fixed)),
+        State(std::shared_ptr<const PreparedTransportObservations> owner,Guard& guard,std::shared_ptr<const M> fixed={},
+              std::shared_ptr<const V> target={})
+            :model(std::move(owner)),limits(guard.limits()),fixed_equations(std::move(fixed)),fixed_target(std::move(target)),
              system{M(0,model->parameter_count()),M(0,add(model->parameter_count(),1)),{},{}},
              kernel(model->parameter_count(),0) {
             const auto start=guard.steps();
+            if(fixed_equations && !fixed_target)fixed_target=std::make_shared<const V>(fixed_equations->rows());
             guard.step();guard.dimension(add(model->parameter_count(),1));workspace(guard);
             if(fixed_equations) {
-                guard.matrix(*fixed_equations);
-                if(fixed_equations->cols()!=model->parameter_count())
+                guard.matrix(*fixed_equations);guard.vector(*fixed_target);
+                if(fixed_equations->cols()!=model->parameter_count() || fixed_target->size()!=fixed_equations->rows())
                     throw std::invalid_argument("fixed transport equations require the original parameter carrier");
                 auto next=fixed_equations->entries().begin();
                 for(std::size_t i=0;i<fixed_equations->rows();++i) {
@@ -76,6 +81,8 @@ class PreparedTransportEvidence {
                     while(next!=fixed_equations->entries().end() && next->first.first==i) {
                         guard.step();row.emplace(next->first.second,next->second);++next;workspace(guard,row.size());
                     }
+                    const auto rhs=numeric::canonical_rational((*fixed_target)[i]);guard.value(rhs);
+                    if(rhs!=0)row.emplace(model->parameter_count(),rhs);
                     insert(std::move(row),guard);
                 }
                 fixed_rank=rows.size();
@@ -85,7 +92,9 @@ class PreparedTransportEvidence {
         }
         template<class ObservationType>
         State(const State& parent,const std::vector<ObservationType>& suffix,Guard& guard)
-            :model(parent.model),limits(parent.limits),fixed_equations(parent.fixed_equations),kernel(model->parameter_count(),0) {
+            :model(parent.model),limits(parent.limits),fixed_equations(parent.fixed_equations),fixed_target(parent.fixed_target),
+             kernel(model->parameter_count(),0) {
+
             const auto start=guard.steps();guard.step();parent.admit(guard);
             if(suffix.empty()) throw std::invalid_argument("nonempty original observation suffix required");
             guard.dimension(add(parent.history.size(),suffix.size()));
@@ -220,7 +229,7 @@ class PreparedTransportEvidence {
             if(numeric::checked_apply(system.design,particular,guard)!=system.target ||
                     numeric::checked_multiply(system.design,kernel,guard).nonzeros())
                 throw std::logic_error("complete transport evidence family certificate failed");
-            if(fixed_equations && (numeric::checked_apply(*fixed_equations,particular,guard)!=V(fixed_equations->rows()) ||
+            if(fixed_equations && (numeric::checked_apply(*fixed_equations,particular,guard)!=*fixed_target ||
                     numeric::checked_multiply(*fixed_equations,kernel,guard).nonzeros()))
                 throw std::logic_error("fixed transport equation family certificate failed");
             workspace(guard);family_steps=guard.steps()-start;
@@ -262,6 +271,11 @@ public:
     PreparedTransportEvidence(PreparedTransportObservations owner,M fixed_equations,Guard& guard)
         :state_(std::make_shared<const State>(std::make_shared<const PreparedTransportObservations>(std::move(owner)),guard,
             std::make_shared<const M>(std::move(fixed_equations)))) {}
+    // Affine fixed equations retain their exact right-hand side across appends.
+    PreparedTransportEvidence(PreparedTransportObservations owner,M fixed_equations,V fixed_target,Guard& guard)
+        :state_(std::make_shared<const State>(std::make_shared<const PreparedTransportObservations>(std::move(owner)),guard,
+            std::make_shared<const M>(std::move(fixed_equations)),
+            std::make_shared<const V>(guard.canonical_input(fixed_target)))) {}
     std::size_t fixed_rank() const noexcept {return state_->fixed_rank;}
     std::size_t observation_rank() const noexcept {return state_->fixed_equations?state_->observation_rows.size():rank();}
     PreparedTransportEvidence append(const std::vector<TransportObservation>& suffix,Guard& guard) const {

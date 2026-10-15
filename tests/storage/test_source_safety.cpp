@@ -98,7 +98,12 @@ void machine_tests() {
     rejects([&]{(void)machine::checked_size_mul(max,2);},"checked multiply wrapped");
     rejects([&]{(void)machine::ceil_div(1,0);},"ceil zero divisor");
     check(machine::checked_size_add(max,0)==max && machine::checked_size_mul(max,0)==0,"checked size legal limits");
-    rejects([&]{numeric::IntegerMatrix m(max,2);},"integer matrix product wrapped");
+    numeric::IntegerMatrix sparse_integer(max,2);
+    sparse_integer.set(max-1,1,numeric::Integer{7});
+    check(sparse_integer.rows()==max && sparse_integer.cols()==2 && sparse_integer.stored_entries()==1 &&
+          sparse_integer.get(max-1,1)==7,"sparse integer domain formed an ambient allocation");
+    sparse_integer.set(max-1,1,numeric::Integer{0});
+    check(sparse_integer.stored_entries()==0,"sparse integer zero erasure");
     rejects([&]{numeric::IndexDomain d({max,2});},"tensor shape product wrapped");
     check(numeric::IndexDomain({0,129}).logical_size()==0,"empty tensor domain");
     rejects([&]{PackedBits p(65,false,1);},"word budget ignored");

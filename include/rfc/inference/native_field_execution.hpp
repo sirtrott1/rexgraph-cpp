@@ -141,8 +141,8 @@ public:
             const auto grade=core::Grade{static_cast<std::uint16_t>(k)};const auto& arena=source.grade(grade);
             const auto key=request.grade_carriers[k];
             require(carriers.contains(key),"selected grade carrier absent");const auto& carrier=*carriers.at(key);
-            require(carrier.kind==storage::TemporalCarrierKind::SourceGrade && carrier.grade==grade && arena.cell_count()>0,
-                    "finite native tower requires nonempty declared SourceGrade carriers");
+            require(carrier.kind==storage::TemporalCarrierKind::SourceGrade && carrier.grade==grade,
+                    "native tower requires the declared SourceGrade carrier at every retained grade");
             if(global && arena.cell_count()>request.global_grade_dimension_limit)throw std::length_error("global exact grade dimension limit");
             cells=add(cells,arena.cell_count());occurrences=add(occurrences,arena.incidence_count());
             if (k) {
@@ -217,6 +217,8 @@ public:
     std::size_t grade_size(core::Grade grade) const {return state_->publication.endpoint()->source.grade(grade).cell_count();}
     std::uint64_t grade_carrier(core::Grade grade) const {return state_->request.grade_carriers.at(grade.value);}
     storage::PinnedNativeAccession publication() const {return state_->publication;}
+    const std::vector<storage::PinnedNativeAccession>& metric_pins() const & {return state_->request.metric_tensors;}
+    const std::vector<storage::PinnedNativeAccession>& metric_pins() const &&=delete;
     const runtime::ExecutionHostPolicy& preparation_policy() const & {return state_->policy;}
     const runtime::ExecutionHostPolicy& preparation_policy() const && = delete;
     NativeMetricSelection metric_selection() const {return state_->request.metrics;}

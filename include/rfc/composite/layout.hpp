@@ -1,4 +1,5 @@
 #pragma once
+#include <limits>
 
 #include "rfc/composite/declaration.hpp"
 #include "rfc/numeric/sparse_tensor.hpp"
@@ -284,7 +285,21 @@ private:
                 allocate(p->support().count(), sizeof(std::size_t));
                 allocate(p->stored_nonzeros(), sizeof(numeric::SparseRationalEntry));
                 bits = machine::checked_size_mul(varuint_bytes(p->support().count()), 8);
-                p->support().for_each_active([&](auto i) { accumulate(machine::checked_size_mul(varuint_bytes(i), 8)); });
+                if (p->support().storage() == numeric::StructuralSupport::Storage::Full) {
+                    // Sum the legacy per-index varuint widths without enumerating
+                    // an implicit full domain. This preserves the existing codec
+                    // allocation/admission policy exactly; it does not encode it.
+                    const auto count = p->support().size();
+                    std::size_t index_bytes = count;
+                    for (std::size_t threshold = 128; threshold < count;) {
+                        index_bytes = machine::checked_size_add(index_bytes, count - threshold);
+                        if (threshold > std::numeric_limits<std::size_t>::max() / 128) break;
+                        threshold *= 128;
+                    }
+                    accumulate(machine::checked_size_mul(index_bytes, 8));
+                } else {
+                    p->support().for_each_active([&](auto i) { accumulate(machine::checked_size_mul(varuint_bytes(i), 8)); });
+                }
                 accumulate(machine::checked_size_mul(varuint_bytes(p->stored_nonzeros()), 8));
                 for (const auto& e : p->values().entries()) {
                     accumulate(machine::checked_size_mul(varuint_bytes(e.index), 8));

@@ -4,6 +4,7 @@
 #include "rfc/field/exact_metric.hpp"
 #include "rfc/numeric/exact_matrix.hpp"
 #include "rfc/numeric/sparse_vector.hpp"
+#include "rfc/numeric/checked_exact_actions.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -43,10 +44,11 @@ inline numeric::ExactMatrix boundary_matrix(const core::RelationalComplex& compl
 inline numeric::ExactMatrix solve_columns(const numeric::ExactMatrix& A, const numeric::ExactMatrix& rhs) {
     if (A.rows() != A.cols() || A.rows() != rhs.rows()) throw std::invalid_argument("solve_columns dimension mismatch");
     numeric::ExactMatrix out(A.cols(), rhs.cols());
+    const numeric::PreparedExactSolve factor(A);
     for (std::size_t j = 0; j < rhs.cols(); ++j) {
         numeric::RationalVector column(rhs.rows(), numeric::Rational{0});
         for (std::size_t i = 0; i < rhs.rows(); ++i) column[i] = rhs.get(i,j);
-        const auto solved = A.solve(column);
+        const auto solved = factor.apply(column);
         for (std::size_t i = 0; i < solved.size(); ++i) if (solved[i] != 0) out.set(i,j,solved[i]);
     }
     return out;
@@ -84,8 +86,8 @@ inline numeric::SparseRationalVector metric_adjoint_apply_sparse(const BoundaryO
                                                                  const ExactMetric& source_metric,
                                                                  const ExactMetric& target_metric,
                                                                  numeric::SparseRationalView y) {
-    if (!source_metric.supports_sparse_solve() || !target_metric.is_diagonal()) {
-        throw std::logic_error("sparse metric adjoint requires identity/diagonal metrics");
+    if (!source_metric.supports_sparse_solve() || !target_metric.supports_sparse_apply()) {
+        throw std::logic_error("sparse metric adjoint requires declared sparse metric actions");
     }
     if (source_metric.size() != boundary.domain_size() || target_metric.size() != boundary.codomain_size() || y.size() != boundary.codomain_size()) {
         throw std::invalid_argument("sparse operator metric adjoint dimension mismatch");

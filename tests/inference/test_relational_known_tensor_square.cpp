@@ -79,7 +79,13 @@ OwnedRelationalInputAccession accession(const OwnedRelationalInputUseAsset& byte
 }
 std::vector<std::byte> false_square_witness(const OwnedRelationalKnownTensorSquare& square) {
     using namespace known_tensor_square_codec_detail;
-    auto w=envelope(square_magic); parent(w,square.parent()); declaration(w,square.declaration()); Writer bad;
+    auto w=envelope(square_magic);
+    const auto input=square.parent(); const auto owner=input.accession();
+    blob(w,encode_relational_field_program(owner.program()));
+    blob(w,encode_relational_input_use_asset(owner.asset()));
+    field_interface_codec_detail::accession(w,owner.declaration());
+    w.u64(input.use()); storage::temporal_codec_detail::tensor(w,input.source_field());
+    declaration(w,square.declaration()); Writer bad;
     storage::temporal_codec_detail::tensor(bad,square.context_field());
     auto values=square.tensor_square().values().dense(); values[0]+=1;
     const auto flat=tensor(values);

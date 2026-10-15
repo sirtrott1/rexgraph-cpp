@@ -157,6 +157,17 @@ if(RFC_BUILD_APPS)
   target_link_libraries(rfc_boolean_declaration_demo PRIVATE rfc::storage)
   add_executable(rfc_rfcx_digits_product apps/rfcx_digits_product.cpp)
   target_link_libraries(rfc_rfcx_digits_product PRIVATE rfc::storage)
+
+  add_executable(rfc_finite_algebra_demo examples/finite_algebra/main.cpp)
+  target_link_libraries(rfc_finite_algebra_demo PRIVATE rfc::algebra)
+  add_executable(rfc_radix_carry_demo examples/radix_carry/main.cpp)
+  target_link_libraries(rfc_radix_carry_demo PRIVATE rfc::local)
+  add_executable(rfc_batch_harmonic_attachment_demo examples/batch_harmonic_attachment/main.cpp)
+  target_link_libraries(rfc_batch_harmonic_attachment_demo PRIVATE rfc::inference Threads::Threads)
+  if(RFC_BUILD_LEARNING)
+    add_executable(rfc_transport_family_gluing_demo examples/transport_family_gluing/main.cpp)
+    target_link_libraries(rfc_transport_family_gluing_demo PRIVATE rfc::learning Threads::Threads)
+  endif()
 endif()
 
 if(PROJECT_IS_TOP_LEVEL OR RFC_BUILD_TESTS)
@@ -330,6 +341,18 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
   add_test(NAME rfc_native_frames COMMAND rfc_native_frame_tests)
   add_test(NAME rfc_native_frames_fraction COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_native_frames.py $<TARGET_FILE:rfc_native_frame_tests>)
+  add_executable(rfc_native_batch_attachment_tests tests/inference/test_native_batch_attachment.cpp)
+  target_link_libraries(rfc_native_batch_attachment_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_batch_attachment COMMAND rfc_native_batch_attachment_tests)
+  add_executable(rfc_native_factored_calculus_tests tests/inference/test_native_factored_calculus.cpp)
+  target_link_libraries(rfc_native_factored_calculus_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_factored_calculus COMMAND rfc_native_factored_calculus_tests)
+  add_executable(rfc_native_selected_moment_tests tests/inference/test_native_selected_moments.cpp)
+  target_link_libraries(rfc_native_selected_moment_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_selected_moments COMMAND rfc_native_selected_moment_tests)
+  add_executable(rfc_native_multitime_moment_tests tests/inference/test_native_multitime_moments.cpp)
+  target_link_libraries(rfc_native_multitime_moment_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_multitime_moments COMMAND rfc_native_multitime_moment_tests)
   add_executable(rfc_native_selected_observation_tests tests/inference/test_native_selected_observation.cpp)
   target_link_libraries(rfc_native_selected_observation_tests PRIVATE rfc::inference Threads::Threads)
   add_test(NAME rfc_native_selected_observation COMMAND rfc_native_selected_observation_tests)
@@ -563,6 +586,10 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
   target_compile_definitions(rfc_temporal_native_tests PRIVATE RFC_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   add_test(NAME rfc_rfcx_temporal_native COMMAND rfc_temporal_native_tests)
 
+  add_executable(rfc_codec_initialization_tests tests/storage/test_codec_initialization.cpp)
+  target_link_libraries(rfc_codec_initialization_tests PRIVATE rfc::storage)
+  add_test(NAME rfc_codec_initialization COMMAND rfc_codec_initialization_tests)
+
   add_executable(rfc_local_block_storage_tests tests/storage/test_local_blocks.cpp)
   target_link_libraries(rfc_local_block_storage_tests PRIVATE rfc::storage)
   add_test(NAME rfc_rfcx_local_blocks COMMAND rfc_local_block_storage_tests)
@@ -688,6 +715,26 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
     add_test(NAME rfc_relational_available_evidence_fraction COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/learning/check_relational_available_evidence.py $<TARGET_FILE:rfc_relational_available_evidence_tests>)
 
+    add_executable(rfc_graded_transport_sparse_tests tests/learning/test_graded_transport_sparse.cpp)
+    target_link_libraries(rfc_graded_transport_sparse_tests PRIVATE rfc::learning Threads::Threads)
+    add_test(NAME rfc_graded_transport_sparse COMMAND rfc_graded_transport_sparse_tests)
+
+    add_executable(rfc_affine_transport_completion_tests tests/learning/test_affine_transport_completion.cpp)
+    target_link_libraries(rfc_affine_transport_completion_tests PRIVATE rfc::learning Threads::Threads)
+    add_test(NAME rfc_affine_transport_completion COMMAND rfc_affine_transport_completion_tests)
+
+    add_executable(rfc_transport_family_gluing_tests tests/learning/test_transport_family_gluing.cpp)
+    target_link_libraries(rfc_transport_family_gluing_tests PRIVATE rfc::learning Threads::Threads)
+    add_test(NAME rfc_transport_family_gluing COMMAND rfc_transport_family_gluing_tests)
+
+    add_executable(rfc_assertion_diagnosis_tests tests/learning/test_assertion_diagnosis.cpp)
+    target_link_libraries(rfc_assertion_diagnosis_tests PRIVATE rfc::learning Threads::Threads)
+    add_test(NAME rfc_assertion_diagnosis COMMAND rfc_assertion_diagnosis_tests)
+
+    add_executable(rfc_multiplicative_relation_tests tests/learning/test_multiplicative_relations.cpp)
+    target_link_libraries(rfc_multiplicative_relation_tests PRIVATE rfc::learning)
+    add_test(NAME rfc_multiplicative_relations COMMAND rfc_multiplicative_relation_tests)
+
     add_executable(rfc_transport_field_objective_tests tests/learning/test_transport_field_objective.cpp)
     target_link_libraries(rfc_transport_field_objective_tests PRIVATE rfc::learning Threads::Threads)
     add_test(NAME rfc_transport_field_objective COMMAND rfc_transport_field_objective_tests)
@@ -756,6 +803,10 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
   target_link_libraries(rfc_branching_core_tests PRIVATE rfc::core)
   add_test(NAME rfc_branching_relations COMMAND rfc_branching_core_tests)
 
+  add_executable(rfc_sparse_sheaf_action_tests tests/local/test_sparse_sheaf_actions.cpp)
+  target_link_libraries(rfc_sparse_sheaf_action_tests PRIVATE rfc::local)
+  add_test(NAME rfc_sparse_sheaf_actions COMMAND rfc_sparse_sheaf_action_tests)
+
   add_executable(rfc_branching_sheaf_tests tests/local/test_branching_sheaf.cpp)
   target_link_libraries(rfc_branching_sheaf_tests PRIVATE rfc::local)
   add_test(NAME rfc_branching_stalk_sheaf COMMAND rfc_branching_sheaf_tests)
@@ -763,6 +814,13 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
   add_executable(rfc_constraint_system_tests tests/local/test_constraint_system.cpp)
   target_link_libraries(rfc_constraint_system_tests PRIVATE rfc::local)
   add_test(NAME rfc_finite_constraint_system COMMAND rfc_constraint_system_tests)
+
+  add_executable(rfc_bounded_constraint_tests tests/local/test_bounded_constraints.cpp)
+  target_link_libraries(rfc_bounded_constraint_tests PRIVATE rfc::local)
+  add_test(NAME rfc_bounded_constraints COMMAND rfc_bounded_constraint_tests)
+  add_executable(rfc_positive_rule_tests tests/local/test_positive_rules.cpp)
+  target_link_libraries(rfc_positive_rule_tests PRIVATE rfc::local)
+  add_test(NAME rfc_positive_rules COMMAND rfc_positive_rule_tests)
   # Compatibility build target for scripts from the pre-realignment tree.
   add_custom_target(rfc_constraint_sheaf_tests DEPENDS rfc_constraint_system_tests)
 
@@ -773,6 +831,10 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
   add_executable(rfc_branching_semantic_tests tests/local/test_branching_semantic_scale.cpp)
   target_link_libraries(rfc_branching_semantic_tests PRIVATE rfc::local)
   add_test(NAME rfc_branching_semantic_scale COMMAND rfc_branching_semantic_tests)
+
+  add_executable(rfc_radix_carry_tests tests/local/test_radix_carry.cpp)
+  target_link_libraries(rfc_radix_carry_tests PRIVATE rfc::local)
+  add_test(NAME rfc_radix_carry COMMAND rfc_radix_carry_tests)
 
 
   add_executable(rfc_sheaf_cohomology_tests tests/topology/test_sheaf_cohomology.cpp)
@@ -786,6 +848,14 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
   add_executable(rfc_integral_homology_tests tests/topology/test_integral_homology.cpp)
   target_link_libraries(rfc_integral_homology_tests PRIVATE rfc::topology)
   add_test(NAME rfc_integral_smith_homology COMMAND rfc_integral_homology_tests)
+
+  add_executable(rfc_equivariant_torsion_tests tests/topology/test_equivariant_torsion.cpp)
+  target_link_libraries(rfc_equivariant_torsion_tests PRIVATE rfc::topology)
+  add_test(NAME rfc_equivariant_torsion COMMAND rfc_equivariant_torsion_tests)
+
+  add_executable(rfc_cyclotomic_field_tests tests/topology/test_cyclotomic_fields.cpp)
+  target_link_libraries(rfc_cyclotomic_field_tests PRIVATE rfc::field rfc::storage)
+  add_test(NAME rfc_cyclotomic_fields COMMAND rfc_cyclotomic_field_tests)
 
   add_executable(rfc_relational_homotopy_tests tests/topology/test_relational_homotopy.cpp)
   target_link_libraries(rfc_relational_homotopy_tests PRIVATE rfc::topology)
@@ -890,6 +960,48 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
   target_link_libraries(rfc_exact_metric_hodge_tests PRIVATE rfc::field)
   add_test(NAME rfc_exact_metric_hodge COMMAND rfc_exact_metric_hodge_tests)
 
+  add_executable(rfc_sparse_metric_action_tests tests/field/test_sparse_metric_actions.cpp)
+  target_link_libraries(rfc_sparse_metric_action_tests PRIVATE rfc::field)
+  add_test(NAME rfc_sparse_metric_actions COMMAND rfc_sparse_metric_action_tests)
+
+  add_executable(rfc_relational_metric_choice_tests tests/field/test_relational_metric_choice.cpp)
+  target_link_libraries(rfc_relational_metric_choice_tests PRIVATE rfc::field)
+  add_test(NAME rfc_relational_metric_choice COMMAND rfc_relational_metric_choice_tests)
+
+  add_executable(rfc_retained_tucker_tests tests/field/test_retained_tucker.cpp)
+  target_link_libraries(rfc_retained_tucker_tests PRIVATE rfc::field)
+  add_test(NAME rfc_retained_tucker COMMAND rfc_retained_tucker_tests)
+
+  add_executable(rfc_sparse_stalk_action_tests tests/field/test_sparse_stalk_actions.cpp)
+  target_link_libraries(rfc_sparse_stalk_action_tests PRIVATE rfc::field)
+  add_test(NAME rfc_sparse_stalk_actions COMMAND rfc_sparse_stalk_action_tests)
+
+  if(RFC_BUILD_LEARNING)
+    add_executable(rfc_evolving_stalk_gluing_tests tests/temporal/test_evolving_stalk_gluing.cpp)
+    target_link_libraries(rfc_evolving_stalk_gluing_tests PRIVATE rfc::learning Threads::Threads)
+    add_test(NAME rfc_evolving_stalk_gluing COMMAND rfc_evolving_stalk_gluing_tests)
+  endif()
+
+  add_executable(rfc_relational_metric_refinement_tests tests/geometry/test_relational_metric_refinement.cpp)
+  target_link_libraries(rfc_relational_metric_refinement_tests PRIVATE rfc::local)
+  add_test(NAME rfc_relational_metric_refinement COMMAND rfc_relational_metric_refinement_tests)
+
+  add_executable(rfc_passive_dynamics_tests tests/field/test_passive_dynamics.cpp)
+  target_link_libraries(rfc_passive_dynamics_tests PRIVATE rfc::field Threads::Threads)
+  add_test(NAME rfc_passive_dynamics COMMAND rfc_passive_dynamics_tests)
+
+  add_executable(rfc_batch_harmonic_attachment_tests tests/field/test_batch_harmonic_attachment.cpp)
+  target_link_libraries(rfc_batch_harmonic_attachment_tests PRIVATE rfc::field Threads::Threads)
+  add_test(NAME rfc_batch_harmonic_attachment COMMAND rfc_batch_harmonic_attachment_tests)
+
+  add_executable(rfc_prepared_hodge_invariant_tests tests/field/test_prepared_hodge_invariants.cpp)
+  target_link_libraries(rfc_prepared_hodge_invariant_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_prepared_hodge_invariants COMMAND rfc_prepared_hodge_invariant_tests)
+
+  add_executable(rfc_finite_jacobian_tests tests/field/test_finite_jacobian.cpp)
+  target_link_libraries(rfc_finite_jacobian_tests PRIVATE rfc::field)
+  add_test(NAME rfc_finite_jacobian COMMAND rfc_finite_jacobian_tests)
+
   add_executable(rfc_relational_channel_tests tests/field/test_relational_channels.cpp)
   target_link_libraries(rfc_relational_channel_tests PRIVATE rfc::field Threads::Threads)
   add_test(NAME rfc_relational_channels COMMAND rfc_relational_channel_tests)
@@ -925,6 +1037,10 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
   add_executable(rfc_algebra_tests tests/algebra/test_native_algebra.cpp)
   target_link_libraries(rfc_algebra_tests PRIVATE rfc::algebra)
   add_test(NAME rfc_native_algebra COMMAND rfc_algebra_tests)
+
+  add_executable(rfc_finite_algebra_tests tests/algebra/test_finite_algebra.cpp)
+  target_link_libraries(rfc_finite_algebra_tests PRIVATE rfc::algebra)
+  add_test(NAME rfc_finite_algebra COMMAND rfc_finite_algebra_tests)
 
   add_executable(rfc_column_expansion_tests tests/geometry/test_column_expansion.cpp)
   target_link_libraries(rfc_column_expansion_tests PRIVATE rfc::geometry)
@@ -1033,6 +1149,17 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
   add_executable(rfc_sparse_exact_frames_tests tests/numeric/test_sparse_exact_frames.cpp)
   target_link_libraries(rfc_sparse_exact_frames_tests PRIVATE rfc::numeric)
   add_test(NAME rfc_sparse_exact_frames COMMAND rfc_sparse_exact_frames_tests)
+
+
+  add_executable(rfc_sparse_prepared_solve_tests tests/numeric/test_sparse_prepared_solve.cpp)
+  target_link_libraries(rfc_sparse_prepared_solve_tests PRIVATE rfc::numeric)
+  add_test(NAME rfc_sparse_prepared_solve COMMAND rfc_sparse_prepared_solve_tests)
+
+
+  add_executable(rfc_sparse_integer_smith_tests tests/numeric/test_sparse_integer_smith.cpp)
+  target_link_libraries(rfc_sparse_integer_smith_tests PRIVATE rfc::numeric)
+  add_test(NAME rfc_sparse_integer_smith COMMAND rfc_sparse_integer_smith_tests)
+
 endif()
 
 if(RFC_BUILD_BENCHMARKS)

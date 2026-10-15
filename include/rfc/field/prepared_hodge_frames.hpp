@@ -46,10 +46,11 @@ inline void positive(const Matrix& form,Guard& guard) {
 }
 inline Matrix solve_columns(const numeric::PreparedExactSolve& solve,const Matrix& rhs,Guard& guard) {
     guard.matrix(rhs);Matrix result(rhs.rows(),rhs.cols());
-    for(std::size_t j=0;j<rhs.cols();++j){
-        Vector column(rhs.rows());for(std::size_t i=0;i<rhs.rows();++i){guard.step();column[i]=rhs.get(i,j);}
-        const auto value=solve.apply(column,guard);
-        for(std::size_t i=0;i<value.size();++i){guard.step();result.set(i,j,value[i]);guard.entries(result.nonzeros());}
+    std::map<std::size_t,std::vector<numeric::SparseRationalEntry>> columns;
+    for(const auto& [ij,q]:rhs.entries()){guard.step();columns[ij.second].push_back({ij.first,q});}
+    for(auto& [j,entries]:columns){
+        const auto value=solve.apply(numeric::SparseRationalVector(rhs.rows(),std::move(entries)),guard);
+        for(const auto& entry:value.entries()){guard.step();result.set(entry.index,j,entry.value);guard.entries(result.nonzeros());}
     }
     return result;
 }
@@ -70,6 +71,11 @@ struct Projection {
         auto coordinates=gram?gram->apply(rhs,guard):Vector{};
         auto value=numeric::checked_apply(frame,coordinates,guard);
         return {std::move(value),std::move(coordinates)};
+    }
+    std::pair<numeric::SparseRationalVector,numeric::SparseRationalVector> apply(const numeric::SparseRationalVector& input,Guard& guard) const {
+        validate(guard);const auto rhs=numeric::checked_apply(dual,input,guard);
+        auto coordinates=gram?gram->apply(rhs,guard):numeric::SparseRationalVector(0);
+        auto value=numeric::checked_apply(frame,coordinates,guard);return {std::move(value),std::move(coordinates)};
     }
 };
 } // namespace hodge_frame_detail
@@ -159,11 +165,40 @@ public:
     const numeric::PreparedExactFrames& curl_reduction() const &&=delete;
     const numeric::PreparedExactFrames& harmonic_reduction() const &&=delete;
     std::shared_ptr<const core::RelationalComplex> source() const {return state_->source;}
+    const std::vector<Matrix>& metrics() const & {return state_->metrics;}
+    const std::vector<Matrix>& metrics() const &&=delete;
     core::Grade grade() const noexcept {return state_->grade;}
     std::size_t chain_interfaces_checked() const noexcept {return state_->interfaces;}
     std::size_t stored_entries() const noexcept {return state_->retained;}
     std::size_t stored_index_entries() const noexcept {return state_->indices;}
     std::size_t preparation_steps() const noexcept {return state_->preparation;}
+    void validate(Guard& guard) const {
+        using namespace hodge_frame_detail;const auto pin=state_;
+        guard.step();source_values(*pin->source,guard);guard.entries(pin->retained);guard.entries(pin->indices);
+        for(const auto& metric:pin->metrics)guard.matrix(metric);
+        for(const auto& map:pin->boundaries)guard.matrix(map);
+        for(const auto* reduction:{&*pin->gradient_reduction,&*pin->curl_reduction,&*pin->harmonic_reduction})reduction->validate(guard);
+        (void)pin->metric_solve->factor_receipt(guard);
+        for(const auto& sector:pin->sectors)sector->validate(guard);
+    }
+    numeric::Rational sector_volume(std::size_t sector,Guard& guard) const {
+        const auto pin=state_;if(sector>=3)throw std::out_of_range("Hodge sector");
+        validate(guard);const auto& projection=*pin->sectors[sector];
+        return projection.gram?projection.gram->factor_receipt(guard).determinant(guard):numeric::Rational{1};
+    }
+    numeric::RationalVector project_sector(std::size_t sector,numeric::RationalVector input,Guard& guard) const {
+        const auto pin=state_;if(sector>=3)throw std::out_of_range("Hodge sector");validate(guard);
+        return pin->sectors[sector]->apply(input,guard).first;
+    }
+    numeric::SparseRationalVector project_sector(std::size_t sector,const numeric::SparseRationalVector& input,Guard& guard) const {
+        const auto pin=state_;if(sector>=3)throw std::out_of_range("Hodge sector");validate(guard);
+        return pin->sectors[sector]->apply(input,guard).first;
+    }
+    std::pair<numeric::SparseRationalVector,numeric::SparseRationalVector> project_sector_with_coordinates(
+        std::size_t sector,const numeric::SparseRationalVector& input,Guard& guard) const {
+        const auto pin=state_;if(sector>=3)throw std::out_of_range("Hodge sector");validate(guard);
+        return pin->sectors[sector]->apply(input,guard);
+    }
     HodgeFrameDecomposition decompose(numeric::RationalVector input,Guard& guard) const {
         using namespace hodge_frame_detail;
         const auto pin=state_;guard.step();source_values(*pin->source,guard);

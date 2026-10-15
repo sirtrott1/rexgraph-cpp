@@ -15,7 +15,47 @@ This software is proprietary and available through the author's personal
 distribution. See [LICENSE](LICENSE). Third party dependencies retain their own
 terms.
 
+## Exact native consumers
+
+The [native exact system guide](docs/native-exact-system/README.md) describes the
+implemented C++ APIs, their declared hypotheses, retained certificates and
+remaining scope boundaries. The same exact library components serve the native
+execution adapters and the logic/electrodynamics companion.
+
+The [exact metric-choice and refinement certificates](docs/relational-metric-refinement/README.md)
+verify admissible metric choices on retained complexes, a universal rational
+subdivision identity, sparse chain-map transport, and compatible local field
+and metric gluing.
+
+- [Transport family gluing](examples/transport_family_gluing/README.md) combines
+  affine boundary completion with complete parameter families on retained
+  interfaces. Assertion diagnosis (`include/rfc/learning/assertion_diagnosis.hpp`)
+  supplies consistency, corruption ambiguity and repair with the full potential
+  gauge; multiplicative relations (`include/rfc/learning/multiplicative_relations.hpp`)
+  retain exact equation witnesses.
+- [Batch harmonic attachment](examples/batch_harmonic_attachment/README.md)
+  stages actual source cells, reuses prepared Hodge frames and retains new
+  upper-cycle witnesses. Native factored actions (`include/rfc/inference/native_factored_action.hpp`),
+  tower operators (`include/rfc/inference/native_tower_operators.hpp`) and
+  selected moments (`include/rfc/inference/native_moments.hpp`), including
+  multitime moment changes (`include/rfc/inference/native_multitime_moments.hpp`),
+  compose sparse exact actions with their original owners and execution limits.
+- [Finite algebra](examples/finite_algebra/README.md),
+  [radix carries](examples/radix_carry/README.md) and
+  [algebraic phase fields](examples/algebraic_phase_fields/README.md) provide
+  retained law certificates, invariant-preserving carries and checked algebraic
+  field/phase declarations, including bounded cyclotomic construction.
+- Integral periods (`include/rfc/field/period_lattice.hpp`),
+  finite Jacobians (`include/rfc/field/finite_jacobian.hpp`) and
+  equivariant torsion (`include/rfc/topology/equivariant_torsion.hpp`) consume
+  declared integral cycles, cup data, coordinate bases and attaching evidence.
+
+The examples include standalone CMake projects. The main build registers their
+demo targets under `RFC_BUILD_APPS`; the transport gluing example and learning
+regressions also respect `RFC_BUILD_LEARNING`.
+
 ## Installation
+
 
 The SDK requires CMake 3.24 or later, a C++20 compiler, pkg-config and the GMP and
 GMPXX development libraries. The commands below also use Ninja. Run them from

@@ -77,6 +77,33 @@ int main() {
         const auto identity=g.identity(0u);
         require(topology::certify_relational_homotopy(presentation,loop,identity,{{0u,0u,false,false,0u}}),
                 "filled triangle attaching loop should be null-homotopic by one certified face move");
+        require(topology::certify_relational_homotopy(presentation,identity,identity,{}),
+                "same-source identity certificate should remain valid");
+
+        // Equal local indices and even an identical copied carrier cannot
+        // replace the retained source owner of either certified path.
+        const auto other_triangle=make_filled_triangle();
+        topology::PairwisePathGroupoid other_groupoid(other_triangle);
+        const auto rejects_owner=[&](const auto& claimed_presentation,const auto& first,const auto& second) {
+            bool rejected=false;
+            try { (void)topology::certify_relational_homotopy(claimed_presentation,first,second,{}); }
+            catch(const std::invalid_argument&) { rejected=true; }
+            return rejected;
+        };
+        require(rejects_owner(presentation,identity,other_groupoid.identity(0)),
+                "foreign-source identity received a homotopy certificate");
+        require(rejects_owner(presentation,g.generator(0),other_groupoid.generator(0)),
+                "foreign-source generator received a homotopy certificate");
+        require(rejects_owner(topology::fundamental_groupoid_presentation(other_triangle),identity,identity),
+                "empty certificate bypassed presentation ownership");
+        require(rejects_owner(topology::FundamentalGroupoidPresentation{},identity,identity),
+                "null presentation received an identity certificate");
+        auto mixed_presentation=presentation;
+        mixed_presentation.relators[0]=topology::attaching_word(other_triangle,0);
+        bool rejected_relator=false;
+        try { (void)topology::apply_face_homotopy(mixed_presentation,loop,{0u,0u,false,false,0u}); }
+        catch(const std::invalid_argument&) { rejected_relator=true; }
+        require(rejected_relator,"foreign-source relator was used in a face move");
 
         const auto torus=make_one_vertex_surface(true);
         const auto trivial_face=make_one_vertex_surface(false);

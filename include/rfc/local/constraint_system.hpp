@@ -8,6 +8,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <stop_token>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
@@ -15,6 +16,18 @@
 #include <vector>
 
 namespace rfc::local {
+
+// Bounded native search is an explicit request. Existing unbounded APIs retain
+// their original meaning. No partially explored branch is an unsat certificate.
+enum class FiniteSearchStatus { Satisfiable, Unsatisfiable, BudgetExceeded, Cancelled };
+struct FiniteSearchLimits {
+    std::size_t max_variables{65536};
+    std::size_t max_steps{1u << 22};
+};
+struct FiniteSearchReceipt {
+    std::size_t steps{}, value_trials{}, chart_tests{}, tuple_tests{}, coordinate_tests{};
+    std::size_t variables{}, peak_assigned{};
+};
 
 // Exact finite/set-valued local constraint system over the retained relational
 // subcomplex topology.  Value is deliberately unconstrained by linear algebra:
@@ -287,6 +300,100 @@ public:
         return std::nullopt;
     }
 
+    struct BoundedSearchResult {
+        FiniteSearchStatus status;
+        std::optional<Assignment> witness;
+        FiniteSearchReceipt work;
+    };
+
+    // Iterative depth-first search through the SAME retained domains and exact
+    // chart predicate as global_section(). All domains and charts participate,
+    // even if a caller later projects the witness onto one selected cell.
+    // Work counts retained record visits, not CPU instructions or Value costs.
+    // The returned witness is absent on interruption. Unexpected exceptions
+    // propagate; they never become an unsatisfiability result.
+    [[nodiscard]] BoundedSearchResult bounded_global_section(
+        const Assignment& fixed = {}, FiniteSearchLimits limits = {},
+        std::stop_token stop = {}) const {
+        struct Interrupted { FiniteSearchStatus status; };
+        FiniteSearchReceipt work;
+        const auto tick = [&] {
+            if (stop.stop_requested()) throw Interrupted{FiniteSearchStatus::Cancelled};
+            if (work.steps >= limits.max_steps) throw Interrupted{FiniteSearchStatus::BudgetExceeded};
+            ++work.steps;
+        };
+        try {
+            tick();
+            if (domains_.size() > limits.max_variables)
+                throw Interrupted{FiniteSearchStatus::BudgetExceeded};
+            work.variables = domains_.size();
+            std::vector<core::CellId> variables;
+            variables.reserve(domains_.size());
+            for (const auto& [cell, _] : domains_) { tick(); variables.push_back(cell); }
+            std::sort(variables.begin(), variables.end(), [&](auto a, auto b) {
+                tick();
+                if (domain(a).size() != domain(b).size()) return domain(a).size() < domain(b).size();
+                if (chart_degree(a) != chart_degree(b)) return chart_degree(a) > chart_degree(b);
+                return a < b;
+            });
+            for (const auto& [cell, value] : fixed) {
+                tick();
+                const auto& values = domain(cell);
+                bool found = false;
+                for (const auto& v : values) { tick(); if (v == value) { found = true; break; } }
+                if (!found) throw std::invalid_argument("bounded search fixed value is outside its native domain");
+            }
+            const auto test_chart = [&](const Chart& chart, const Assignment& a, bool complete) {
+                tick(); ++work.chart_tests;
+                return chart_satisfied_work(chart, a, complete, [&](bool tuple) {
+                    tick(); if (tuple) ++work.tuple_tests; else ++work.coordinate_tests;
+                });
+            };
+            Assignment current = fixed;
+            work.peak_assigned = current.size();
+            for (const auto& chart : charts_) {
+                if (!test_chart(chart, current, false))
+                    return {FiniteSearchStatus::Unsatisfiable, std::nullopt, work};
+            }
+            variables.erase(std::remove_if(variables.begin(), variables.end(), [&](auto cell) {
+                tick(); return fixed.contains(cell);
+            }), variables.end());
+            std::vector<std::size_t> next(variables.size(), 0);
+            std::size_t position = 0;
+            while (true) {
+                tick();
+                if (position == variables.size()) {
+                    bool valid = true;
+                    for (const auto& chart : charts_)
+                        if (!test_chart(chart, current, true)) { valid = false; break; }
+                    if (valid) { tick(); return {FiniteSearchStatus::Satisfiable, std::move(current), work}; }
+                    if (!position) break;
+                    --position; current.erase(variables[position]);
+                    continue;
+                }
+                const auto cell = variables[position];
+                const auto& values = domain(cell);
+                if (next[position] == values.size()) {
+                    next[position] = 0; current.erase(cell);
+                    if (!position) break;
+                    --position; current.erase(variables[position]);
+                    continue;
+                }
+                tick(); ++work.value_trials;
+                current.insert_or_assign(cell, values[next[position]++]);
+                work.peak_assigned = std::max(work.peak_assigned, current.size());
+                bool extendable = true;
+                const auto adjacent = charts_by_cell_.find(cell);
+                if (adjacent != charts_by_cell_.end())
+                    for (const auto ci : adjacent->second)
+                        if (!test_chart(charts_[ci], current, false)) { extendable = false; break; }
+                if (extendable) ++position;
+                else current.erase(cell);
+            }
+            tick(); return {FiniteSearchStatus::Unsatisfiable, std::nullopt, work};
+        } catch (const Interrupted& e) { return {e.status, std::nullopt, work}; }
+    }
+
     // Exact deterministic subset-minimal unsatisfiable core for the complete
     // finite constraint family.  Returns nullopt when the family has a global
     // section.  The reduction performs at most one exact satisfiability check
@@ -401,12 +508,15 @@ private:
         return std::all_of(support.begin(), support.end(), [&](const auto cell) { return patch.contains(cell); });
     }
 
-    [[nodiscard]] bool chart_satisfied(const Chart& chart,
-                                       const Assignment& assignment,
-                                       bool require_complete) const {
+    template<class Visit>
+    [[nodiscard]] bool chart_satisfied_work(const Chart& chart,
+                                            const Assignment& assignment,
+                                            bool require_complete, Visit&& visit) const {
         for (const auto& tuple : chart.allowed) {
+            visit(true);
             bool matches = true;
             for (std::size_t i = 0; i < chart.support.size(); ++i) {
+                visit(false);
                 const auto it = assignment.find(chart.support[i]);
                 if (it == assignment.end()) {
                     if (require_complete) { matches = false; break; }
@@ -417,6 +527,11 @@ private:
             if (matches) return true;
         }
         return false;
+    }
+    [[nodiscard]] bool chart_satisfied(const Chart& chart,
+                                       const Assignment& assignment,
+                                       bool require_complete) const {
+        return chart_satisfied_work(chart, assignment, require_complete, [](bool) {});
     }
 
     [[nodiscard]] std::size_t chart_degree(core::CellId cell) const noexcept {

@@ -167,8 +167,13 @@ inline void write_field(Writer& writer,const numeric::CertifiedAlgebraicField& f
     writer.u64(field.minimal_polynomial().size()); for (const auto& q:field.minimal_polynomial()) writer.rational(q,admission);
     writer.u8(static_cast<std::uint8_t>(field.certificate().index()));
     std::visit([&](const auto& certificate) {
-        writer.u64(certificate.prime);
-        if constexpr (std::same_as<std::decay_t<decltype(certificate)>,numeric::EisensteinShift>) writer.integer(certificate.shift,limits);
+        if constexpr (std::same_as<std::decay_t<decltype(certificate)>,numeric::CyclotomicIrreducibility>) {
+            numeric::algebraic_detail::certify(field.minimal_polynomial(),field.certificate(),work);
+            writer.u64(certificate.order);
+        } else {
+            writer.u64(certificate.prime);
+            if constexpr (std::same_as<std::decay_t<decltype(certificate)>,numeric::EisensteinShift>) writer.integer(certificate.shift,limits);
+        }
     },field.certificate());
 }
 inline numeric::CertifiedAlgebraicField read_field(Reader& reader,Admission& admission) {
@@ -179,10 +184,11 @@ inline numeric::CertifiedAlgebraicField read_field(Reader& reader,Admission& adm
     numeric::RationalVector polynomial; polynomial.reserve(n);
     for (std::size_t i=0;i<n;++i) polynomial.push_back(reader.rational());
     require(polynomial.back()==1,"archive field polynomial must be monic without trailing zeros");
-    const auto certificate_kind=reader.u8(); require(certificate_kind<=1,"unsupported archive field certificate");
-    const auto prime=reader.u64();
-    const auto certificate=certificate_kind==0 ? numeric::AlgebraicIrreducibility(numeric::IrreducibleReduction{prime}) :
-        numeric::AlgebraicIrreducibility(numeric::EisensteinShift{prime,reader.integer()});
+    const auto certificate_kind=reader.u8(); require(certificate_kind<=2,"unsupported archive field certificate");
+    const auto parameter=reader.u64();
+    const auto certificate=certificate_kind==0 ? numeric::AlgebraicIrreducibility(numeric::IrreducibleReduction{parameter}) :
+        certificate_kind==1 ? numeric::AlgebraicIrreducibility(numeric::EisensteinShift{parameter,reader.integer()}) :
+        numeric::AlgebraicIrreducibility(numeric::CyclotomicIrreducibility{parameter});
     return numeric::CertifiedAlgebraicField::declare(polynomial,certificate,limits.field);
 }
 inline void write_root(Writer& writer,const AlgebraicSelectedEmbedding& selected,Admission& admission) {

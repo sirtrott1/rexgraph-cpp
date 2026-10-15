@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <set>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -139,11 +140,7 @@ public:
             if (middle >= lower.cols() || middle >= upper.rows()) {
                 throw std::out_of_range("route defect middle cell");
             }
-            numeric::RationalVector left(lower.rows(), numeric::Rational{0});
-            numeric::RationalVector right(upper.cols(), numeric::Rational{0});
-            for (std::size_t i = 0; i < lower.rows(); ++i) left[i] = lower.get(i, middle);
-            for (std::size_t j = 0; j < upper.cols(); ++j) right[j] = upper.get(middle, j);
-            auto contribution = numeric::outer_product(left, right);
+            auto contribution = route_outer_product(lower,upper,middle);
             out.assembled = out.assembled.add(contribution);
             out.channels.push_back(RouteDefectChannel{middle, std::move(contribution)});
         }
@@ -167,11 +164,7 @@ public:
         std::vector<numeric::ExactMatrix> routes;
         routes.reserve(lower.cols());
         for (std::size_t middle=0;middle<lower.cols();++middle) {
-            numeric::RationalVector left(lower.rows(),numeric::Rational{0});
-            numeric::RationalVector right(upper.cols(),numeric::Rational{0});
-            for (std::size_t i=0;i<lower.rows();++i) left[i]=lower.get(i,middle);
-            for (std::size_t j=0;j<upper.cols();++j) right[j]=upper.get(middle,j);
-            routes.push_back(numeric::outer_product(left,right));
+            routes.push_back(route_outer_product(lower,upper,middle));
         }
         return routes;
     }
@@ -179,13 +172,33 @@ public:
     [[nodiscard]] numeric::Rational curvature_magnitude(core::Grade upper_grade,
                                                          const std::vector<ExactMetric>& metrics) const {
         if (metrics.size()!=complex_->grade_count()) throw std::invalid_argument("curvature metric count mismatch");
-        const auto F=curvature(upper_grade).defect;
-        const auto& source_metric=metrics[upper_grade.value].materialize();
-        const auto& target_metric=metrics[upper_grade.value-2u].materialize();
-        const auto source_inverse=inverse_by_solves(source_metric);
-        const auto energy=source_inverse.multiply(F.transpose()).multiply(target_metric).multiply(F);
+        if(upper_grade.value<2 || upper_grade.value>=maps_.size())throw std::out_of_range("curvature requires grade >= 2");
+        const auto& upper=maps_[upper_grade.value];
+        const auto& lower=maps_[upper_grade.value-1u];
+        const auto& source_metric=metrics[upper_grade.value];
+        const auto& target_metric=metrics[upper_grade.value-2u];
+        const auto upper_transpose=upper.transpose(),lower_transpose=lower.transpose();
         numeric::Rational trace=0;
-        for (std::size_t i=0;i<energy.rows();++i) trace+=energy.get(i,i);
+        // tr(Ms^-1 F^T Mt F), evaluated through the two original factors and
+        // reusable metric solves. Neither F, an inverse, nor F^dagger F is built.
+        std::set<std::size_t> active;
+        for(const auto& [ij,q]:upper.entries()){(void)q;active.insert(ij.second);}
+        for(const auto i:active){
+            if(target_metric.supports_sparse_apply() && source_metric.supports_sparse_solve()){
+                const auto basis=numeric::SparseRationalVector::basis(upper.cols(),i);
+                const auto first=upper.apply_sparse(basis.view()),image=lower.apply_sparse(first.view());
+                const auto measured=target_metric.apply(image.view()),middle=lower_transpose.apply_sparse(measured.view());
+                const auto dual=upper_transpose.apply_sparse(middle.view()),solution=source_metric.solve(dual.view());
+                for(const auto& entry:solution.entries())if(entry.index==i)trace+=entry.value;
+            }else{
+                // Compatibility with a caller's explicitly declared external
+                // full-coordinate callback, which has no sparse action port.
+                numeric::RationalVector basis(upper.cols());basis[i]=1;
+                const auto measured=target_metric.apply(lower.apply(upper.apply(basis)));
+                const auto dual=upper_transpose.apply(lower_transpose.apply(measured));
+                trace+=source_metric.solve(dual)[i];
+            }
+        }
         trace.canonicalize();
         return trace;
     }
@@ -197,13 +210,22 @@ public:
         maps.reserve(complex.grade_count());
         maps.emplace_back(0,complex.grade(core::Grade{0}).cell_count());
         for (std::size_t k=1;k<complex.grade_count();++k) {
-            const auto lower_inverse=inverse_by_solves(coordinates[k-1u]);
-            maps.push_back(lower_inverse.multiply(boundary_matrix(complex,core::Grade{static_cast<std::uint16_t>(k)})).multiply(coordinates[k]));
+            const auto rhs=boundary_matrix(complex,core::Grade{static_cast<std::uint16_t>(k)}).multiply(coordinates[k]);
+            maps.push_back(solve_columns(coordinates[k-1u],rhs));
         }
         return ExactConnectionTower(complex,std::move(maps));
     }
 
 private:
+    static numeric::ExactMatrix route_outer_product(const numeric::ExactMatrix& lower,
+        const numeric::ExactMatrix& upper,std::size_t middle) {
+        std::vector<std::pair<std::size_t,numeric::Rational>> left,right;
+        for(const auto& [ij,q]:lower.entries())if(ij.second==middle)left.emplace_back(ij.first,q);
+        for(const auto& [ij,q]:upper.entries())if(ij.first==middle)right.emplace_back(ij.second,q);
+        numeric::ExactMatrix result(lower.rows(),upper.cols());
+        for(const auto& [i,a]:left)for(const auto& [j,b]:right)result.set(i,j,a*b);
+        return result;
+    }
     const core::RelationalComplex* complex_{};
     std::vector<numeric::ExactMatrix> maps_;
 };

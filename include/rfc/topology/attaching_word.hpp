@@ -115,6 +115,9 @@ inline PairwisePath apply_face_homotopy(const FundamentalGroupoidPresentation& p
     const AttachingWord* relator = nullptr;
     for (const auto& candidate : presentation.relators) if (candidate.face.index == move.face) { relator = &candidate; break; }
     if (relator == nullptr) throw std::out_of_range("unknown attaching face in homotopy move");
+    if (&relator->loop.complex() != presentation.complex || relator->face.grade != core::Grade{2}) {
+        throw std::invalid_argument("homotopy relator belongs to another source or grade");
+    }
 
     auto word = cyclic_steps(relator->loop.steps(),move.cyclic_shift);
     if (move.inverse) word = inverse_steps(word);
@@ -141,6 +144,13 @@ inline bool certify_relational_homotopy(const FundamentalGroupoidPresentation& p
                                         const PairwisePath& first,
                                         const PairwisePath& second,
                                         const std::vector<FaceHomotopyMove>& certificate) {
+    // Local cell indices have meaning only in their retained source.  This
+    // preflight also applies to the identity certificate, which has no move at
+    // which apply_face_homotopy could otherwise check the presentation owner.
+    if (presentation.complex == nullptr || &first.complex() != presentation.complex ||
+        &second.complex() != presentation.complex) {
+        throw std::invalid_argument("homotopy paths and presentation must share their source complex");
+    }
     PairwisePath current = first.reduced();
     for (const auto& move : certificate) current = apply_face_homotopy(presentation,current,move);
     const auto lhs = current.reduced();

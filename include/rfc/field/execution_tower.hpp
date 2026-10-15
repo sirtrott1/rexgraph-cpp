@@ -218,6 +218,7 @@ public:
     std::size_t harmonic_frame_integer_bits() const noexcept {return state_->frame_bits;}
     const std::vector<ExactMetric>& metrics() const & {return state_->metrics;}
     const std::vector<ExactMetric>& metrics() const && = delete;
+    std::shared_ptr<const core::RelationalComplex> source() const {return state_->source;}
     std::size_t batch_workspace_slots(core::Grade grade, std::size_t capacity) const {
         if (state_->profile != PreparedExactProfile::FiniteActions)
             throw std::invalid_argument("exact batch requires the finite action profile");

@@ -58,39 +58,58 @@ struct TemporalRoute {
     std::vector<std::size_t> contact_indices;
 };
 
+namespace detail {
+inline void validate_scheduled_contacts(std::size_t object_count,
+                                        const std::vector<ScheduledContact>& contacts) {
+    for (const auto& contact : contacts) {
+        if (contact.source >= object_count || contact.target >= object_count ||
+            contact.arrival < contact.departure) {
+            throw std::invalid_argument("invalid scheduled contact");
+        }
+    }
+}
+} // namespace detail
+
 inline TemporalRoute earliest_arrival(std::size_t object_count,
                                       const std::vector<ScheduledContact>& contacts,
                                       std::uint32_t source,
                                       std::uint32_t target,
                                       numeric::Rational start_time = numeric::Rational{0}) {
     if (source >= object_count || target >= object_count) throw std::out_of_range("temporal route object index");
-    std::vector<std::optional<numeric::Rational>> arrival(object_count);
-    std::vector<std::size_t> hops(object_count, static_cast<std::size_t>(-1));
-    std::vector<std::optional<std::size_t>> parent_contact(object_count);
-    arrival[source] = start_time; hops[source] = 0;
+    detail::validate_scheduled_contacts(object_count, contacts);
+    // A witness points to an immutable earlier witness, not a mutable vertex
+    // label.  Improving an intermediate arrival must not rewrite an already
+    // issued descendant route or leave its recorded contact count stale.
+    struct Witness { std::size_t contact; std::optional<std::size_t> previous; };
+    struct Label { numeric::Rational time; std::size_t hops; std::optional<std::size_t> witness; };
+    std::vector<Witness> witnesses;
+    std::vector<std::optional<Label>> labels(object_count);
+    labels[source] = Label{start_time, 0u, std::nullopt};
     bool changed = true;
     for (std::size_t pass = 0; pass < object_count && changed; ++pass) {
         changed = false;
         for (std::size_t i = 0; i < contacts.size(); ++i) {
             const auto& c = contacts[i];
-            if (c.source >= object_count || c.target >= object_count || c.arrival < c.departure) throw std::invalid_argument("invalid scheduled contact");
-            if (!arrival[c.source] || *arrival[c.source] > c.departure) continue;
-            if (!arrival[c.target] || c.arrival < *arrival[c.target]) {
-                arrival[c.target] = c.arrival;
-                hops[c.target] = hops[c.source] + 1u;
-                parent_contact[c.target] = i;
+            if (!labels[c.source] || labels[c.source]->time > c.departure) continue;
+            const auto hops = labels[c.source]->hops + 1u;
+            if (!labels[c.target] || c.arrival < labels[c.target]->time ||
+                (c.arrival == labels[c.target]->time && hops < labels[c.target]->hops)) {
+                const auto previous = labels[c.source]->witness;
+                witnesses.push_back(Witness{i, previous});
+                labels[c.target] = Label{c.arrival, hops, witnesses.size() - 1u};
                 changed = true;
             }
         }
     }
-    if (!arrival[target]) return {};
+    if (!labels[target]) return {};
     std::vector<std::size_t> reversed;
-    for (auto v = target; v != source;) {
-        if (!parent_contact[v]) break;
-        const auto idx = *parent_contact[v]; reversed.push_back(idx); v = contacts[idx].source;
+    for (auto witness = labels[target]->witness; witness;) {
+        const auto& step = witnesses[*witness];
+        reversed.push_back(step.contact);
+        witness = step.previous;
     }
     std::vector<std::size_t> path(reversed.rbegin(), reversed.rend());
-    return {true, *arrival[target], hops[target], std::move(path)};
+    return {true, labels[target]->time, path.size(), std::move(path)};
 }
 
 inline TemporalRoute fewest_contacts(std::size_t object_count,
@@ -99,6 +118,7 @@ inline TemporalRoute fewest_contacts(std::size_t object_count,
                                      std::uint32_t target,
                                      numeric::Rational start_time = numeric::Rational{0}) {
     if (source >= object_count || target >= object_count) throw std::out_of_range("temporal route object index");
+    detail::validate_scheduled_contacts(object_count, contacts);
     // Dynamic labels by contact count. For equal count keep earliest arrival.
     struct Label { std::size_t hops; numeric::Rational time; std::uint32_t vertex; std::vector<std::size_t> path; };
     std::vector<Label> frontier{{0u, start_time, source, {}}};
