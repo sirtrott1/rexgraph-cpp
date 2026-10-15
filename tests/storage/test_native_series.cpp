@@ -348,6 +348,17 @@ void migration_and_indexes(const std::filesystem::path& out) {
     auto a = f2_fixture::endpoint(); const auto migration = f2_fixture::source_map(a.source.signature());
     auto b = f2_fixture::evolved(a, migration); auto seg = f2_fixture::segment(a, b, migration);
     NativeTemporalSeries series(a, 111); series.append(seg); series.checkpoint(1);
+    NativeTemporalSeries owned(a,111);const auto initial=owned;
+    const auto original_segment=encode_temporal_segment(seg);
+    auto consumed=seg;owned.append(std::move(consumed));owned.checkpoint(1);
+    check(encode_native_series(owned)==encode_native_series(series),"owned append changed full declaration archive");
+    check(encode_temporal_segment(seg)==original_segment,"borrowed append changed its caller segment");
+    check(initial.last_sequence()==0 && encode_native_series(initial)==encode_native_series(NativeTemporalSeries(a,111)),
+          "owned append changed a retained initial history");
+    auto invalid=seg;invalid.base_sequence=1;invalid.target_sequence=2;
+    invalid.base_endpoint_hash^=1;const auto before_failed=encode_native_series(owned);
+    rejects([&]{owned.append(std::move(invalid));},"owned append admitted an invalid predecessor");
+    check(encode_native_series(owned)==before_failed,"failed owned append changed complete history");
     NativeTemporalSeries direct(a,111);
     direct.append_target(b,{},{{1000,20}},RelationalCodeEncoding::Automatic,migration,
                         make_temporal_declaration_update(a.declarations,b.declarations,f2_fixture::maps()));

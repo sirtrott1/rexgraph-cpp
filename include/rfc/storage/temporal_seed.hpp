@@ -18,11 +18,19 @@ inline Encoding encode(const TemporalEndpoint& endpoint, const StableSourceIndex
     using namespace temporal_codec_detail;
     temporal_endpoint_detail::validate(endpoint, source_index);
     const auto source_hash = rfcx_detail::fnv1a64(source.bytes);
-    Writer w(capacity); w.raw(magic); w.u32(1);
-    w.u32((endpoint.finite_systems.empty() ? 0u : finite_systems_flag) |
-          (endpoint.codes ? relational_codes_flag : 0u) | (endpoint.declarations ? declarations_flag : 0u));
-    w.u64(0); w.u64(0);
-    w.u64(endpoint.sequence); w.u64(source.stats.payload_hash); w.u64(source_hash); w.u64(0);
+    const auto header=[&](Writer& w) {
+        w.raw(magic); w.u32(1);
+        w.u32((endpoint.finite_systems.empty() ? 0u : finite_systems_flag) |
+              (endpoint.codes ? relational_codes_flag : 0u) | (endpoint.declarations ? declarations_flag : 0u));
+        w.u64(0); w.u64(0);
+        w.u64(endpoint.sequence); w.u64(source.stats.payload_hash); w.u64(source_hash); w.u64(0);
+    };
+    if (endpoint.declarations) {
+        auto measured=Writer::measure_only();header(measured);
+        (void)endpoint_body(measured,endpoint,source_index,source_hash);
+        capacity=std::max(capacity,measured.size());
+    }
+    Writer w(capacity);header(w);
     const auto hash = endpoint_body(w, endpoint, source_index, source_hash);
     w.patch_u64(56, hash);
     w.patch_u64(16, w.size());

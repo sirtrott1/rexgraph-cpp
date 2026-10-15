@@ -253,9 +253,47 @@ void byte_writer() {
     rejects([&]{overflow.u8(1);},"measured extent overflow accepted");
     check(overflow.size()==std::numeric_limits<std::size_t>::max(),"failed extent measurement changed position");
 }
+void integer_wire() {
+    const auto expected=[](const numeric::Integer& value) {
+        auto text=value.get_str(16);const bool negative=text.front()=='-';
+        if (negative) text.erase(text.begin());
+        if (value==0) text.clear();
+        if (text.size()%2) text.insert(text.begin(),'0');
+        const auto count=static_cast<std::uint32_t>(text.size()/2);
+        std::vector<std::byte> wire{static_cast<std::byte>(negative)};
+        for (unsigned j=0;j<4;++j) wire.push_back(static_cast<std::byte>((count>>(8u*j))&255u));
+        const auto digit=[](char c) {return c>='a' ? c-'a'+10 : c-'0';};
+        for (std::size_t j=0;j<text.size();j+=2)
+            wire.push_back(static_cast<std::byte>(16*digit(text[j])+digit(text[j+1])));
+        return wire;
+    };
+    for (std::size_t bits=0;bits<=1024;++bits) for (const int sign:{-1,1}) {
+        numeric::Integer value=bits ? numeric::Integer{1}<<bits : numeric::Integer{0};
+        if (bits%3==0 && value!=0) --value;
+        value*=sign;const auto original=value;
+        rfcx_detail::Writer wire;rfcx_detail::write_bigint(wire,value);
+        check(wire.bytes()==expected(value),"integer differs from independent hexadecimal wire");
+        check(value==original,"integer encoding changed caller value");
+        auto measured=rfcx_detail::Writer::measure_only();rfcx_detail::write_bigint(measured,value);
+        check(measured.size()==wire.size(),"integer measured extent differs");
+    }
+    for (const int sign:{-1,1}) {
+        numeric::Rational value;
+        mpz_set_si(mpq_numref(value.get_mpq_t()),14*sign);
+        mpz_set_si(mpq_denref(value.get_mpq_t()),-42);
+        rfcx_detail::Writer wire;rfcx_detail::write_rational(wire,value);
+        numeric::Rational canonical=value;canonical.canonicalize();
+        auto bytes=expected(canonical.get_num());const auto denominator=expected(canonical.get_den());
+        bytes.insert(bytes.end(),denominator.begin(),denominator.end());
+        check(wire.bytes()==bytes,"rational canonical wire differs");
+        check(mpz_cmp_si(mpq_numref(value.get_mpq_t()),14*sign)==0 &&
+              mpz_cmp_si(mpq_denref(value.get_mpq_t()),-42)==0,"rational encoding changed caller value");
+    }
+}
+
 } // namespace
 int main() {
-    try { equivalence(); historical(); archive_ownership(); identity_source(); carrier_identity(); canonical_policy(); byte_writer();
+    try { equivalence(); historical(); archive_ownership(); identity_source(); carrier_identity(); canonical_policy(); byte_writer(); integer_wire();
         std::cout << "endpoint_codec_checks=" << checks << " PASS\n";return 0;
     } catch(const std::exception& e) {std::cerr << e.what() << '\n';return 1;}
 }

@@ -217,28 +217,21 @@ private:
     std::size_t pos_{};
 };
 
+inline void write_gmp_integer(Writer& w, mpz_srcptr input) {
+    const auto count=mpz_sgn(input)==0 ? std::size_t{0} : machine::ceil_div(
+        static_cast<std::size_t>(mpz_sizeinbase(input,2)),8u);
+    if (count>std::numeric_limits<std::uint32_t>::max())
+        throw std::overflow_error("RFCX integer byte count overflow");
+    w.u8(static_cast<std::uint8_t>(mpz_sgn(input)<0 ? 1u : 0u)); w.u32(static_cast<std::uint32_t>(count));
+    if (w.is_measuring()) { (void)w.reserve(count); return; }
+    if (count) {
+        auto bytes=w.append_zeroed(count);std::size_t written{};
+        mpz_export(bytes.data(),&written,1,1,1,0,input);
+        if (written!=count) throw std::runtime_error("RFCX integer extent changed");
+    }
+}
 inline void write_bigint(Writer& w, const numeric::Integer& input) {
-    if (w.is_measuring()) {
-        const auto count=input==0 ? std::size_t{0} : machine::ceil_div(
-            static_cast<std::size_t>(mpz_sizeinbase(input.get_mpz_t(),2)),8u);
-        if (count>std::numeric_limits<std::uint32_t>::max())
-            throw std::overflow_error("RFCX integer byte count overflow");
-        w.u8(input<0 ? 1u : 0u); w.u32(static_cast<std::uint32_t>(count));
-        (void)w.reserve(count); return;
-    }
-    numeric::Integer magnitude = input < 0 ? -input : input;
-    std::size_t count = 0;
-    std::vector<std::byte> bytes;
-    if (magnitude != 0) {
-        const auto bits = static_cast<std::size_t>(mpz_sizeinbase(magnitude.get_mpz_t(), 2));
-        bytes.resize(machine::ceil_div(bits, 8u));
-        mpz_export(bytes.data(), &count, 1, 1, 1, 0, magnitude.get_mpz_t());
-        bytes.resize(count);
-    }
-    if (bytes.size() > std::numeric_limits<std::uint32_t>::max()) throw std::overflow_error("RFCX integer byte count overflow");
-    w.u8(input < 0 ? 1u : 0u);
-    w.u32(static_cast<std::uint32_t>(bytes.size()));
-    w.raw(bytes);
+    write_gmp_integer(w,input.get_mpz_t());
 }
 
 inline numeric::Integer read_bigint(Reader& r) {
@@ -254,8 +247,8 @@ inline numeric::Integer read_bigint(Reader& r) {
 
 inline void write_rational(Writer& w, numeric::Rational value) {
     value.canonicalize();
-    write_bigint(w, value.get_num());
-    write_bigint(w, value.get_den());
+    write_gmp_integer(w,mpq_numref(value.get_mpq_t()));
+    write_gmp_integer(w,mpq_denref(value.get_mpq_t()));
 }
 
 inline numeric::Rational read_rational(Reader& r) {

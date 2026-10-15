@@ -483,6 +483,15 @@ public:
         const auto view=std::span<const std::byte>(bytes);
         append_frame(view,std::move(bytes));
     }
+    // Release the consumed segment before canonical decode and replay.
+    void append(TemporalSegment&& segment) {
+        auto bytes=[&] {
+            auto owned=std::move(segment);
+            return encode_temporal_segment(owned);
+        }();
+        const auto view=std::span<const std::byte>(bytes);
+        append_frame(view,std::move(bytes));
+    }
     // Build against the owned tail, decode the canonical frame and replay it
     // before publication. A failed append retains the complete previous state.
     void append_target(const TemporalEndpoint& target,
@@ -497,7 +506,7 @@ public:
         auto segment = temporal_segment_detail::build_temporal_segment(*old.tail, target,
             std::move(correspondences), std::move(code_transports), code_encoding,
             std::move(source_migration), std::move(declaration_update), old.limits.temporal.source_declarations);
-        append(segment);
+        append(std::move(segment));
     }
     void append_encoded(std::span<const std::byte> frame) { append_frame(frame,{}); }
 private:

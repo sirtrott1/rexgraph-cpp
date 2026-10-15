@@ -525,21 +525,29 @@ inline void check_chain(const TemporalSegment &previous, const TemporalSegment &
 
 inline std::vector<std::byte> encode_temporal_segment(const TemporalSegment &segment) {
     using namespace temporal_segment_detail;
-    temporal_codec_detail::Writer w;
-    w.raw(magic);
-    w.u32(1u);
-    w.u32((has_finite_extension(segment) ? temporal_codec_detail::finite_systems_flag : 0u) |
-          (segment.codes ? (segment.codes->patch ? temporal_codec_detail::relational_code_patch_flag :
-                            temporal_codec_detail::relational_codes_flag) : 0u) |
-          (segment.declarations ? temporal_codec_detail::declarations_flag : 0u) |
-          (segment.source_migration ? temporal_codec_detail::source_migration_flag : 0u));
-    w.u64(0);
-    w.u64(0);
-    if (has_canonical_segment_order(segment)) write_body(w, segment);
-    else write_body(w, canonical_segment(segment));
-    w.patch_u64(16, w.size());
-    w.patch_u64(24, rfcx_detail::fnv1a64(std::span<const std::byte>(w.bytes()).subspan(header_size)));
-    return std::move(w).take_bytes();
+    const auto encode=[](const TemporalSegment& ordered) {
+        temporal_codec_detail::Writer w;
+        if (ordered.declarations) {
+            auto measured=temporal_codec_detail::Writer::measure_only();
+            (void)measured.reserve(header_size);write_body(measured,ordered);
+            w=temporal_codec_detail::Writer(measured.size());
+        }
+        w.raw(magic);
+        w.u32(1u);
+        w.u32((has_finite_extension(ordered) ? temporal_codec_detail::finite_systems_flag : 0u) |
+              (ordered.codes ? (ordered.codes->patch ? temporal_codec_detail::relational_code_patch_flag :
+                                temporal_codec_detail::relational_codes_flag) : 0u) |
+              (ordered.declarations ? temporal_codec_detail::declarations_flag : 0u) |
+              (ordered.source_migration ? temporal_codec_detail::source_migration_flag : 0u));
+        w.u64(0);
+        w.u64(0);
+        write_body(w,ordered);
+        w.patch_u64(16, w.size());
+        w.patch_u64(24, rfcx_detail::fnv1a64(std::span<const std::byte>(w.bytes()).subspan(header_size)));
+        return std::move(w).take_bytes();
+    };
+    if (has_canonical_segment_order(segment)) return encode(segment);
+    return encode(canonical_segment(segment));
 }
 inline TemporalSegment decode_temporal_segment(std::span<const std::byte> bytes,
                                                const TemporalReadLimits &limits = {}) {
