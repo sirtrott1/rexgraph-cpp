@@ -9,14 +9,18 @@ namespace rfc::topology {
 
 inline std::pair<std::size_t, std::size_t> pairwise_incidence_slots(const core::RelationalComplex& complex,
                                                                     std::size_t relation_index) {
-    const auto endpoints = pairwise_endpoints(complex, relation_index);
+    (void)pairwise_endpoints(complex, relation_index);
     const auto& arena = complex.grade(core::Grade{1});
     const auto [begin, end] = arena.incidence_range(relation_index);
     std::size_t tail_slot = arena.incidence_count();
     std::size_t head_slot = arena.incidence_count();
     for (std::size_t slot = begin; slot < end; ++slot) {
-        if (arena.lower_index[slot] == endpoints.tail) tail_slot = slot;
-        if (arena.lower_index[slot] == endpoints.head) head_slot = slot;
+        if (!arena.aspects.get(complex.signature().existence_aspect(),slot)) continue;
+        // A loop has two different endpoint occurrences at the same vertex.
+        // The signed roles identify the slots, not the shared lower identity.
+        const auto coefficient = complex.incidence_coefficient(core::Grade{1},slot);
+        if (coefficient < 0) tail_slot = slot;
+        if (coefficient > 0) head_slot = slot;
     }
     if (tail_slot == arena.incidence_count() || head_slot == arena.incidence_count()) {
         throw std::logic_error("pairwise endpoint incidence slot missing");

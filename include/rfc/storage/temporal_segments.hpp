@@ -190,7 +190,8 @@ inline TemporalEndpoint replay_temporal_segment(const TemporalEndpoint &base,
     return next;
 }
 
-inline TemporalSegment make_temporal_segment(const TemporalEndpoint &base, const TemporalEndpoint &target,
+namespace temporal_segment_detail {
+inline TemporalSegment build_temporal_segment(const TemporalEndpoint &base, const TemporalEndpoint &target,
                                              std::vector<TemporalCorrespondence> correspondences = {},
                                              std::vector<RelationalCodeTransport> code_transports = {},
                                              RelationalCodeEncoding code_encoding = RelationalCodeEncoding::Automatic,
@@ -319,9 +320,19 @@ inline TemporalSegment make_temporal_segment(const TemporalEndpoint &base, const
     }
     if (!temporal_codec_detail::code_state_equal(base.codes, target.codes) || !code_transports.empty())
         segment.codes = make_relational_code_update(base.codes, target.codes, std::move(code_transports), code_encoding);
-    // The builder is a validated reference path, not an unchecked serializer.
-    // This also rejects target physical realizations that cannot be rebuilt by
-    // the canonical same-signature source codec.
+    return segment;
+}
+} // namespace temporal_segment_detail
+
+inline TemporalSegment make_temporal_segment(const TemporalEndpoint &base, const TemporalEndpoint &target,
+                                             std::vector<TemporalCorrespondence> correspondences = {},
+                                             std::vector<RelationalCodeTransport> code_transports = {},
+                                             RelationalCodeEncoding code_encoding = RelationalCodeEncoding::Automatic,
+                                             std::optional<SourceDeclarationMigration> source_migration = {},
+                                             std::optional<TemporalDeclarationUpdate> declaration_update = {},
+                                             const SourceDeclarationLimits& source_limits = {}) {
+    auto segment = temporal_segment_detail::build_temporal_segment(base, target, std::move(correspondences),
+        std::move(code_transports), code_encoding, std::move(source_migration), std::move(declaration_update), source_limits);
     (void)replay_temporal_segment(base, segment, source_limits);
     return segment;
 }

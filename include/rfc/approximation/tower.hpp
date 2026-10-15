@@ -57,6 +57,8 @@ public:
             }
             case field::OperatorKind::HarmonicProjector:
                 throw std::invalid_argument("approx harmonic projector is intentionally not implicit; request exact projector then convert if desired");
+            case field::OperatorKind::HarmonicInverse: case field::OperatorKind::GradientPotential:
+                throw std::invalid_argument("harmonic inverse and potential require the declared exact profile");
             case field::OperatorKind::Dirac:
                 throw std::invalid_argument("Dirac acts on tower field; use apply_dirac");
         }

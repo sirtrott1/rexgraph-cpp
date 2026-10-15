@@ -2,6 +2,7 @@
 
 #include "rfc/storage/relational_codes.hpp"
 #include "rfc/storage/temporal_segments.hpp"
+#include "rfc/storage/native_series.hpp"
 #include <memory>
 
 namespace rfc::storage {
@@ -333,7 +334,17 @@ class RelationalCodeObservationStore {
         Guard guard(busy_);
         validate_temporal_endpoint(endpoint);
         auto index = std::make_unique<RelationalCodeObservationIndex>(std::move(selector));
-        published_ = build(endpoint, queries, std::move(index), nullptr);
+        published_ = build(std::make_shared<const TemporalEndpoint>(endpoint), queries, std::move(index), nullptr);
+    }
+    // A series pin is minted only by canonical native ownership. Arbitrary
+    // shared_ptr<const TemporalEndpoint> is deliberately not a public intake.
+    explicit RelationalCodeObservationStore(const NativeSeriesEndpoint& endpoint,
+            std::vector<RelationalCodeObservationQuery> queries,
+            Selector selector = [](auto bytes) { return rfcx_detail::fnv1a64(bytes); },
+            RelationalCodeObservationLimits limits = {}) : limits_(limits) {
+        Guard guard(busy_);validate_temporal_endpoint(endpoint.endpoint());
+        auto index=std::make_unique<RelationalCodeObservationIndex>(std::move(selector));
+        published_=build(endpoint.pin(),std::move(queries),std::move(index),nullptr);
     }
     RelationalCodeObservationStore(const RelationalCodeObservationStore &) = delete;
     RelationalCodeObservationStore &operator=(const RelationalCodeObservationStore &) = delete;
@@ -346,19 +357,21 @@ class RelationalCodeObservationStore {
     RelationalCodeObservationStats advance(const TemporalSegment &segment,
         std::optional<std::vector<RelationalCodeObservationQuery>> queries = std::nullopt) {
         Guard guard(busy_);
-        auto endpoint = replay_temporal_segment(published_->endpoint, segment);
+        auto endpoint = replay_temporal_segment(*published_->endpoint, segment);
         return publish(std::move(endpoint), queries ? *queries : published_->queries);
     }
     RelationalCodeObservationStats reconfigure(std::vector<RelationalCodeObservationQuery> queries) {
         Guard guard(busy_);
-        return publish(published_->endpoint, queries);
+        auto index=std::make_unique<RelationalCodeObservationIndex>(*published_->index);
+        auto next=build(published_->endpoint,std::move(queries),std::move(index),published_.get());
+        published_.swap(next);return published_->stats;
     }
-    std::uint64_t sequence() const { readable(); return published_->endpoint.sequence; }
-    TemporalEndpoint snapshot() const { readable(); return published_->endpoint; }
+    std::uint64_t sequence() const { readable(); return published_->endpoint->sequence; }
+    TemporalEndpoint snapshot() const { readable(); return *published_->endpoint; }
     // Immutable aliases pin ONE publication, not the mutable store. The source
     // and observation payloads are not copied and survive later publication.
     std::shared_ptr<const TemporalEndpoint> pin_snapshot() const {
-        readable(); return {published_, &published_->endpoint};
+        readable(); return published_->endpoint;
     }
     std::shared_ptr<const RelationalCodeObservation> pin_observation(RelationalCodeIdentity id) const {
         readable(); return {published_, &published_->entries.at(id).observation};
@@ -396,14 +409,14 @@ class RelationalCodeObservationStore {
     using Entry = relational_observation_detail::Entry;
     using Id = RelationalCodeIdentity;
     struct Published {
-        TemporalEndpoint endpoint;
+        std::shared_ptr<const TemporalEndpoint> endpoint;
         std::vector<RelationalCodeObservationQuery> queries;
         std::unique_ptr<RelationalCodeObservationIndex> index;
         std::map<Id, Entry> entries;
         std::map<Fact, Bytes> facts;
         std::map<Fact, std::set<Id>> reverse;
         RelationalCodeObservationStats stats;
-        Published(TemporalEndpoint e, std::vector<RelationalCodeObservationQuery> q,
+        Published(std::shared_ptr<const TemporalEndpoint> e, std::vector<RelationalCodeObservationQuery> q,
                   std::unique_ptr<RelationalCodeObservationIndex> i)
             : endpoint(std::move(e)), queries(std::move(q)), index(std::move(i)) {}
     };
@@ -421,19 +434,19 @@ class RelationalCodeObservationStore {
     RelationalCodeObservationStats publish(TemporalEndpoint endpoint,
                                             std::vector<RelationalCodeObservationQuery> queries) {
         auto index = std::make_unique<RelationalCodeObservationIndex>(*published_->index);
-        auto next = build(std::move(endpoint), std::move(queries), std::move(index), published_.get());
+        auto next = build(std::make_shared<const TemporalEndpoint>(std::move(endpoint)), std::move(queries), std::move(index), published_.get());
         published_.swap(next); // noexcept publication of complete candidate
         return published_->stats;
     }
-    std::shared_ptr<const Published> build(TemporalEndpoint endpoint,
+    std::shared_ptr<const Published> build(std::shared_ptr<const TemporalEndpoint> endpoint,
                                     std::vector<RelationalCodeObservationQuery> queries,
                                     std::unique_ptr<RelationalCodeObservationIndex> index,
                                     const Published *old) const {
         using namespace relational_observation_detail;
         validate_queries(queries, limits_);
         auto next = std::make_shared<Published>(std::move(endpoint), std::move(queries), std::move(index));
-        Context context(next->endpoint);
-        const auto selected = select(next->endpoint, next->queries, limits_);
+        Context context(*next->endpoint);
+        const auto selected = select(*next->endpoint, next->queries, limits_);
         std::set<Id> dirty;
         for (const auto &[id, descriptor] : selected) {
             auto deps = context.dependencies(descriptor);

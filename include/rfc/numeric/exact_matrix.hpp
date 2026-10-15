@@ -1,5 +1,6 @@
 #pragma once
 #include "rfc/numeric/exact.hpp"
+#include "rfc/numeric/sparse_vector.hpp"
 #include <algorithm>
 #include <cstddef>
 #include <map>
@@ -58,6 +59,19 @@ public:
     }
     [[nodiscard]] bool operator!=(const ExactMatrix& other) const noexcept { return !(*this == other); }
     [[nodiscard]] const std::map<Key, Rational>& entries() const noexcept { return entries_; }
+
+    [[nodiscard]] SparseRationalVector apply_sparse(SparseRationalView input) const {
+        if (input.size() != cols_) throw std::invalid_argument("sparse matrix input size");
+        std::vector<SparseRationalEntry> values;
+        for (const auto& [ij, coefficient] : entries_) {
+            const auto xs = input.entries();
+            const auto it = std::lower_bound(xs.begin(), xs.end(), ij.second,
+                [](const auto& entry, std::size_t index) { return entry.index < index; });
+            if (it != xs.end() && it->index == ij.second)
+                values.push_back({ij.first, coefficient * it->value});
+        }
+        return SparseRationalVector(rows_, std::move(values));
+    }
 
     [[nodiscard]] Rational get(std::size_t i, std::size_t j) const {
         check_index(i, j);

@@ -55,7 +55,7 @@ inline std::vector<std::byte> bound_code_declaration_bytes(const TemporalDeclara
         if(d.element.valid())visit(d.element);
     };
     visit(it->type);
-    const composite::CompiledLayout layout(composite::DeclarationRegistry(std::move(definitions)),it->type,state.profile);
+    const composite::CompiledLayout layout(composite::DeclarationRegistry(std::move(definitions),state.resource_limits),it->type,state.profile,state.resource_limits);
     rfcx_detail::Writer w;w.u64(state.namespace_key);w.raw(encode_declarations(layout));return w.bytes();
 }
 } // namespace rfc::storage

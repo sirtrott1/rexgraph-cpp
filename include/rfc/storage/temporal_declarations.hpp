@@ -42,6 +42,9 @@ struct TemporalDeclarationState {
     std::vector<TemporalSourceAspectLayout> source_layouts;
     std::vector<TemporalCodeDeclarationBinding> code_types;
     std::vector<TemporalSourceLayoutProgram> programs;
+    // Transient caller resource policy. It is not a semantic declaration and
+    // is not serialized; decoded owners adopt the reader's explicit policy.
+    composite::DeclarationLimits resource_limits{};
 };
 struct TemporalDeclarationUpdate {
     // A complete owning target, not a map/defect from which new directions must
@@ -62,7 +65,9 @@ template<class T> inline auto keyed(const std::vector<T>& xs) {
 inline bool owner_equal(const TemporalDeclaredValue& a, const TemporalDeclaredValue& b) {
     return a.block == b.block && a.branch == b.branch && a.cell == b.cell && a.occurrence == b.occurrence;
 }
-inline void validate_definitions(const TemporalDeclarationState& s, const composite::DeclarationLimits& limits = {}) {
+inline void validate_definitions(const TemporalDeclarationState& s, std::optional<composite::DeclarationLimits> policy = {}) {
+    const auto limits = policy.value_or(s.resource_limits);
+    limits.validate();
     require(s.namespace_key && !s.registry.definitions().empty(), "empty/unnamespaced declaration endpoint");
     const composite::PreparedLayoutRegistry registry(s.registry, limits);
     composite::validate_layout_profile(s.profile);
@@ -70,10 +75,13 @@ inline void validate_definitions(const TemporalDeclarationState& s, const compos
     for (const auto& binding : s.code_types) (void)s.registry.at(binding.type);
     std::size_t nodes = 0, bytes = machine::checked_size_mul(s.values.size(), sizeof(TemporalDeclaredValue));
     composite::declaration_detail::budget(bytes, limits.max_materialized_bytes, "declared root-value buffer budget");
+    // Reuse consecutive equal types without retaining a registry copy per type.
+    std::optional<composite::CompiledLayout> value_layout;
     for (const auto& v : s.values) {
         require(!(v.cell && v.occurrence), "declared value has multiple source owners");
-        const composite::CompiledLayout layout(registry, v.type, s.profile);
-        const auto allocation = layout.allocation(v.value);
+        if(!value_layout || value_layout->root()!=v.type)
+            value_layout.emplace(registry,v.type,s.profile);
+        const auto allocation = value_layout->allocation(v.value);
         nodes = machine::checked_size_add(nodes, allocation.value_nodes);
         bytes = machine::checked_size_add(bytes, allocation.materialized_bytes);
         composite::declaration_detail::budget(nodes, limits.max_value_nodes, "aggregate declared value work budget");
@@ -81,7 +89,9 @@ inline void validate_definitions(const TemporalDeclarationState& s, const compos
     }
 }
 inline std::pair<std::size_t,std::size_t> update_usage(const TemporalDeclarationUpdate& u,
-                                                     const composite::DeclarationLimits& limits = {}) {
+                                                     std::optional<composite::DeclarationLimits> policy = {}) {
+    const auto limits = policy.value_or(u.target ? u.target->resource_limits : composite::DeclarationLimits{});
+    limits.validate();
     std::size_t nodes=0,bytes=0;
     std::optional<composite::PreparedLayoutRegistry> registry;
     const auto allocation=[&](composite::DeclarationId type,const composite::DeclaredValue& value) {
@@ -117,10 +127,11 @@ inline std::pair<std::size_t,std::size_t> update_usage(const TemporalDeclaration
 
 namespace temporal_declaration_detail {
 inline void validate_against_source(const core::RelationalComplex& source,
-                                           const StableSourceIndex& source_index,
-                                           const std::vector<LocalBlockDefinition>& blocks,
-                                           const TemporalDeclarationState& state,
-                                           const composite::DeclarationLimits& limits = {}) {
+                                    const StableSourceIndex& source_index,
+                                    const std::vector<LocalBlockDefinition>& blocks,
+                                    const TemporalDeclarationState& state,
+                                    std::optional<composite::DeclarationLimits> policy = {}) {
+    const auto limits = policy.value_or(state.resource_limits);
     using namespace temporal_declaration_detail;
     validate_definitions(state, limits);
     std::map<std::uint64_t,const LocalBlockDefinition*> block_index;
@@ -176,14 +187,15 @@ inline void validate_against_source(const core::RelationalComplex& source,
 inline void validate_temporal_declarations(const core::RelationalComplex& source,
                                            const std::vector<LocalBlockDefinition>& blocks,
                                            const TemporalDeclarationState& state,
-                                           const composite::DeclarationLimits& limits = {}) {
+                                           std::optional<composite::DeclarationLimits> policy = {}) {
     const StableSourceIndex source_index(source);
-    temporal_declaration_detail::validate_against_source(source, source_index, blocks, state, limits);
+    temporal_declaration_detail::validate_against_source(source, source_index, blocks, state, policy);
 }
 
 inline composite::DeclaredValue materialize_declared_source_aspects(const core::RelationalComplex& source,
     const TemporalDeclarationState& state, std::uint64_t binding_key, StableOccurrenceKey occurrence,
-    const composite::DeclarationLimits& limits = {}) {
+    std::optional<composite::DeclarationLimits> policy = {}) {
+    const auto limits = policy.value_or(state.resource_limits);
     const auto bindings = temporal_declaration_detail::keyed(state.source_layouts);
     const auto it = bindings.find(binding_key);
     temporal_source_detail::require(it != bindings.end(), "unknown declared source layout");
@@ -203,7 +215,7 @@ inline TemporalSourceLayoutProgram recode_declared_program(const TemporalDeclara
     const auto a=temporal_declaration_detail::keyed(base.source_layouts);
     const auto b=temporal_declaration_detail::keyed(target.source_layouts);
     require(a.contains(old.layout) && b.contains(target_layout), "program recoding layout absent");
-    const composite::DeclarationRecoding recoding(base.registry,target.registry,maps);
+    const composite::DeclarationRecoding recoding(base.registry,target.registry,maps,target.resource_limits);
     require(recoding.target_id(a.at(old.layout)->type)==b.at(target_layout)->type,"program type correspondence mismatch");
     const auto& from=base.registry.at(a.at(old.layout)->type);
     const auto& to=target.registry.at(b.at(target_layout)->type);
@@ -230,7 +242,7 @@ inline machine::PackedBits execute_declared_source_program(const core::Relationa
     const auto& p=*programs.at(key);
     temporal_source_detail::require(layouts.contains(p.layout),"declared source program layout absent");
     const auto& l=*layouts.at(p.layout);
-    return core::SourceAspectLayoutBinding(source.signature(),composite::CompiledLayout(state.registry,l.type,state.profile),l.factors)
+    return core::SourceAspectLayoutBinding(source.signature(),composite::CompiledLayout(state.registry,l.type,state.profile,state.resource_limits),l.factors)
         .execute(source,grade,p.program,p.output);
 }
 
@@ -249,7 +261,7 @@ inline void validate_temporal_declaration_transition(const std::optional<Tempora
         if (old.declaration.id == b.declaration.id)
             require(old.declaration == b.declaration, "immutable branch declaration redefined");
     require(base->namespace_key == next.namespace_key, "declaration namespace change requires detach/attach");
-    composite::DeclarationRecoding recoding(base->registry,next.registry,update.maps);
+    composite::DeclarationRecoding recoding(base->registry,next.registry,update.maps,next.resource_limits);
     const auto old_values = keyed(base->values), next_values = keyed(next.values);
     std::set<std::uint64_t> replaced;
     for (auto key : update.replaced_values)
@@ -272,7 +284,7 @@ inline TemporalDeclarationUpdate make_temporal_declaration_update(const std::opt
                     "changed declaration DAG requires explicit correspondence");
             out.maps = composite::identity_declaration_maps(base->registry);
         }
-        const composite::DeclarationRecoding recoding(base->registry,out.target->registry,out.maps);
+        const composite::DeclarationRecoding recoding(base->registry,out.target->registry,out.maps,out.target->resource_limits);
         const auto old_values = keyed(base->values);
         for (const auto& v : out.target->values) {
             if (!old_values.contains(v.key)) continue;

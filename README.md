@@ -13,6 +13,25 @@ activity, zero values, and numerical cancellation remain distinct.
 This software is proprietary and available for use only through the author's
 personal distribution. See [LICENSE](LICENSE).
 
+## Temporal product demonstration
+
+The [temporal walkthrough](examples/temporal_dynamics/README.md) follows one
+evolving incident through native database publications, historical queries,
+signed span boundaries, exact field responses, finite attribution and tensor
+products. It includes an offline presentation, a runnable query notebook,
+independent checks of historical isolation and scoped PageRank, TextRank and
+group variation comparisons.
+
+From the directory containing `rexgraphcpp/`:
+
+```sh
+python3 rexgraphcpp/examples/temporal_dynamics/run.py --verify --package --serve
+```
+
+First compilation has visible progress. Every run preserves previous output and
+creates a new directory under `build/temporal-dynamics-demo/`. The local server
+enables exact queries against the selected native publication.
+
 ## Build and test
 
 Requirements: CMake 3.24 or later, a C++20 compiler, pkg-config, GMP/GMPXX,
@@ -158,15 +177,261 @@ masks, or ordered word callbacks. `runtime/query_mask.hpp` provides prepared mas
 intersection through the same packed executor.
 
 `inference/native_field_execution.hpp` prepares owning boundary, metric adjoint,
-and down/up/full Hodge actions on complete declared `SourceGrade` carriers. It
+and down/up/full Hodge actions on complete declared `SourceGrade` carriers.
 Its finite profile accepts named unit metrics or complete positive diagonal
 native metrics. The explicitly selected `GlobalActions` profile also accepts
-complete declared positive rational metrics, exact Green solves and harmonic
-projectors. Metric solves reuse their exact LDL factors. Harmonic frames are
+complete declared positive rational metrics, exact Green solves, harmonic
+projectors, harmonic-complement inverses and gradient potentials. Metric solves reuse their exact LDL factors. Harmonic frames are
 prepared once; Green uses sparse augmented equations and verifies its residual.
 Negative Green parameters require a nonsingular system. Dimension, fill, work
 and integer-growth admission remain explicit. These actions do not require a
 Hodge matrix, inverse matrix or eigensolve.
+
+For repeated global requests, retain the action returned by
+`PreparedNativeExactTower::prepare_action(operation, lease)`, then call
+`action.execute(field_pin, lease)` for each input. It owns the original publication,
+grade, metric and parameter, together with one augmented or Gram factorization.
+Applications use independent scratch and recheck the current admission limits and
+cancellation. An input from another publication requires a separately prepared
+action, even when carrier keys or values match. Result fields are not cached.
+At the field layer, `PreparedExactExecutionTower::prepare_action` supplies the same
+reusable solve with explicit `ExactActionLimits`. It accepts owned unit, diagonal
+or sparse positive metrics; external metric callbacks keep their one-shot API.
+The [standalone example](examples/prepared_global_actions/README.md) prepares one
+action of each kind and applies it to two retained fields. `HarmonicInverse`
+returns `L_k^# x` with zero complete harmonic component. `GradientPotential`
+returns `B_k L_k^# x` on the declared lower-grade carrier, orthogonal to the entire
+kernel of `B_k^dagger`; applying that adjoint returns the gradient component.
+Inverse and potential requests require zero `lambda`. Grade zero has no lower
+potential carrier. A vertex anchor does not replace the full gauge for branching
+relations. Field actions expose `output_grade()` and `output_size()`; native
+results retain their actual output carrier in provenance.
+
+For explicit coordinates of an owned square rational system,
+`numeric::PreparedExactSolve::prepare_selected(coordinates)` prepares reusable
+dual certificates. Applications return those coordinates in request order,
+including repeats, and check the complete operator, input and certificate
+residuals. Complete requests use the full primal solve. `apply_transpose` solves
+the algebraic transpose; it does not infer a metric adjoint. The solver indexes
+actual pivot-column support and reports exact preparation work, fill and bit
+statistics. The [selected-solve example](examples/selected_exact_solve/README.md)
+uses the original boundary of a retained complex. Native field actions keep
+their complete declared outputs and carrier ownership.
+
+`PreparedExactSolve::prepare_ordered(matrix, ordering)` accepts complete row and
+column bijections while retaining the original operator. All outputs and
+residuals use the original coordinates. The optional deterministic
+`minimum_degree_ordering` plans from numerical support; its work and storage
+are charged separately, and improvement depends on the operator. The default
+pivot rule remains unchanged. An owning `factor_receipt()` exposes the exact
+pivots and coordinate/swap signs; its bounded `determinant()` reuses those
+factors only when requested. The [ordered-solve example](examples/ordered_exact_solve/README.md)
+measures elimination storage on a retained complex's boundary Green system.
+
+For a declared rational update `A + U C V^T`, retain
+`field::PreparedWoodburySolve(A, U, C, V)` or pass an existing
+`numeric::PreparedExactSolve` as its base. It prepares the complete update
+directions once, requires invertible `C`, and checks the full updated equation
+on every `apply`. The correction preserves the order of noncommuting factors
+and stores no inverse matrix. `temporal::PreparedGreenResponseDelta` similarly
+retains both shifted operators and the complete injection/operator defects.
+`PreparedObservedGreenResponseDelta` adds reusable accession work. These finite
+matrix plans own their declared maps, recheck current limits, and support
+independent concurrent inputs; they do not infer native endpoint identity or
+transport from equal dimensions. Existing one-shot update functions use the
+same prepared implementation. See the
+[update example](examples/prepared_updates/README.md).
+
+For stored operators, `inference::PreparedNativeWoodburySolve` binds the baseline,
+directions, coupling, independent row map and full updated operator to one
+authentic publication and their declared carriers. It verifies the whole update
+identity, reuses an actual native base factor and requires complete field support
+at execution. Current policy and namespace/sequence cutoffs remain binding.
+The [native update example](examples/native_updates/README.md) uses the paper's
+head-change Gram update and retains its original source occurrences.
+
+`inference::PreparedNativeGreenResponseDelta` owns both native endpoints,
+resolving operators, source injections and complete declared ambient/source
+correspondences. Its observation plan adopts the actual Green owner and both
+Accession maps with an explicit output comparison. Rectangular maps retain all
+directions. Separate endpoint cutoffs remain binding at preparation and each
+stored-field execution. The [native Green example](examples/native_green/README.md)
+reproduces the paper's three response and four observation contributions.
+
+`inference::PreparedNativeHodgeFrames` prepares complete gradient, curl and
+harmonic frames on an actual SourceGrade carrier. It validates the full declared
+metric and chain family, retains exact image/kernel reductions and reuses Gram
+factors for complete stored-field decompositions. Empty grades remain explicit.
+Every result retains its source and basis owners with current bounds and temporal
+cutoffs. The [native frame example](examples/native_frames/README.md) reconstructs
+a square field before and after attachment and checks a grade-three tower.
+
+`inference::PreparedNativeSelectedObservation` adopts an actual native solve
+owner and a complete declared Accession selector. It returns original field
+coordinates in requested order, including repetitions, on the declared output
+carrier. Native bases also accept explicit full row/column ordering words through
+`PreparedNativeWoodburySolve::prepare_base_ordered`. Ordering changes numerical
+execution coordinates while source identities and attaching order remain intact.
+Current bounds and explicit temporal cutoffs apply even to empty readouts.
+See the [native observation example](examples/native_observations/README.md).
+
+`inference::PreparedNativeLinearObservation` uses that same native base with
+arbitrary complete rational Accession rows. It returns `S solve(A, b)` on the
+actual declared output carrier, retaining zero and repeated rows. Exact equal
+coefficient rows share transpose certificates when their count is below the
+input dimension; larger requests use the original primal solve. Proportional
+rows remain distinct. Complete maps, current resources and endpoint cutoffs
+remain binding. See the
+[linear observation example](examples/native_linear_observations/README.md).
+
+`inference::PreparedNativeMetricNovelty` compares complete stored Fields on two
+actual SourceGrade endpoints through a declared injective correspondence and
+positive new Metric Tensor. A prepared Gram solve separates change within the
+old image from its metric complement. Ordered declared cause Fields can return
+the full pairing tensor, including repetition, cancellation and cross terms;
+their sum must equal the innovation. Rank loss, invalid metrics, incomplete
+support and foreign or later publications reject explicitly. Both preparation
+and current endpoint cutoffs remain binding. The
+[metric novelty example](examples/native_metric_novelty/README.md) reproduces the
+paper's rectangular split and path-change pairings without assembling an
+inverse or projector. Relative novelty does not establish physical birth.
+
+`inference::PreparedNativeTensorProduct` owns binary tensor-product sources with
+declared external types, ordered factor identities and complete boundary
+occurrences. Exact tensor chain maps check every factor direction and act lazily
+on supported product fields. Results retain both actual source owners, full maps
+and input history under explicit cutoffs. See the
+[native tensor product example](examples/native_tensor_product/README.md).
+
+`PreparedNativeGluing` retains the existing atlas pushout and its complete
+three-source interface square. It supports exact scalar section gluing and
+boundary actions with owning inputs and explicit cutoffs.
+`PreparedNativeGluingMorphism` checks complete agreeing source maps and prepares
+their unique map from the pushout. See the
+[native gluing example](examples/native_gluing/README.md).
+
+Prepared native relative pairs own the actual ambient source and full
+boundary-closed selections. Exact quotient actions, cycle boundary witnesses
+and complete pair maps retain original occurrences and temporal ownership.
+See the [native relative example](examples/native_relative/README.md).
+
+Prepared native cylinders own the original source and canonical interval as a
+declared lazy tensor product. Exact endpoint, prism and boundary actions retain
+full occurrence support; signed-prism witnesses check `dH + Hd = finish - start`.
+Complete strict factor maps induce owned cylinder chain maps with all four
+native cutoffs checked. See the [native cylinder example](examples/native_cylinder/README.md).
+
+Owned native coverings retain complete cell and occurrence projections, including
+inactive flags, and check both local incidence stars. Exact chain pushforward and
+transfer remain separate from scalar-section pullback and descent. Original flag
+walks have owning lifts and fiber permutations; full deck maps and declared
+pullback squares retain all endpoint witnesses and universal source maps.
+See the [native covering example](examples/native_covering/README.md).
+
+`PreparedNativeRelationalHomotopy` certifies a supplied cylinder carrier and a
+complete strict morphism into an actual native target. Product types, retained
+cell/occurrence bijections and both full endpoint restrictions are checked before
+deriving `dK + Kd = second - first`. Results retain the structural map, original
+inputs and four independent native cutoffs. See the
+[relational homotopy example](examples/native_relational_homotopy/README.md).
+
+`PreparedNativeHomotopyComposition` composes a declared homotopy with full strict
+source maps before and after it. It checks the supplied domain cylinder, complete
+type interpretations and all original occurrence maps, then derives the composed
+endpoints and exact signed-prism identity. Results retain the original homotopy
+and all eight native publication roles with independent cutoffs. See the
+[homotopy composition example](examples/native_homotopy_composition/README.md).
+
+`PreparedNativeHomotopySequence` retains repeated compositions as an immutable
+ordered sequence with every intermediate cylinder, map and native publication.
+Complete cumulative cell and occurrence certificates check association against
+the root homotopy; equal outputs do not merge operation histories. Every retained
+cutoff and native execution budget remains applicable. See the
+[repeated composition example](examples/native_homotopy_sequence/README.md).
+
+`PreparedNativeCoveringHomotopy` lifts a supplied cylinder through an owning
+strict covering from an explicit initial endpoint and base comparison map.
+It checks every retained incidence route and rejects shared-cell or occurrence
+conflicts before deriving the lifted signed-prism action. Results own the full
+lift, original inputs and six independent native publication cutoffs. See the
+[covering homotopy example](examples/native_covering_homotopy/README.md).
+
+Declared covering base changes certify both supplied lifts on every cell and
+original flag, retaining three universal mediators and sixteen independent
+publication cutoffs. Exact signed-prism witnesses also retain projection
+residuals. See the [base-change example](examples/native_covering_homotopy_base_change/README.md).
+
+`inference::PreparedNativeProductAssociator` checks the complete correspondence
+between the two parenthesizations of three declared factors. Nested identities,
+unused type pairs, ordered original flags and separate Koszul signs remain
+retained. Exact field reassociation has owning round-trip and chain-naturality
+witnesses, with three independent temporal cutoffs. See the
+[product associator example](examples/native_product_associator/README.md).
+
+`OwnedProductPentagon` retains all five parenthesizations of four finite strict
+rational factors, complete type bijections and ordered original occurrence
+fibers. Its owning witnesses check both routes, all five boundary comparisons,
+and explicit reverse edges without flattening carriers or dropping zero support.
+`PreparedNativeProductPentagon` binds four actual publications and independent
+cutoffs; derived actions retain their input and edge history. See the
+[product pentagon example](examples/native_product_pentagon/README.md).
+
+`PreparedNativeProductInterchange` prepares distinct owned AB/BA products from
+two native sources and an additional complete graded-interchange declaration.
+Its exact rational swap includes `(-1)^(pq)`, retains both original boundary
+words with an explicit factor-block permutation, and verifies round trip and
+boundary naturality. The source cutoffs remain in the original A/B roles for
+both orders. See the
+[product interchange example](examples/native_product_interchange/README.md).
+
+`PreparedNativeProductHexagon` retains twelve actual nested carriers and both
+three-factor hexagons. Complete declared type maps cover unused directions;
+inner swaps retain canonical interchange receipts, and block swaps preserve
+the nested product. Owning witnesses keep both routes, their original flags,
+reverse actions and exact boundary comparisons. All permutations retain the
+original three source cutoffs. See the
+[product hexagon example](examples/native_product_hexagon/README.md).
+
+`PreparedNativeProductBraid` adopts that same owning hexagon to certify the
+three-factor Yang–Baxter relation. Both adjacent-swap routes retain their
+reassociations, original flags, complete type maps and exact boundary witnesses.
+Canonical native fields keep every primitive input link and the original A/B/C
+cutoffs. Work admission includes the numeric proof and both native routes. See
+the [product braid example](examples/native_product_braid/README.md).
+
+`PreparedNativeProductChainMap` lifts three complete rational factor chain maps
+between actual owning product hexagons. It retains declared zero directions,
+each intermediate contribution, and exact boundary and signed coherence
+comparisons. Its six endpoint cutoffs stay independent. Linear maps do not
+implicitly transport types or occurrence fibers. See the
+[three-factor chain map example](examples/native_product_chain_map/README.md).
+
+`PreparedNativeProductMapComposition` composes those maps through their actual
+owning intermediate product. Factor contributions, supported-zero cancellation,
+direct and staged tensor histories, and all nine endpoint roles remain retained.
+Identity maps include every declared grade. The second native stage points to
+its actual first-stage receipt. See the
+[map composition example](examples/native_product_map_composition/README.md).
+
+`PreparedNativeProductMapAssociativity` retains both parenthesizations of three
+declared chain maps, complete triple paths and all twelve original endpoint
+roles. `continue_from` adopts the actual two-map receipt while preserving its
+origin, cutoffs and inherited work and integer limits. See the
+[three-map example](examples/native_product_map_associativity/README.md).
+
+`PreparedNativeExactTower::execute_batch` evaluates ordered stored fields with
+an exclusive workspace from `tower().make_batch_workspace(grade, capacity)`.
+The finite profile reuses rational buffers for unit and diagonal metric actions.
+`PreparedNativeMetricLayer::forward_batch` uses that same workspace and retains
+the original ordered channel gains and bias. Results own their field pins and
+complete sample values. Scratch capacity is fixed; native work and exact integer
+growth remain subject to the selected execution and accession limits.
+
+`IntegerRelationalNetwork::forward_batch` evaluates contiguous sample columns
+with an explicit `IntegerNetworkWorkspace`. Scratch capacity is fixed at
+construction and reused across layers. `LatticeBoundaryOperator` provides
+checked boundary and transpose actions into distinct batch buffers.
+
 `learning/native_metric_layer.hpp` retains original ordered finite channels and
 native gain/bias fields and returns prospective values. Its original finite
 channels remain the supported model profile; empty grades reject explicitly.
@@ -226,6 +491,25 @@ native history. Event, knowledge, label, publication and fitted-parameter cutoff
 are checked separately; evaluation labels cannot update parameters. Resume
 replays every exact update and checks the complete ordered history. This profile
 uses no random state or momentum and does not assert predictions as source facts.
+`parameter_knowledge_time()` returns the current fitted parameter knowledge time.
+
+`NativeExactTrainingContract::metadata_capacity` selects the checkpoint byte
+carrier size, from 8 through 65536 bytes, with a default of 4096. The complete
+sample declaration and each update must fit that capacity. Resume requires the
+same capacity and validates all declared samples, including later observations.
+
+Use `make_training_workspace(sample_capacity)` with `advance_prepared` to cache
+fixed channel metric pairings on a finite unit/diagonal source. The exclusive
+workspace preserves every original parameter and checks availability before
+reuse. `resume_prepared` replays and validates the same complete native history.
+Cache slots, preparation work and coefficient growth remain subject to execution
+bounds. The direct `advance` and `resume` methods remain available.
+
+`learning/integer_perceptron.hpp` provides sparse signed integer classification.
+Construct `ExactIntegerPerceptron(feature_count)` for zero parameters, or
+`ExactIntegerPerceptron(weights, bias)` to restore explicit int64 parameters.
+`score`, `predict` and `train_epoch` use checked integer arithmetic. Prediction
+maps zero to +1; training updates nonpositive signed margins in sample order.
 
 `field/exact_dirac.hpp` provides an explicit rational-complex Cayley action with
 separate full real and imaginary towers. `numeric/rational_function.hpp` supplies
@@ -235,12 +519,69 @@ the caller's declarations. `geometry/chain_homotopy.hpp` owns explicit chain
 homotopy certificates. A linear certificate does not supply an undeclared
 structural cylinder morphism or a universal homotopy solver.
 
+`numeric/rational_phase.hpp` supplies exact unit phases over `Q(i)` and finite
+cyclic-group actions. `geometry/rational_rotation.hpp` gives coordinate-axis
+rotations and rational unit-sphere charts. These use declared coordinates without
+angles or trigonometric evaluation. `algebra/polygon.hpp` constructs an oriented
+boundary circle, filled disk, or sphere from two oppositely attached disks;
+vertex count specifies retained cells, not geometric circumference.
+`topology/cyclic_attachment.hpp` owns a one-vertex grade-0..2 presentation and
+its ordered Laurent-polynomial Fox contributions. Explicit common rational
+transport produces owning block boundaries and their complete curvature.
+Homology requires a flat specialization. This profile preserves the original
+attachments and does not classify arbitrary knots.
+
+`topology/attaching_transport.hpp` extends attachment transport to distinct,
+possibly noncommuting generator maps. Its named common-coordinate constructor
+owns the full source, declared maps, native stalk/fiber realization, ordered
+occurrence contributions and complete boundary defect. Chronological column
+steps multiply on the left. Local routes remain visible before cancellation;
+flat attachments can retain nontrivial generator holonomy. The cyclic profile
+uses the same ordered matrix walk.
+
+`numeric/algebraic_field.hpp` provides exact power-basis arithmetic over a
+declared rational algebraic field with a checked irreducibility certificate.
+`numeric/algebraic_phase.hpp` validates a declared field involution and norm-one
+units. A trace form requires the usual positivity check before metric use.
+`geometry/quadratic_embedding.hpp` selects a quadratic root by an exact real
+interval or complex half-plane; radical coordinates stay exact.
+`topology/algebraic_attachment.hpp` retains both the formal Laurent data and its
+algebraic specialization, using the existing native stalk/fiber execution through
+the faithful rational carrier. Rational and algebraic homology dimensions remain
+distinct. The [algebraic phase example](examples/algebraic_phase_fields/README.md)
+shows an exceptional trefoil phase and a higher-degree regular action.
+
+`temporal/phase_history.hpp` owns rational or algebraic phase operations on a
+declared source/cell carrier. Prefixes retain only the requested operations;
+prospective edits replay into a new history. `topology/cyclic_cover.hpp` supplies
+an explicitly branched infinite cover of a retained polygon. Its integer path
+lift, rather than its phase endpoint, determines winding.
+`geometry/panel_assembly.hpp` declares exact panel planes and crease frames;
+`temporal/fold_history.hpp` preserves shared vertices through piecewise rigid
+folds and replays downstream frames after an edit. Both histories use the existing
+ordered word defects and complete finite factor attribution. See the
+[phase and fold example](examples/phase_fold_histories/README.md). These are logical
+operation histories and exact crease kinematics; they do not assign event times
+or establish material contact and collision feasibility.
+
+`storage/phase_fold_codec.hpp` saves these original words as canonical RFCXW
+archives, retaining initial data, inactive operations, cyclic lifts, and separate
+prospective edits. `storage/phase_fold_durable.hpp` publishes complete revisions
+through the existing Linux native store. Prefix observations exclude future steps
+and proposals; restored owners are independent. See the
+[phase and fold storage example](examples/phase_fold_storage/README.md).
+
 `storage/native_series_prefix.hpp` captures an owning history through one explicit
 publication cutoff. `temporal/chronological_prefix.hpp` evaluates only the declared
 forward steps. `models/native_temporal_context.hpp` requires per-source namespace
 cutoffs alongside host authorization and rejects newer publications before access.
 Publication order is not event time; callers must declare when inputs, labels and
 fitted parameters became available. These views preserve the complete source history.
+
+`NativeTemporalSeries::append_target(endpoint, correspondences)` builds a transition
+against the owned tail and checks its canonical frame and reconstructed endpoint
+before publication. `append` accepts a `TemporalSegment`; `append_encoded` accepts
+canonical frame bytes.
 
 The [engine consumer](examples/engine_consumer/README.md) demonstrates a separate
 application adapter. The [database preview](examples/database_preview/README.md)
@@ -286,6 +627,39 @@ and reusable scratch are available.
 The mathematical paper defines the semantics. New implementations must preserve
 retained identities, declared carriers, exact values, and ordered history.
 
+The [algebraic stalk consumer](examples/algebraic_modules/README.md) demonstrates
+exact real-root certificates and owned field/module comparisons. Complete
+algebraic occurrence blocks use the native rational fiber and prepared-field
+engine, with explicit flat or deformed chain contracts.
+
+The [cellular attachment consumer](examples/cellular_attachments/README.md) uses
+distinct vertex stalks, ordered face charts and complete higher incidence maps.
+It retains full loop curvature separately from chart-visible boundary defects,
+validates every adjacent chain law, and records owned path and face-move receipts.
+
+The [complex root consumer](examples/complex_root_certificates/README.md) selects
+nonreal roots with finite rational contraction certificates and retains nested
+observation enclosures. Native algebraic values remain exact; selected root
+agreement, conjugate observations and field involutions are separate declarations.
+
+The [algebraic storage consumer](examples/algebraic_storage/README.md) saves exact
+coefficient domains, selected embeddings, stalks, complete fiber maps and typed
+values in bounded canonical archives. Reopening creates fresh owners and rechecks
+certificates and metric positivity. Explicit carrier comparisons and reconstruction
+maps retain redundant physical directions. A Linux adapter stores ordered archive
+revisions through the existing durable native history, with selected sequence reads.
+
+The [algebraic graph consumer](examples/algebraic_graph/README.md) persists explicit
+field and carrier comparisons between archives. Named references retain shared
+owners without merging independently declared equal fields or stalks. Selected-root,
+involution, complete measurement and reconstruction checks remain separate.
+
+The [algebraic metric consumer](examples/algebraic_metrics/README.md) certifies
+compatible real and Hermitian metrics on the full native stalk carriers. Exact
+LDL factors serve reusable solves; algebraic duals, coordinate transposes and
+metric adjoints stay separate. Complete retained fiber systems provide boundary,
+coboundary and Hodge actions with independently checked positive pairings.
+
 ## Repository contents
 
 Git tracks source, tests, compatibility fixtures, build configuration, and these
@@ -313,3 +687,19 @@ role predicates, and exact grouped aggregates retaining source membership.
 publications using a declared participant correspondence with both exact cutoffs.
 Equal keys across namespaces never infer identity. Aggregate requests specify
 occurrence or unique assertion multiplicity; unsupported numeric values stay absent.
+
+Exact algebraic archives can be queried through owning record pins and complete
+coefficient tensor windows. See [the algebraic database consumer](examples/algebraic_database/README.md)
+for selected history windows and a cached native C++ notebook example.
+
+The [durable graph consumer](examples/graph_history/README.md) publishes complete
+owner graphs with an explicit native source anchor and source/archive bindings.
+Selected prefixes exclude later revisions. Shared references, independent owners,
+and complete comparison receipts survive the qualified Linux store's grouped
+publication, exact retries, and recovery.
+
+The [graph database consumer](examples/graph_database/README.md) queries actual
+archive owners at a selected native revision. Full grade tensors bind one vector
+to every original cell stalk and contract the retained occurrence maps through
+the canonical boundary action. Reversible tensor windows retain their original
+cell coordinates, graph associations and endpoint pins.

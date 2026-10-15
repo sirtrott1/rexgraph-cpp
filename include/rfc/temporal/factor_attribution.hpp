@@ -12,18 +12,26 @@ struct OrderedFactorInteraction {
     numeric::ExactMatrix contribution;
 };
 
-inline numeric::ExactMatrix ordered_product(const std::vector<numeric::ExactMatrix>& factors) {
+enum class FactorOrder : unsigned char { AppliedFirst, WrittenProduct };
+
+inline numeric::ExactMatrix ordered_product(const std::vector<numeric::ExactMatrix>& factors,
+                                           FactorOrder order = FactorOrder::AppliedFirst) {
     if(factors.empty()) throw std::invalid_argument("ordered product requires at least one factor");
+    if(order != FactorOrder::AppliedFirst && order != FactorOrder::WrittenProduct)
+        throw std::invalid_argument("unknown factor order");
     numeric::ExactMatrix result=factors.front();
-    for(std::size_t i=1;i<factors.size();++i) result=factors[i].multiply(result);
+    for(std::size_t i=1;i<factors.size();++i)
+        result=order == FactorOrder::AppliedFirst ? factors[i].multiply(result) : result.multiply(factors[i]);
     return result;
 }
 
-// Exact finite product attribution. Position 0 is the rightmost/applied-first
-// factor, matching operation-word convention O_m ... O_1.
+// Exact finite product attribution. AppliedFirst puts position 0 on the right,
+// matching chronological operation words O_m ... O_1. WrittenProduct retains
+// the displayed left-to-right product O_1 ... O_m.
 inline std::vector<OrderedFactorInteraction> finite_ordered_factor_attribution(
     const std::vector<numeric::ExactMatrix>& old_factors,
-    const std::vector<numeric::ExactMatrix>& new_factors) {
+    const std::vector<numeric::ExactMatrix>& new_factors,
+    FactorOrder order = FactorOrder::AppliedFirst) {
     if(old_factors.empty() || old_factors.size()!=new_factors.size()) {
         throw std::invalid_argument("finite factor attribution size mismatch");
     }
@@ -49,7 +57,7 @@ inline std::vector<OrderedFactorInteraction> finite_ordered_factor_attribution(
             if((mask&(std::uint64_t{1}<<i))!=0){ selected.push_back(delta[i]); positions.push_back(i); }
             else selected.push_back(old_factors[i]);
         }
-        out.push_back({std::move(positions),ordered_product(selected)});
+        out.push_back({std::move(positions),ordered_product(selected,order)});
     }
     return out;
 }

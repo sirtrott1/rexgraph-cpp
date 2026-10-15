@@ -22,6 +22,17 @@ NativeAccessionRequest aspect(std::uint64_t occurrence=10000) {
 }
 void basic(const std::filesystem::path& out) {
     auto e=endpoint();NativeAccessionDirectory d(e,800,queries(),[](auto){return 0;});
+    NativeTemporalSeries history(e,800);const auto actual=history.tail();
+    NativeAccessionDirectory adopted(actual,queries());
+    check(adopted.pin_snapshot()==actual.pin(),"directory copied a canonical immutable endpoint");
+    RelationalCodeObservationStore retained(actual,queries());
+    check(retained.pin_snapshot()==actual.pin(),"observation store copied a canonical immutable endpoint");
+    retained.reconfigure(queries());
+    check(retained.pin_snapshot()==actual.pin(),"reconfiguration replaced unchanged mathematical ownership");
+    e.sequence=99;
+    check(adopted.sequence()==actual.sequence(),"host mutation changed adopted publication");
+    e.sequence=actual.sequence();
+
     const auto chain=d.intern(NativeAccessionRequest::chain(101,core::Grade{1}));
     const auto cochain=d.intern(NativeAccessionRequest::cochain(102,core::Grade{1}));
     const auto x=d.resolve(chain),f=d.resolve(cochain);

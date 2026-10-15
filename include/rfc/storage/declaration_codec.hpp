@@ -57,16 +57,15 @@ inline void put_magnitude(machine::BitWriter& out, const numeric::Integer& x) {
     std::vector<unsigned char> bytes(n); std::size_t written = 0;
     mpz_export(bytes.data(), &written, -1, 1, 0, 0, x.get_mpz_t());
     if (written != n) throw std::logic_error("integer layout/export disagreement");
-    for (const auto b : bytes) out.put(b, 8);
+    out.put_octets(std::as_bytes(std::span(bytes)));
 }
 inline numeric::Integer get_magnitude(machine::BitReader& in, DecodeBudget& use) {
     const auto n = get_size(in);
     budget(n, machine::ceil_div(use.limits.max_integer_bits, 8), "integer magnitude byte budget");
     require(n <= in.remaining() / 8, "truncated integer magnitude");
     use.allocate<unsigned char>(n);
-    std::vector<unsigned char> bytes(n);
-    for (auto& b : bytes) b = static_cast<unsigned char>(in.get(8));
-    require(n == 0 || bytes.back() != 0, "nonminimal integer magnitude");
+    const auto bytes = in.get_octets(n);
+    require(n == 0 || bytes.back() != std::byte{0}, "nonminimal integer magnitude");
     numeric::Integer value = 0;
     if (n) mpz_import(value.get_mpz_t(), n, -1, 1, 0, 0, bytes.data());
     budget(composite::declaration_detail::integer_bits(value), use.limits.max_integer_bits, "integer bit budget");
@@ -218,12 +217,24 @@ inline machine::EncodedBits encode_declared_bits(const composite::CompiledLayout
     declaration_codec_detail::put_value(out, layout, layout.root(), value);
     return std::move(out).finish();
 }
+// Reuse an owning layout while tightening only this payload's remaining
+// value-node/materialization allowances. Schema, profile and scalar limits stay
+// bound to the same immutable compilation; no subsequent allocation is unguarded.
+inline composite::DeclaredValue decode_declared_bits(const composite::CompiledLayout& layout,
+    std::span<const std::byte> bytes,std::size_t bits,std::size_t value_nodes,
+    std::size_t materialized_bytes) {
+    auto policy=layout.limits();
+    policy.max_value_nodes=std::min(policy.max_value_nodes,value_nodes);
+    policy.max_materialized_bytes=std::min(policy.max_materialized_bytes,materialized_bytes);
+    machine::BitReader in(bytes,bits,policy.max_encoded_bytes);
+    declaration_codec_detail::DecodeBudget use{policy};
+    auto value=declaration_codec_detail::get_value(in,layout,layout.root(),use);
+    in.finish();layout.validate(value);return value;
+}
 inline composite::DeclaredValue decode_declared_bits(const composite::CompiledLayout& layout,
                                                       std::span<const std::byte> bytes, std::size_t bits) {
-    machine::BitReader in(bytes, bits, layout.limits().max_encoded_bytes);
-    declaration_codec_detail::DecodeBudget use{layout.limits()};
-    auto value = declaration_codec_detail::get_value(in, layout, layout.root(), use);
-    in.finish(); layout.validate(value); return value;
+    return decode_declared_bits(layout,bytes,bits,layout.limits().max_value_nodes,
+        layout.limits().max_materialized_bytes);
 }
 inline composite::DeclaredValue decode_declared_bits(const composite::CompiledLayout& layout,
                                                       const machine::EncodedBits& bits) {

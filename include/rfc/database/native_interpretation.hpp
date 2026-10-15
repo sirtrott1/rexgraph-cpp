@@ -133,7 +133,7 @@ inline storage::TemporalEndpoint build_endpoint(const CompiledInterpretation& pl
     std::sort(subjects.begin(),subjects.end());for(auto s:subjects)builder.declare_witness_identity(s);
     std::vector<const ExternalAssertion*> assertions;for(const auto& a:input.assertions)assertions.push_back(&a);
     std::sort(assertions.begin(),assertions.end(),[&](const auto* a,const auto* b){return index.assertions.at(a->origin)<index.assertions.at(b->origin);});
-    storage::TemporalDeclarationState state;state.namespace_key=plan.schema.binding_namespace;state.registry=plan.registry;
+    storage::TemporalDeclarationState state;state.namespace_key=plan.schema.binding_namespace;state.registry=plan.registry;state.resource_limits=limits.declarations;
     for(const auto* a:assertions) {
         const auto key=index.assertions.at(a->origin);
         std::vector<core::BoundaryOccurrenceInput> incidences;std::vector<DeclaredValue> states,orders;

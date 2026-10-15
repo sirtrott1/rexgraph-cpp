@@ -24,6 +24,17 @@ public:
             [](auto bytes){return rfcx_detail::fnv1a64(bytes);},observation_limits);
         auto next=build(*store,{});store_=std::move(store);published_=std::move(next);
     }
+    explicit NativeAccessionDirectory(const NativeSeriesEndpoint& endpoint,
+        std::vector<RelationalCodeObservationQuery> queries={},
+        Selector selector=[](auto bytes){return rfcx_detail::fnv1a64(bytes);},
+        NativeAccessionLimits limits={},RelationalCodeObservationLimits observation_limits={})
+        :namespace_(endpoint.source_namespace()),selector_(std::move(selector)),limits_(limits) {
+        native_accession_detail::require(static_cast<bool>(selector_),"empty accession bucket selector");
+        Guard guard(busy_);
+        auto store=std::make_unique<RelationalCodeObservationStore>(endpoint,std::move(queries),
+            [](auto bytes){return rfcx_detail::fnv1a64(bytes);},observation_limits);
+        auto next=build(*store,{});store_=std::move(store);published_=std::move(next);
+    }
     NativeAccessionDirectory(const NativeAccessionDirectory&)=delete;
     NativeAccessionDirectory& operator=(const NativeAccessionDirectory&)=delete;
     NativeAccessionDirectory(NativeAccessionDirectory&&)=delete;

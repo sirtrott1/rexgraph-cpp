@@ -441,6 +441,89 @@ void moments_words_and_topology() {
     check(product.boundary_apply_lazy(first).empty(),"replayed-factor product violates graded chain identity");
 }
 
+bool positive_by_minors(const M& form) {
+    if (form.rows() != form.cols() || form != form.transpose()) return false;
+    for (std::size_t n = 1; n <= form.rows(); ++n) {
+        M principal(n,n);
+        for (const auto& [key,value] : form.entries())
+            if (key.first < n && key.second < n) principal.set(key.first,key.second,value);
+        if (principal.determinant() <= 0) return false;
+    }
+    return true;
+}
+void metric_certification() {
+    const auto first = checks;
+    const auto source = triangle(false);
+    const auto endpoint_for = [&](const M& form) {
+        TemporalEndpoint endpoint(source);
+        endpoint.carriers = {{700,TemporalCarrierKind::Explicit,{}, {},701,
+                              numeric::IndexDomain::linear(form.rows())}};
+        endpoint.tensors = {map_tensor(702,TemporalTensorRole::Metric,700,700,form)};
+        return endpoint;
+    };
+    const auto verify = [&](const M& form) {
+        const bool expected = positive_by_minors(form);
+        bool reference = true;
+        try { (void)field::ExactMetric(form); } catch (const std::invalid_argument&) { reference = false; }
+        auto endpoint = endpoint_for(form);
+        const auto original = endpoint.tensors[0].tensor;
+        bool accepted = true;
+        try { validate_temporal_endpoint(endpoint); } catch (const std::invalid_argument&) { accepted = false; }
+        check(accepted == expected, "stored metric certification disagrees with exact leading minors");
+        check(accepted == reference, "stored metric certification differs from the general exact certificate");
+        check(temporal_endpoint_detail::tensor_equal(original,endpoint.tensors[0].tensor), "metric certification changed support or values");
+        if (accepted) {
+            const auto bytes = encode_temporal_endpoint(endpoint);
+            const auto restored = decode_temporal_endpoint(source,bytes);
+            check(encode_temporal_endpoint(restored) == bytes, "metric certification changed endpoint roundtrip");
+        }
+    };
+    for (const auto& form : std::vector<M>{M{0,0},M{2,3},M::diagonal({R{1,3}}),M::diagonal({R{0}}),
+            M::diagonal({R{-1,3}}),M::diagonal({R{2,3},R{5,7},R{11,13}}),
+            M::diagonal({R{2,3},R{0},R{11,13}}),M::diagonal({R{2,3},R{-5,7},R{11,13}}),
+            M::from_rows({{3,2},{2,3}}),M::from_rows({{1,1},{1,1}}),M::from_rows({{1,2},{2,1}}),
+            M::from_rows({{2,1},{0,2}}),M::from_rows({{0,1},{1,2}})}) verify(form);
+    numeric::Integer huge; mpz_ui_pow_ui(huge.get_mpz_t(),2,521);
+    verify(M::diagonal({R{huge},R{1,huge},R{huge,huge+1}}));
+    auto partial = endpoint_for(M::diagonal({R{2,3},R{5,7},R{11,13}}));
+    auto& tensor = partial.tensors[0].tensor;
+    tensor = {tensor.domain(),numeric::StructuralSupport::sparse(9,{0,4,8}),tensor.values()};
+    validate_temporal_endpoint(partial);
+    check(partial.tensors[0].tensor.state(0) == R{2,3} && !partial.tensors[0].tensor.state(1),
+          "metric certificate completed absent off-diagonal support");
+    const auto bytes = encode_temporal_endpoint(partial);
+    check(encode_temporal_endpoint(decode_temporal_endpoint(source,bytes)) == bytes, "partial metric support roundtrip changed");
+    auto foreign = partial;
+    foreign.carriers.push_back({703,TemporalCarrierKind::Explicit,{}, {},704,numeric::IndexDomain::linear(3)});
+    foreign.tensors[0].input = 703;
+    rejects([&] { validate_temporal_endpoint(foreign); }, "equal-sized metric carriers identified");
+    foreign = partial; foreign.tensors[0].input.reset();
+    rejects([&] { validate_temporal_endpoint(foreign); }, "missing metric carrier accepted");
+    foreign = partial; foreign.tensors[0].owner.kind = TemporalOwnerKind::Cell;
+    foreign.tensors[0].owner.cell = {core::Grade{0},123456};
+    rejects([&] { validate_temporal_endpoint(foreign); }, "metric certificate accepted an absent owner");
+    std::mt19937 random(874);
+    for (std::size_t trial = 0; trial < 240; ++trial) {
+        const auto n = 1+trial%6; M form(n,n);
+        for (std::size_t i = 0; i < n; ++i) for (std::size_t j = 0; j <= i; ++j) {
+            if (trial%4 == 0 && i != j) continue;
+            const R value{static_cast<long>(random()%9)-4,static_cast<unsigned long>(1+random()%7)};
+            form.set(i,j,value); form.set(j,i,value);
+        }
+        if (trial%4 == 1) form = form.transpose().multiply(form).add(M::identity(n));
+        if (trial%4 == 3 && n > 1) form.set(0,1,form.get(1,0)+1);
+        verify(form);
+    }
+    M large(4096,4096);
+    for (std::size_t i = 0; i < large.rows(); ++i) large.set(i,i,R{1,3});
+    auto declared = endpoint_for(large);
+    validate_temporal_endpoint(declared);
+    check(temporal_tensor_matrix(declared.tensors[0]) == large, "large diagonal certificate changed a direction");
+    large.set(4095,4095,0);
+    declared = endpoint_for(large);
+    rejects([&] { validate_temporal_endpoint(declared); }, "large diagonal certificate omitted the final missing pivot");
+    std::cout << "metric_certification_checks=" << checks-first << '\n';
+}
 } // namespace
 
 int main() {
@@ -449,7 +532,7 @@ int main() {
     try {
         std::filesystem::create_directories(dir);
         coupled_roundtrip(dir); occurrence_regressions(); tensor_local_evolution(); exact_and_random_source();
-        retained_magnitude_and_parser(); moments_words_and_topology();
+        retained_magnitude_and_parser(); moments_words_and_topology(); metric_certification();
         const numeric::SparseRationalEntry half{3,R{1,2}}, one{3,R{1}}, prior{2,R{100}};
         check(half == numeric::SparseRationalEntry{3,R{1,2}}, "exact sparse entry equality");
         check(half < one, "exact sparse entry rational ordering");

@@ -17,6 +17,7 @@ struct NativeExactTrainingContract {
     std::uint64_t initial_parameter_knowledge_time{};
     std::uint64_t publication_cutoff{};
     std::uint64_t metadata_coordinates{};
+    std::size_t metadata_capacity{4096};
 };
 
 // A deterministic, serial exact gradient profile on the original ordered
@@ -24,7 +25,92 @@ struct NativeExactTrainingContract {
 // sample order, time coordinates and label availability. There is no PRNG,
 // momentum, Boolean derivative, parameter pooling or automatic assertion.
 class NativeExactTrainer {
+    struct State;
+    struct Identity {};
+    struct Statistics {
+        std::size_t sample{}, bits{};
+        numeric::RationalVector values;
+    };
   public:
+    // Exclusive physical cache for fixed source responses and metric pairings.
+    // Duplicate responses share storage. Hodge uses its down and up responses
+    // when both are declared. Gradients retain the original parameter coordinates.
+    class TrainingWorkspace {
+      public:
+        std::size_t capacity() const noexcept { return entries_.size(); }
+        std::size_t cached_samples() const noexcept {
+            return static_cast<std::size_t>(std::count_if(entries_.begin(), entries_.end(),
+                                                        [](const auto& entry) { return bool(entry); }));
+        }
+        std::size_t retained_slots() const {
+            std::size_t slots = 0;
+            for (const auto& entry : entries_)
+                if (entry) slots = machine::checked_size_add(slots, entry->values.size());
+            return slots;
+        }
+        std::size_t hits() const noexcept { return hits_; }
+        std::size_t misses() const noexcept { return misses_; }
+        std::size_t response_count() const noexcept { return channels_.size() + 1; }
+        const std::vector<ExactMetricChannel>& response_channels() const noexcept { return channels_; }
+        const std::vector<std::vector<std::size_t>>& parameter_coordinates() const noexcept { return coordinates_; }
+        const runtime::ExecutionRequirements& last_requirements() const noexcept { return last_; }
+      private:
+        friend class NativeExactTrainer;
+        TrainingWorkspace(std::shared_ptr<const State> owner, std::size_t capacity)
+            : owner_(std::move(owner)), entries_(capacity) {
+            const auto contains = [&](ExactMetricChannelKind kind) {
+                return std::any_of(owner_->channels.begin(), owner_->channels.end(),
+                                   [&](const auto& channel) { return channel.kind == kind; });
+            };
+            const bool split_hodge = contains(ExactMetricChannelKind::HodgeDown) &&
+                                     contains(ExactMetricChannelKind::HodgeUp);
+            for (const auto kind : {ExactMetricChannelKind::Identity, ExactMetricChannelKind::HodgeDown,
+                                    ExactMetricChannelKind::HodgeUp, ExactMetricChannelKind::Hodge})
+                if (contains(kind) && !(split_hodge && kind == ExactMetricChannelKind::Hodge))
+                    channels_.push_back({kind, numeric::Rational{0}});
+            const auto index = [&](ExactMetricChannelKind kind) {
+                const auto found = std::find_if(channels_.begin(), channels_.end(),
+                                               [&](const auto& channel) { return channel.kind == kind; });
+                if (found == channels_.end()) throw std::logic_error("training response coordinate absent");
+                return static_cast<std::size_t>(found - channels_.begin());
+            };
+            std::vector<std::size_t> terms(response_count(), 0);
+            for (const auto& channel : owner_->channels) {
+                if (split_hodge && channel.kind == ExactMetricChannelKind::Hodge)
+                    coordinates_.push_back({index(ExactMetricChannelKind::HodgeDown),
+                                            index(ExactMetricChannelKind::HodgeUp)});
+                else coordinates_.push_back({index(channel.kind)});
+                for (const auto coordinate : coordinates_.back()) ++terms[coordinate];
+            }
+            coordinates_.push_back({channels_.size()});
+            terms.back() = 1;
+            max_fold_terms_ = *std::max_element(terms.begin(), terms.end());
+        }
+        std::shared_ptr<const State> owner_;
+        std::vector<std::unique_ptr<Statistics>> entries_;
+        std::vector<ExactMetricChannel> channels_;
+        std::vector<std::vector<std::size_t>> coordinates_;
+        std::size_t max_fold_terms_{};
+        std::size_t hits_{}, misses_{};
+        runtime::ExecutionRequirements last_{};
+    };
+    TrainingWorkspace make_training_workspace(std::size_t capacity,
+            const runtime::ExecutionLease& lease = runtime::ExecutionLease{}) const {
+        using namespace inference::native_field_detail;
+        const auto pin = state_;
+        require(pin->tower.profile() == field::PreparedExactProfile::FiniteActions,
+                "prepared training requires the finite metric profile");
+        require(capacity && capacity <= pin->samples.size(), "training workspace capacity mismatch");
+        lease.check_cancelled();
+        TrainingWorkspace workspace(pin, capacity);
+        auto required = pin->tower.requirements(1, field::OperatorKind::Hodge);
+        required.records = add(required.records, capacity);
+        required.records = add(required.records, mul(pin->parameters.size(), 3));
+        required.rational_slots = add(required.rational_slots, mul(capacity, statistics_slots(workspace.response_count())));
+        required.scalar_work = 0;
+        runtime::admit_execution(required, lease.policy());
+        return workspace;
+    }
     static NativeExactTrainer
     prepare(inference::PreparedNativeExactTower tower, core::Grade grade,
             std::vector<ExactMetricChannel> channels, storage::PinnedNativeAccession gains,
@@ -40,6 +126,8 @@ class NativeExactTrainer {
                     contract.metadata_coordinates != contract.time_coordinates,
                 "training requires separate declared history, time and checkpoint byte coordinates");
         require(!samples.empty() && samples.size() <= 1024, "exact training sample count limit");
+        require(contract.metadata_capacity >= 8 && contract.metadata_capacity <= 65536,
+                "training checkpoint capacity must be between 8 and 65536 bytes");
         require(tower.publication().sequence() <= contract.publication_cutoff,
                 "future source publication is unavailable for training");
         // Reuse the canonical parameter and ordered-channel binding checks.
@@ -120,6 +208,103 @@ class NativeExactTrainer {
         for (const auto &q : parameters)
             if (integer_bits(q) > required.integer_bits)
                 throw std::runtime_error("exact training integer envelope violated");
+        return publish_step(pin, std::move(parameters), loss, rate, event_cutoff, knowledge_cutoff, lease);
+    }
+    NativeExactTrainer advance_prepared(const numeric::Rational& rate, std::uint64_t event_cutoff,
+            std::uint64_t knowledge_cutoff, TrainingWorkspace& workspace,
+            const runtime::ExecutionLease& lease = runtime::ExecutionLease{}) const {
+        using namespace inference::native_field_detail;
+        validate_learning_rational(rate);
+        require(rate > 0, "exact training step size must be positive");
+        lease.check_cancelled();
+        const auto pin = state_;
+        require(workspace.owner_ && workspace.capacity() && workspace.owner_->identity == pin->identity,
+                "training workspace belongs to another lineage");
+        const auto step = pin->history.last_sequence();
+        if (step >= 1024) throw std::length_error("exact training retained step limit");
+        const auto sample_index = static_cast<std::size_t>(step % pin->samples.size());
+        const auto& sample = pin->samples[sample_index];
+        require(sample.partition == NativeSamplePartition::Training, "evaluation labels cannot update fitted parameters");
+        require(sample.event_time <= event_cutoff && sample.knowledge_time <= knowledge_cutoff &&
+                    sample.label_available_time <= knowledge_cutoff && pin->parameter_knowledge_time <= knowledge_cutoff,
+                "future event, knowledge, label or fitted parameter is unavailable");
+        const auto slot = sample_index % workspace.capacity();
+        const bool hit = workspace.entries_[slot] && workspace.entries_[slot]->sample == sample_index;
+        std::unique_ptr<Statistics> candidate;
+        std::size_t cold_work = 0, cold_slots = 0, cold_bits = 0;
+        if (!hit) {
+            const auto cold = statistics_requirements(*pin, sample, workspace);
+            admit_training(cold, *pin, lease);
+            candidate = make_statistics(*pin, sample, sample_index, workspace, cold.integer_bits, lease);
+            cold_work = cold.scalar_work;
+            cold_slots = cold.rational_slots;
+            cold_bits = cold.integer_bits;
+        }
+        const auto& statistics = hit ? *workspace.entries_[slot] : *candidate;
+        const auto d = pin->parameters.size();
+        const auto r = workspace.response_count();
+        std::size_t parameter_bits = 1;
+        for (const auto& value : pin->parameters) parameter_bits = std::max(parameter_bits, integer_bits(value));
+        const auto folded_bits = workspace.max_fold_terms_ == 1 ? parameter_bits :
+                                 sum_bound(parameter_bits, workspace.max_fold_terms_);
+        const auto row_bits = sum_bound(add(statistics.bits, folded_bits), r);
+        const auto gradient_bits = sum_bound(add(add(row_bits, statistics.bits), 1), 2);
+        const auto update_bits = add(add(add(parameter_bits, integer_bits(rate)), gradient_bits), 1);
+        const auto loss_bits = add(add(sum_bound(add(folded_bits, row_bits), r),
+                                       sum_bound(add(folded_bits, statistics.bits), r)), add(statistics.bits, 4));
+        auto required = pin->tower.requirements(1, field::OperatorKind::Hodge);
+        required.records = add(required.records, add(workspace.capacity(), mul(d, 3)));
+        required.rational_slots = add(required.rational_slots,
+            add(workspace.retained_slots(), add(hit ? 0 : statistics.values.size(), add(add(d, mul(r, 2)), 6))));
+        required.rational_slots = std::max(required.rational_slots, cold_slots);
+        required.scalar_work = add(cold_work, add(mul(mul(r, r), 4), add(add(mul(r, 16), mul(d, 8)), 8)));
+        required.integer_bits = std::max({required.integer_bits, cold_bits, folded_bits, row_bits, gradient_bits, update_bits, loss_bits});
+        admit_training(required, *pin, lease);
+        numeric::RationalVector folded(r, numeric::Rational{0}), gradients(r);
+        for (std::size_t c = 0; c < d; ++c)
+            for (const auto coordinate : workspace.coordinates_[c]) folded[coordinate] += pin->parameters[c];
+        for (const auto& value : folded)
+            if (integer_bits(value) > folded_bits) throw std::runtime_error("training folded parameter envelope violated");
+        auto parameters = pin->parameters;
+        numeric::Rational quadratic = 0, cross = 0;
+        for (std::size_t c = 0; c < r; ++c) {
+            lease.check_cancelled();
+            numeric::Rational row = 0;
+            for (std::size_t j = 0; j < r; ++j) row += statistics.values[c*r+j] * folded[j];
+            const auto& linear = statistics.values[r*r+c];
+            quadratic += folded[c] * row;
+            cross += folded[c] * linear;
+            gradients[c] = row - linear;
+        }
+        for (std::size_t c = 0; c < d; ++c) {
+            numeric::Rational gradient = 0;
+            for (const auto coordinate : workspace.coordinates_[c]) gradient += gradients[coordinate];
+            if (integer_bits(gradient) > gradient_bits) throw std::runtime_error("training gradient envelope violated");
+            parameters[c] -= rate * gradient;
+        }
+        const numeric::Rational loss = (quadratic - 2*cross + statistics.values.back()) / 2;
+        require(loss >= 0, "prepared metric loss is negative");
+        if (integer_bits(loss) > required.integer_bits)
+            throw std::runtime_error("prepared training loss envelope violated");
+        for (const auto& value : parameters)
+            if (integer_bits(value) > required.integer_bits)
+                throw std::runtime_error("prepared training parameter envelope violated");
+        auto result = publish_step(pin, std::move(parameters), loss, rate, event_cutoff, knowledge_cutoff, lease);
+        if (hit) ++workspace.hits_;
+        else { workspace.entries_[slot] = std::move(candidate); ++workspace.misses_; }
+        workspace.last_ = required;
+        return result;
+    }
+    storage::NativeTemporalSeries history() const { return state_->history; }
+    numeric::RationalVector parameters() const { return state_->parameters; }
+    std::uint64_t parameter_knowledge_time() const { return state_->parameter_knowledge_time; }
+    std::optional<numeric::Rational> last_loss() const { return state_->last_loss; }
+
+  private:
+    static NativeExactTrainer publish_step(const std::shared_ptr<const State>& pin,
+            numeric::RationalVector parameters, const numeric::Rational& loss, const numeric::Rational& rate,
+            std::uint64_t event_cutoff, std::uint64_t knowledge_cutoff, const runtime::ExecutionLease& lease) {
+        const auto step = pin->history.last_sequence();
         auto next = std::make_shared<State>(*pin);
         next->parameters = std::move(parameters);
         next->parameter_knowledge_time = knowledge_cutoff;
@@ -134,16 +319,27 @@ class NativeExactTrainer {
         std::vector<storage::TemporalCorrespondence> maps;
         for (const auto &carrier : endpoint.carriers)
             maps.push_back({carrier.key, numeric::ExactMatrix::identity(carrier.domain.logical_size())});
-        next->history.append(storage::make_temporal_segment(old.endpoint(), endpoint, std::move(maps)));
+        next->history.append_target(endpoint, std::move(maps));
         lease.check_cancelled();
         return NativeExactTrainer(std::move(next));
     }
-    storage::NativeTemporalSeries history() const { return state_->history; }
-    numeric::RationalVector parameters() const { return state_->parameters; }
-    std::optional<numeric::Rational> last_loss() const { return state_->last_loss; }
+  public:
     static NativeExactTrainer resume(NativeExactTrainer initial, std::span<const std::byte> archive,
                                      const runtime::ExecutionLease &lease = runtime::ExecutionLease{}) {
+        return resume_impl(std::move(initial), archive, nullptr, lease);
+    }
+    static NativeExactTrainer resume_prepared(NativeExactTrainer initial, std::span<const std::byte> archive,
+            TrainingWorkspace& workspace, const runtime::ExecutionLease& lease = runtime::ExecutionLease{}) {
+        return resume_impl(std::move(initial), archive, &workspace, lease);
+    }
+
+  private:
+    static NativeExactTrainer resume_impl(NativeExactTrainer initial, std::span<const std::byte> archive,
+            TrainingWorkspace* workspace, const runtime::ExecutionLease& lease) {
         using namespace inference::native_field_detail;
+        lease.check_cancelled();
+        if (workspace) require(workspace->owner_ && workspace->capacity() &&
+            workspace->owner_->identity == initial.state_->identity, "training workspace belongs to another lineage");
         require(initial.state_->history.last_sequence() == 0,
                 "resume requires the declared initial parameter state");
         const auto history = storage::decode_native_series(archive);
@@ -155,11 +351,13 @@ class NativeExactTrainer {
             storage::encode_temporal_endpoint(first.endpoint()) ==
                 storage::encode_temporal_endpoint(expected.endpoint()),
             "training resume changed source, original parameters, channel order, samples or declarations");
-        for (std::uint64_t step = 1; step <= history.last_sequence(); ++step) {
-            const auto endpoint = history.at(step);
+        history.visit_endpoints([&](const storage::NativeSeriesEndpoint& endpoint) {
+            lease.check_cancelled();
+            const auto step = endpoint.sequence();
+            if (step == 0) return;
             const auto tensor = storage::temporal_endpoint_detail::tensors(endpoint.endpoint())
                                     .at(initial.state_->contract.metadata_tensor);
-            const auto bytes = metadata_bytes(*tensor);
+            const auto bytes = metadata_bytes(*tensor, initial.state_->contract.metadata_capacity);
             storage::rfcx_detail::Reader reader(bytes);
             const auto payload = reader.slice(static_cast<std::size_t>(reader.u64()));
             storage::rfcx_detail::Reader metadata(payload);
@@ -169,12 +367,13 @@ class NativeExactTrainer {
             const auto rate = storage::rfcx_detail::read_rational(metadata);
             const auto events = metadata.u64(), knowledge = metadata.u64();
             require(saved_step == step, "training step order mismatch");
-            initial = initial.advance(rate, events, knowledge, lease);
+            initial = workspace ? initial.advance_prepared(rate, events, knowledge, *workspace, lease)
+                                : initial.advance(rate, events, knowledge, lease);
             const auto produced = initial.state_->history.tail();
             require(storage::encode_temporal_endpoint(produced.endpoint()) ==
                         storage::encode_temporal_endpoint(endpoint.endpoint()),
                     "training resume update or complete optimizer/data-order state mismatch");
-        }
+        });
         require(initial.state_->history.same_history(history),
                 "training resume changed ordered native operation history");
         return initial;
@@ -182,6 +381,7 @@ class NativeExactTrainer {
 
   private:
     struct State {
+        std::shared_ptr<const Identity> identity{std::make_shared<const Identity>()};
         inference::PreparedNativeExactTower tower;
         core::Grade grade;
         std::vector<ExactMetricChannel> channels;
@@ -203,6 +403,66 @@ class NativeExactTrainer {
               parameter_knowledge_time(contract.initial_parameter_knowledge_time),
               history(make_base(*this), contract.history_namespace) {}
     };
+    static std::size_t statistics_slots(std::size_t parameters) {
+        using namespace inference::native_field_detail;
+        return add(mul(parameters, parameters), add(parameters, 1));
+    }
+    static void admit_training(const runtime::ExecutionRequirements& required, const State& state,
+                                const runtime::ExecutionLease& lease) {
+        lease.check_cancelled();
+        runtime::admit_execution(required, lease.policy());
+        if (required.scalar_work > state.tower.publication().limits().max_action_work)
+            throw std::length_error("native training accession work limit");
+    }
+    static runtime::ExecutionRequirements statistics_requirements(const State& state,
+            const NativeExactTrainingSample& sample, const TrainingWorkspace& workspace) {
+        using namespace inference::native_field_detail;
+        auto required = state.tower.requirements(std::max(tensor_bits(*sample.input.tensor()),
+            tensor_bits(*sample.target.tensor())), field::OperatorKind::Hodge);
+        const auto n = state.tower.grade_size(state.grade), d = workspace.response_count();
+        required.records = add(required.records, add(workspace.capacity(), mul(state.parameters.size(), 3)));
+        required.rational_slots = add(required.rational_slots, add(workspace.retained_slots(),
+            add(statistics_slots(d), mul(n, add(d, 4)))));
+        required.scalar_work = add(mul(required.scalar_work, add(workspace.channels_.size(), 16)),
+            mul(n, add(mul(mul(d, d), 4), mul(d, 8))));
+        required.integer_bits = sum_bound(mul(required.integer_bits, 3), n);
+        return required;
+    }
+    static std::unique_ptr<Statistics> make_statistics(const State& state,
+            const NativeExactTrainingSample& sample, std::size_t sample_index,
+            const TrainingWorkspace& workspace, std::size_t bit_limit,
+            const runtime::ExecutionLease& lease) {
+        using namespace inference::native_field_detail;
+        const auto x = state.tower.input_values(sample.input, state.grade);
+        const auto target = state.tower.input_values(sample.target, state.grade);
+        const auto d = workspace.response_count();
+        std::vector<numeric::RationalVector> responses;
+        responses.reserve(d);
+        for (const auto& channel : workspace.channels_) {
+            lease.check_cancelled();
+            responses.push_back(channel.kind == ExactMetricChannelKind::Identity ? x :
+                state.tower.tower().apply({operation(channel), state.grade, channel.parameter}, x));
+        }
+        responses.emplace_back(x.size(), numeric::Rational{1});
+        const auto& metric = state.tower.tower().metrics().at(state.grade.value);
+        const auto measured_target = metric.apply(target);
+        auto statistics = std::make_unique<Statistics>();
+        statistics->sample = sample_index;
+        statistics->values.resize(statistics_slots(d));
+        for (std::size_t c = 0; c < d; ++c) {
+            lease.check_cancelled();
+            const auto measured = metric.apply(responses[c]);
+            for (std::size_t j = 0; j < d; ++j)
+                statistics->values[j*d+c] = numeric::dot(responses[j], measured);
+            statistics->values[d*d+c] = numeric::dot(responses[c], measured_target);
+        }
+        statistics->values.back() = numeric::dot(target, measured_target);
+        statistics->bits = 1;
+        for (const auto& value : statistics->values) statistics->bits = std::max(statistics->bits, integer_bits(value));
+        if (statistics->bits > bit_limit) throw std::runtime_error("training statistics integer envelope violated");
+        lease.check_cancelled();
+        return statistics;
+    }
     static field::OperatorKind operation(const ExactMetricChannel &channel) {
         switch (channel.kind) {
         case ExactMetricChannelKind::HodgeDown:
@@ -217,30 +477,32 @@ class NativeExactTrainer {
     }
     static void update_field(storage::TemporalEndpoint &endpoint, std::uint64_t key,
                              numeric::RationalVector values) {
+        std::vector<numeric::SparseRationalEntry> entries;
+        entries.reserve(values.size());
+        for (std::size_t i = 0; i < values.size(); ++i)
+            if (values[i] != 0) entries.push_back({i, values[i]});
+        update_sparse_field(endpoint, key, values.size(), std::move(entries));
+    }
+    static void update_sparse_field(storage::TemporalEndpoint &endpoint, std::uint64_t key,
+                                   std::size_t size, std::vector<numeric::SparseRationalEntry> entries) {
         for (auto &tensor : endpoint.tensors)
             if (tensor.key == key) {
-                std::vector<numeric::SparseRationalEntry> entries;
-                for (std::size_t i = 0; i < values.size(); ++i)
-                    if (values[i] != 0)
-                        entries.push_back({i, values[i]});
-                tensor.tensor = {numeric::IndexDomain::linear(values.size()),
-                                 numeric::StructuralSupport::full(values.size()),
-                                 numeric::SparseRationalVector(values.size(), std::move(entries))};
+                tensor.tensor = {numeric::IndexDomain::linear(size),
+                                 numeric::StructuralSupport::full(size),
+                                 numeric::SparseRationalVector(size, std::move(entries))};
                 return;
             }
         throw std::invalid_argument("training parameter tensor absent");
     }
-    static std::vector<std::byte> metadata_bytes(const storage::TemporalTensor &tensor) {
-        std::vector<std::byte> out;
-        out.reserve(4096);
-        if (tensor.tensor.domain() != numeric::IndexDomain::linear(4096) ||
-            tensor.tensor.support().count() != 4096)
+    static std::vector<std::byte> metadata_bytes(const storage::TemporalTensor &tensor, std::size_t capacity) {
+        if (tensor.tensor.domain() != numeric::IndexDomain::linear(capacity) ||
+            tensor.tensor.support().count() != capacity)
             throw std::invalid_argument("training metadata carrier mismatch");
-        for (std::size_t i = 0; i < 4096; ++i) {
-            const auto value = *tensor.tensor.state(i);
-            if (value.get_den() != 1 || value < 0 || value > 255)
+        std::vector<std::byte> out(capacity, std::byte{0});
+        for (const auto& entry : tensor.tensor.values().entries()) {
+            if (entry.value.get_den() != 1 || entry.value < 0 || entry.value > 255)
                 throw std::invalid_argument("training metadata byte mismatch");
-            out.push_back(static_cast<std::byte>(value.get_num().get_ui()));
+            out[entry.index] = static_cast<std::byte>(entry.value.get_num().get_ui());
         }
         return out;
     }
@@ -283,15 +545,18 @@ class NativeExactTrainer {
             writer.u64(sample.label_available_time);
         }
         writer.string("half-metric-squared-error/original-parameters/fixed-order/no-momentum/no-random-v1");
-        if (writer.size() > 4088)
+        const auto capacity = state.contract.metadata_capacity;
+        if (writer.size() > capacity - 8)
             throw std::length_error("training complete metadata byte limit");
         storage::rfcx_detail::Writer bytes;
         bytes.u64(writer.size());
         bytes.raw(writer.bytes());
-        numeric::RationalVector values(4096, numeric::Rational{0});
+        std::vector<numeric::SparseRationalEntry> values;
+        values.reserve(bytes.size());
         for (std::size_t i = 0; i < bytes.size(); ++i)
-            values[i] = static_cast<unsigned>(bytes.bytes()[i]);
-        update_field(endpoint, state.contract.metadata_tensor, std::move(values));
+            if (bytes.bytes()[i] != std::byte{0})
+                values.push_back({i, numeric::Rational{static_cast<unsigned>(bytes.bytes()[i])}});
+        update_sparse_field(endpoint, state.contract.metadata_tensor, capacity, std::move(values));
     }
     static storage::TemporalEndpoint make_base(State &state) {
         using namespace inference::native_field_detail;
@@ -308,7 +573,7 @@ class NativeExactTrainer {
                                      core::Grade{0},
                                      {},
                                      state.contract.metadata_coordinates,
-                                     numeric::IndexDomain::linear(4096)});
+                                     numeric::IndexDomain::linear(state.contract.metadata_capacity)});
         storage::TemporalTensor metadata;
         metadata.key = state.contract.metadata_tensor;
         metadata.role = storage::TemporalTensorRole::Field;

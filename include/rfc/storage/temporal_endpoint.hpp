@@ -4,6 +4,7 @@
 #include "rfc/storage/relational_code_types.hpp"
 #include "rfc/field/exact_metric.hpp"
 #include "rfc/storage/declared_code_binding.hpp"
+#include <algorithm>
 
 namespace rfc::storage {
 
@@ -99,14 +100,7 @@ inline bool tensor_equal(const TemporalTensor& a, const TemporalTensor& b) {
 inline numeric::SparseRationalVector sparse_apply(const numeric::ExactMatrix& J,
                                                  const numeric::SparseRationalVector& x) {
     require(J.cols() == x.size(), "sparse temporal correspondence input size");
-    std::vector<numeric::SparseRationalEntry> entries;
-    for (const auto& [ij, value] : J.entries()) {
-        const auto& xs = x.entries();
-        const auto it = std::lower_bound(xs.begin(), xs.end(), ij.second,
-            [](const auto& entry, std::size_t i) { return entry.index < i; });
-        if (it != xs.end() && it->index == ij.second) entries.push_back({ij.first, value * it->value});
-    }
-    return numeric::SparseRationalVector(J.rows(), std::move(entries));
+    return J.apply_sparse(x.view());
 }
 inline numeric::SparseRationalVector sparse_sum(const numeric::SparseRationalVector& a,
                                                const numeric::SparseRationalVector& b, int sign = 1) {
@@ -240,7 +234,19 @@ inline void validate(const TemporalEndpoint& endpoint, const StableSourceIndex& 
         require(t->tensor.domain() == numeric::IndexDomain({out.domain.logical_size(), in.domain.logical_size()}), "map/form dimensions disagree with declared carriers");
         if (t->role == TemporalTensorRole::Metric) {
             require(t->input == t->output, "metric carriers differ");
-            (void)field::ExactMetric(temporal_tensor_matrix(*t)); // Exact SPD certification, not a tag.
+            const auto size = out.domain.logical_size();
+            const auto& entries = t->tensor.values().entries();
+            const bool diagonal = std::all_of(entries.begin(), entries.end(), [size](const auto& entry) {
+                return size && entry.index / size == entry.index % size;
+            });
+            if (diagonal) {
+                // A complete positive diagonal certifies the stored form.
+                require(entries.size() == size, "metric must be positive definite");
+                for (const auto& entry : entries)
+                    require(entry.value > 0, "metric must be positive definite");
+            } else {
+                (void)field::ExactMetric(temporal_tensor_matrix(*t));
+            }
         }
         if (t->role == TemporalTensorRole::RealizedIncidenceMap || t->role == TemporalTensorRole::CoefficientIndependentMap ||
             t->role == TemporalTensorRole::SheafRestriction) {

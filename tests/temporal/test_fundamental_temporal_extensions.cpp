@@ -45,6 +45,19 @@ int main(){
     const auto sum=rfc::temporal::sum_factor_interactions(interactions,1,1);
     const auto delta=rfc::temporal::ordered_product(newf).add(rfc::temporal::ordered_product(oldf).scale(Rational{-1}));
     require(interactions.size()==7 && sum==delta && delta.get(0,0)==971,"finite factor attribution mismatch");
+    const auto a=ExactMatrix::from_rows({{1,2},{3,4},{5,6}});
+    const auto b=ExactMatrix::from_rows({{2,1,0},{0,1,2}});
+    const auto an=a.scale(Rational{2});
+    const auto bn=b.add(ExactMatrix::from_rows({{1,0,0},{0,0,1}}));
+    using rfc::temporal::FactorOrder;
+    require(rfc::temporal::ordered_product({a,b})==b.multiply(a),"chronological default order changed");
+    require(rfc::temporal::ordered_product({a,b},FactorOrder::WrittenProduct)==a.multiply(b),"written rectangular order failed");
+    for(const auto order : {FactorOrder::AppliedFirst,FactorOrder::WrittenProduct}) {
+        const auto old_product=rfc::temporal::ordered_product({a,b},order);
+        const auto new_product=rfc::temporal::ordered_product({an,bn},order);
+        const auto terms=rfc::temporal::finite_ordered_factor_attribution({a,b},{an,bn},order);
+        require(rfc::temporal::sum_factor_interactions(terms,old_product.rows(),old_product.cols())==new_product.add(old_product.scale(Rational{-1})),"rectangular full interaction reconstruction failed");
+    }
 
     // Temporal cylinder: persistent oriented edge closes for identity transport.
     const auto B1=ExactMatrix::from_rows({{-1},{1}});

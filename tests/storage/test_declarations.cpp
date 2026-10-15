@@ -70,6 +70,10 @@ CompiledLayout family_layout() {
 }
 void graph_tests() {
     const auto root = family_layout();
+    check(root.declarations().factor_ordinal(id(8),100)==0 &&
+          root.declarations().factor_ordinal(id(8),300)==2,"product factor index changed order");
+    rejects([&]{(void)root.declarations().factor_ordinal(id(8),999);},"unknown product factor indexed");
+    rejects([&]{(void)root.declarations().alternative_ordinal(id(8),100);},"product accepted as alternative");
     DeclarationBuilder builder;
     builder.define(Declaration::optional(id(800),{88,1,3}));
     rejects([&]{(void)builder.freeze();},"unresolved partial module executed");
@@ -84,6 +88,7 @@ void graph_tests() {
     auto ds = root.declarations().definitions(); std::reverse(ds.begin(),ds.end());
     check(frozen == encode_declarations(CompiledLayout(DeclarationRegistry(ds),root.root())), "definition input order leaked");
     const auto read = decode_declarations(frozen);
+    check(read.declarations().factor_ordinal(id(8),300)==2,"decoded product factor index changed order");
     check(read.declarations().definitions() == root.declarations().definitions(), "declaration roundtrip");
     check(encode_declarations(read) == frozen, "declaration canonical law");
     const auto imported = root.declarations().imported(root.declarations());
@@ -128,6 +133,34 @@ void graph_tests() {
     check(encode_declarations(CompiledLayout(versions,id(1)))!=encode_declarations(CompiledLayout(versions,id(1,2))),"root version binding");
 }
 void cursor_tests() {
+    for(unsigned offset=0;offset<8;++offset)for(std::size_t count=0;count<258;++count) {
+        Bytes bytes(count);
+        for(std::size_t i=0;i<count;++i)bytes[i]=static_cast<std::byte>((i*137+count*19)%256);
+        const auto prefix=offset?((std::uint64_t{1}<<offset)-1):0;
+        const auto extent=offset+count*8+64;
+        const auto budget=machine::ceil_div(extent,8);
+        machine::BitWriter bulk(extent,budget),reference(extent,budget);
+        bulk.put(prefix,offset);reference.put(prefix,offset);
+        bulk.put_octets(bytes);
+        for(const auto byte:bytes)reference.put(std::to_integer<unsigned>(byte),8);
+        bulk.put(~std::uint64_t{0},64);reference.put(~std::uint64_t{0},64);
+        const auto written=std::move(bulk).finish();
+        check(written==std::move(reference).finish(),"bulk octets changed canonical bits");
+        machine::BitReader reader(written.bytes,written.bit_count,budget);
+        check(reader.get(offset)==prefix,"bulk octets changed prefix");
+        check(reader.get_octets(count)==bytes,"bulk octet read changed original bytes");
+        check(reader.get(64)==~std::uint64_t{0},"bulk octets changed suffix");reader.finish();
+    }
+    const Bytes octet{std::byte{255}};
+    machine::BitWriter short_writer(7,1);
+    rejects([&]{short_writer.put_octets(octet);},"truncated bulk writer accepted");
+    short_writer.put(127,7);
+    const auto short_bits=std::move(short_writer).finish();
+    machine::BitReader short_reader(short_bits.bytes,short_bits.bit_count,1);
+    rejects([&]{(void)short_reader.get_octets(std::numeric_limits<std::size_t>::max());},
+            "oversized bulk reader accepted");
+    check(short_reader.remaining()==7 && short_reader.get(7)==127,
+          "failed bulk transfer changed cursor state");short_reader.finish();
     for (unsigned n=0;n<=64;++n) for (unsigned offset=0;offset<8;++offset) {
         const std::uint64_t x = n==64 ? ~std::uint64_t{0} : (std::uint64_t{1}<<n)-1;
         machine::BitWriter w(offset+n,32);w.put(0,offset);w.put(x,n);auto bits=std::move(w).finish();
@@ -428,6 +461,17 @@ void wire_tests(const fs::path& out) {
     DeclarationLimits tiny;tiny.max_encoded_bytes=1;
     rejects([&]{(void)decode_declarations(simple,tiny);},"wire input budget");
 }
+void remaining_budget_tests() {
+    const auto layout=scalar(DeclarationKind::Integer);
+    const auto value=DeclaredValue::integer(numeric::Integer{19});
+    const auto bits=encode_declared_bits(layout,value);
+    check(declared_value_equal(decode_declared_bits(layout,bits.bytes,bits.bit_count,1,1),value),"remaining scalar decode allowance changed value");
+    rejects([&]{(void)decode_declared_bits(layout,bits.bytes,bits.bit_count,0,1);},"zero remaining value allowance bypassed");
+    rejects([&]{(void)decode_declared_bits(layout,bits.bytes,bits.bit_count,1,0);},"zero remaining magnitude allowance bypassed");
+    auto limits=layout.limits();limits.max_integer_bits=4;
+    const CompiledLayout strict(layout.declarations(),layout.root(),layout.profile(),limits);
+    rejects([&]{(void)decode_declared_bits(strict,bits.bytes,bits.bit_count,100,100);},"remaining allowance loosened compiled scalar policy");
+}
 } // namespace
 int main(int argc,char** argv) {
     fs::path out;
@@ -435,7 +479,7 @@ int main(int argc,char** argv) {
         out=argc>1?fs::path(argv[1]):fs::temp_directory_path()/("rfc-declarations-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         if(fs::exists(out))throw std::runtime_error("fixture directory must be fresh");
         fs::create_directories(out);
-        graph_tests();cursor_tests();finite_tests();integer_tests(out);composed_tests(out);tensor_tests(out);branch_tests();source_aspect_tests(out);bridge_tests(out);independent_tests(out);wire_tests(out);
+        graph_tests();cursor_tests();finite_tests();integer_tests(out);composed_tests(out);tensor_tests(out);branch_tests();source_aspect_tests(out);bridge_tests(out);independent_tests(out);wire_tests(out);remaining_budget_tests();
         std::cout<<"Phase03F1 declarations: "<<checks<<" checks passed; truncations="<<truncations
                  <<"; mutations_accepted="<<mutation_accepts<<"; mutations_rejected="<<mutation_rejects<<"\n";
         if(argc==1)fs::remove_all(out);

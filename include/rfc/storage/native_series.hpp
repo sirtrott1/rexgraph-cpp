@@ -413,6 +413,19 @@ public:
     std::size_t segment_count() const { return state().frames.size(); }
     std::size_t archive_bytes() const { return state().archive_bytes; }
     NativeSeriesLimits limits() const { return state().limits; }
+    // Visit the base and each retained endpoint in order, replaying each frame
+    // once. Pins and the selected history survive callback publication changes.
+    template<class Function> void visit_endpoints(Function&& function) const {
+        (void)state(); const auto owner = state_;
+        auto current = owner->base->endpoint;
+        function(NativeSeriesEndpoint{current, owner->name_space, {current->sequence, 0, false}});
+        owner->frames.for_each([&](const auto& frame) {
+            const auto previous = current->sequence;
+            current = std::make_shared<const TemporalEndpoint>(replay_temporal_segment(
+                *current, frame->segment, owner->limits.temporal.source_declarations));
+            function(NativeSeriesEndpoint{current, owner->name_space, {previous, 1, false}});
+        });
+    }
     // Components retain their immutable owner independently of the series and
     // callback. Their sequence/kind identity is separate from a physical digest.
     template<class Function> void visit_components(Function&& function) const {
@@ -461,6 +474,22 @@ public:
         return {state_, first, last};
     }
     void append(const TemporalSegment& segment) { append_encoded(encode_temporal_segment(segment)); }
+    // Build against the owned tail, decode the canonical frame and replay it
+    // before publication. A failed append retains the complete previous state.
+    void append_target(const TemporalEndpoint& target,
+            std::vector<TemporalCorrespondence> correspondences = {},
+            std::vector<RelationalCodeTransport> code_transports = {},
+            RelationalCodeEncoding code_encoding = RelationalCodeEncoding::Automatic,
+            std::optional<SourceDeclarationMigration> source_migration = {},
+            std::optional<TemporalDeclarationUpdate> declaration_update = {}) {
+        const auto& old = state();
+        native_series_detail::bound(machine::checked_size_add(old.frames.size(), 1),
+                                   old.limits.max_segments, "series segment count budget");
+        auto segment = temporal_segment_detail::build_temporal_segment(*old.tail, target,
+            std::move(correspondences), std::move(code_transports), code_encoding,
+            std::move(source_migration), std::move(declaration_update), old.limits.temporal.source_declarations);
+        append(segment);
+    }
     void append_encoded(std::span<const std::byte> frame) {
         using namespace native_series_detail;
         const auto& old = state();
@@ -522,8 +551,13 @@ public:
         next->archive_bytes = archive_size(*next); state_ = std::move(next);
     }
 private:
+    friend class NativeSeriesPrefix;
     friend std::vector<std::byte> encode_native_series(const NativeTemporalSeries&);
     friend NativeTemporalSeries decode_native_series(std::span<const std::byte>, const NativeSeriesLimits&);
+    // Only the canonical reader adopts storage it freshly decoded and owns.
+    // Public host endpoints still pass through the independently freezing path.
+    explicit NativeTemporalSeries(std::shared_ptr<const native_series_detail::State> state)
+        : state_(std::move(state)) {}
     const native_series_detail::State& state() const {
         native_series_detail::require(static_cast<bool>(state_), "moved-from temporal series"); return *state_;
     }

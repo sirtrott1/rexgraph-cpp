@@ -54,7 +54,10 @@ inline std::vector<AttachingWord> attaching_words(const core::RelationalComplex&
     const auto& grade2 = complex.grade(core::Grade{2});
     for (std::size_t face = 0; face < grade2.cell_count(); ++face) {
         const auto type = grade2.relation_types[face];
-        if (complex.signature().type(type).is_attaching_loop()) words.push_back(attaching_word(complex,face));
+        if (!complex.signature().type(type).is_attaching_loop()) {
+            throw std::invalid_argument("complete pairwise attaching-word projection requires every grade-two relation to be declared as an attaching loop");
+        }
+        words.push_back(attaching_word(complex,face));
     }
     return words;
 }

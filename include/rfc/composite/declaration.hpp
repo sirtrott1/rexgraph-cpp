@@ -153,7 +153,7 @@ public:
                 auto& positions = symbol_positions_[d.id];
                 for (std::size_t j = 0; j < d.symbols.size(); ++j) positions.emplace(d.symbols[j], j);
             }
-            if (d.kind == DeclarationKind::Alternative) {
+            if (d.kind == DeclarationKind::Product || d.kind == DeclarationKind::Alternative) {
                 auto& positions = alternative_positions_[d.id];
                 for (std::size_t j = 0; j < d.factors.size(); ++j) positions.emplace(d.factors[j].key, j);
             }
@@ -189,6 +189,11 @@ public:
         return symbol_positions_.at(id).at(symbol);
     }
     [[nodiscard]] std::size_t alternative_ordinal(DeclarationId id, std::uint64_t key) const {
+        if(at(id).kind!=DeclarationKind::Alternative)
+            throw std::out_of_range("not an alternative declaration");
+        return factor_ordinal(id,key);
+    }
+    [[nodiscard]] std::size_t factor_ordinal(DeclarationId id, std::uint64_t key) const {
         return alternative_positions_.at(id).at(key);
     }
     [[nodiscard]] DeclarationRegistry imported(const DeclarationRegistry& other,

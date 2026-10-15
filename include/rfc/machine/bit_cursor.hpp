@@ -49,6 +49,25 @@ public:
             position_ += take; width -= take; value >>= take;
         }
     }
+    // Copy complete LSB-first octets at the current bit offset. Extent checks
+    // precede mutation; no alignment padding or new wire representation is added.
+    void put_octets(std::span<const std::byte> bytes) {
+        if (bytes.size() > (bits_ - position_) / 8)
+            throw std::out_of_range("bit writer octet extent");
+        if (bytes.empty()) return;
+        const auto first = position_ / 8;
+        const auto offset = static_cast<unsigned>(position_ % 8);
+        if (!offset) {
+            std::copy(bytes.begin(), bytes.end(), bytes_.data() + first);
+        } else {
+            for (std::size_t i = 0; i < bytes.size(); ++i) {
+                const auto value = std::to_integer<unsigned>(bytes[i]);
+                bytes_[first + i] |= static_cast<std::byte>(value << offset);
+                bytes_[first + i + 1] = static_cast<std::byte>(value >> (8u - offset));
+            }
+        }
+        position_ += bytes.size() * 8;
+    }
     [[nodiscard]] EncodedBits finish() && {
         if (position_ != bits_) throw std::logic_error("incomplete bit writer");
         EncodedBits result{bits_, std::move(bytes_)};
@@ -80,6 +99,24 @@ public:
             shift += take; position_ += take; width -= take;
         }
         return value;
+    }
+    [[nodiscard]] std::vector<std::byte> get_octets(std::size_t count) {
+        if (count > remaining() / 8)
+            throw std::invalid_argument("truncated bit octets");
+        if (!count) return {};
+        std::vector<std::byte> bytes(count);
+        const auto first = position_ / 8;
+        const auto offset = static_cast<unsigned>(position_ % 8);
+        if (!offset) {
+            std::copy_n(bytes_.data() + first, count, bytes.begin());
+        } else {
+            for (std::size_t i = 0; i < count; ++i)
+                bytes[i] = static_cast<std::byte>(
+                    (std::to_integer<unsigned>(bytes_[first + i]) >> offset) |
+                    (std::to_integer<unsigned>(bytes_[first + i + 1]) << (8u - offset)));
+        }
+        position_ += count * 8;
+        return bytes;
     }
     void finish() const {
         if (remaining()) throw std::invalid_argument("trailing declared bits");

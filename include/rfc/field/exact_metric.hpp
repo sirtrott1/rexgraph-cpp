@@ -6,6 +6,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <utility>
 #include <variant>
@@ -39,12 +40,11 @@ public:
     }
 
     static ExactMetric identity(std::size_t n) {
-        if (n == 0) throw std::invalid_argument("metric must be nonempty");
+        // The declared zero carrier has one positive metric, vacuously.
         return ExactMetric(IdentityStorage{n});
     }
 
     static ExactMetric diagonal(numeric::RationalVector diagonal) {
-        if (diagonal.empty()) throw std::invalid_argument("metric must be nonempty");
         for (auto& value : diagonal) {
             value.canonicalize();
             if (value <= 0) throw std::invalid_argument("metric diagonal must be positive");
@@ -59,7 +59,7 @@ public:
                                           VectorAction apply,
                                           VectorAction solve,
                                           Materializer materialize = {}) {
-        if (n == 0 || !apply || !solve) throw std::invalid_argument("external exact metric requires size/apply/solve");
+        if (!apply || !solve) throw std::invalid_argument("external exact metric requires apply/solve");
         return ExactMetric(ExternalStorage{n, ExactMetricKind::CertifiedExternal, std::move(apply), std::move(solve), std::move(materialize)});
     }
 
@@ -132,6 +132,17 @@ public:
     [[nodiscard]] numeric::RationalVector solve(const numeric::RationalVector& x) const {
         if (x.size() != size()) throw std::invalid_argument("metric solve size mismatch");
         return std::visit([&](const auto& value) { return value.solve(x); }, storage_);
+    }
+
+    // Unit and diagonal metrics act on contiguous sample rows. Exact in place
+    // application is permitted; partially overlapping buffers are rejected.
+    void apply_batch_into(std::span<const numeric::Rational> input,
+                          std::span<numeric::Rational> output, std::size_t samples) const {
+        diagonal_batch_into(input, output, samples, false);
+    }
+    void solve_batch_into(std::span<const numeric::Rational> input,
+                          std::span<numeric::Rational> output, std::size_t samples) const {
+        diagonal_batch_into(input, output, samples, true);
     }
 
     [[nodiscard]] numeric::SparseRationalVector apply(numeric::SparseRationalView x) const {
@@ -212,6 +223,25 @@ public:
     }
 
 private:
+    void diagonal_batch_into(std::span<const numeric::Rational> input,
+                             std::span<numeric::Rational> output, std::size_t samples,
+                             bool inverse) const {
+        if (!is_diagonal()) throw std::logic_error("metric batch requires a unit or diagonal metric");
+        if (!samples || input.size() != machine::checked_size_mul(size(), samples) || output.size() != input.size())
+            throw std::invalid_argument("metric batch buffer shape mismatch");
+        const std::less<const numeric::Rational*> before;
+        if (input.data() != output.data() && before(input.data(), output.data() + output.size()) &&
+            before(output.data(), input.data() + input.size()))
+            throw std::invalid_argument("metric batch buffers partially overlap");
+        const auto* diagonal = std::get_if<DiagonalStorage>(&storage_);
+        for (std::size_t cell = 0; cell < size(); ++cell)
+            for (std::size_t s = 0; s < samples; ++s) {
+                const auto index = cell * samples + s;
+                if (!diagonal) output[index] = input[index];
+                else if (inverse) output[index] = input[index] / diagonal->diagonal[cell];
+                else output[index] = input[index] * diagonal->diagonal[cell];
+            }
+    }
     struct IdentityStorage {
         std::size_t n{};
         [[nodiscard]] std::size_t size() const noexcept { return n; }
@@ -270,7 +300,7 @@ private:
     explicit ExactMetric(ExternalStorage storage) : storage_(std::move(storage)) {}
 
     static void validate_square_symmetric(const numeric::ExactMatrix& form) {
-        if (form.rows() == 0 || form.rows() != form.cols()) throw std::invalid_argument("metric must be nonempty square form");
+        if (form.rows() != form.cols()) throw std::invalid_argument("metric must be square form");
         for (const auto& [key, value] : form.entries()) {
             if (value != form.get(key.second, key.first)) throw std::invalid_argument("metric must be symmetric");
         }

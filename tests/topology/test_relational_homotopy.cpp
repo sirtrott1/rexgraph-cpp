@@ -59,6 +59,17 @@ static rfc::core::RelationalComplex make_klein_bottle() {
 int main() {
     try {
         using namespace rfc;
+        core::RelationSignature untyped_signature;
+        const auto untyped_edge=untyped_signature.add_type("edge",core::BoundaryPolicy::DeclaredExact,2,2);
+        const auto untyped_face=untyped_signature.add_type("face",core::BoundaryPolicy::DeclaredExact,2,2);
+        core::RelationalComplexBuilder untyped_builder(untyped_signature);
+        untyped_builder.add_grade_one(untyped_edge,{{0,true,true,false,1},{1,true,false,false,1}});
+        untyped_builder.add_higher(core::Grade{2},untyped_face,{{0,true,false,false,1},{0,true,true,false,1}});
+        const auto untyped_complex=untyped_builder.freeze();
+        bool refused=false;
+        try { (void)topology::fundamental_groupoid_presentation(untyped_complex); }
+        catch(const std::invalid_argument&) { refused=true; }
+        require(refused,"complete topology projection silently omitted an untyped attachment");
         const auto triangle=make_filled_triangle();
         topology::PairwisePathGroupoid g(triangle);
         const auto loop=topology::PairwisePath::compose(topology::PairwisePath::compose(g.generator(0),g.generator(1)),g.generator(2,false));

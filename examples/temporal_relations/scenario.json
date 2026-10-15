@@ -1,0 +1,20 @@
+{
+  "title": "Synthetic ex vivo perfusion study",
+  "data_status": "Constructed mathematical fixture; no patient data or measured biological results",
+  "interpretation": "Declared biomedical presentation of the retained typed temporal fixture; source bytes and exact calculations unchanged",
+  "vocabulary": {
+    "startup": "Perfusion initiation",
+    "alarm": "Flow disturbance",
+    "baseline": "Control interval",
+    "inspection": "Delayed assay report",
+    "repair": "Protocol adjustment",
+    "episode": "Perfusion episode",
+    "closure": "Episode consistency relation"
+  },
+  "signal_units": "Dimensionless constructed values",
+  "time_units": "Minutes",
+  "boundary": "end minus start",
+  "higher_boundary": "startup + alarm + repair - episode",
+  "semantic_roles": "Ordered equipment occurrences are separate from the declared time boundary realization",
+  "availability": "Every displayed history and numerical fit selects its own publication cutoff"
+}

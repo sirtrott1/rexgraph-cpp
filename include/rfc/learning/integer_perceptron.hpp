@@ -23,6 +23,9 @@ public:
     explicit ExactIntegerPerceptron(std::size_t feature_count)
         : weights_(feature_count, 0) {}
 
+    ExactIntegerPerceptron(std::vector<std::int64_t> weights, std::int64_t bias)
+        : weights_(std::move(weights)), bias_(bias) {}
+
     [[nodiscard]] std::int64_t score(const std::vector<SparseIntFeature>& features) const {
         std::int64_t acc = bias_;
         for (const auto& feature : features) {

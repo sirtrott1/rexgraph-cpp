@@ -20,6 +20,12 @@ compile_commands.json
 *.gcno
 *.profraw
 *.profdata
+*.pch
+*.gch
+*.pdb
+*.ilk
+*.dSYM/
+install_manifest.txt
 
 # Local tools and generated results
 /.cache/
@@ -32,11 +38,16 @@ __pycache__/
 .pytest_cache/
 *.log
 *.html
+!examples/temporal_dynamics/index.html
+!examples/temporal_relations/index.html
 *.executed.ipynb
 *.ipynb
 *.pdf
 *.zip
 *.tar.gz
+*.tar.xz
+*.tgz
+*.7z
 *.sqlite
 *.sqlite3
 *.db
@@ -56,10 +67,26 @@ __pycache__/
 /verification/
 /backups/
 /paper/
+/papers/
+/research/
+/experiments/
+/notes/
+/reports/
+/archives/
+/context/
+/dist/
 /notebooks/
 /AGENTS.md
 /CHECKSUMS.sha256
 /FILE_MANIFEST.txt
 *.patch
+*.tex
+*.bib
+*.aux
+*.bbl
+*.blg
+*.fls
+*.fdb_latexmk
+*.synctex.gz
 *.md
 !README.md

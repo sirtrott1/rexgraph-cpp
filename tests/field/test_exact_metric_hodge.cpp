@@ -30,6 +30,24 @@ int main(){
     using rfc::numeric::Rational;
     using rfc::numeric::rational;
     using rfc::numeric::ExactMatrix;
+    using rfc::field::ExactMetric;
+    using rfc::numeric::RationalVector;
+    for (const auto& zero : {ExactMetric::identity(0), ExactMetric::diagonal({}), ExactMetric(ExactMatrix(0,0))}) {
+        require(zero.size()==0 && zero.apply(RationalVector{}).empty() && zero.solve(RationalVector{}).empty(),"zero-carrier metric action failed");
+        require(zero.inner({}, {})==0 && zero.materialize()==ExactMatrix(0,0),"zero-carrier metric realization failed");
+        bool refused=false;
+        try { (void)zero.apply(RationalVector{1}); } catch(const std::invalid_argument&) { refused=true; }
+        require(refused,"zero carrier accepted a nonempty field");
+    }
+    rfc::core::RelationalComplexBuilder empty_builder(rfc::core::RelationSignature{});
+    empty_builder.declare_witness_identity(0);
+    empty_builder.declare_grade(rfc::core::Grade{2});
+    const auto empty_complex=empty_builder.freeze();
+    const std::vector<ExactMetric> empty_metrics{ExactMetric::identity(1),ExactMetric::identity(0),ExactMetric::identity(0)};
+    const rfc::field::ExactHodgeOperator empty_hodge(empty_complex,rfc::core::Grade{1},empty_metrics);
+    require(empty_hodge.apply(RationalVector{}).empty() && empty_hodge.harmonic_frame()==ExactMatrix(0,0),"empty intermediate grade Hodge failed");
+    const auto empty_projectors=rfc::field::exact_hodge_projectors(empty_hodge);
+    require(empty_projectors.project_harmonic({}).empty(),"empty grade projector failed");
     std::vector<rfc::field::ExactMetric> M;
     M.emplace_back(ExactMatrix::from_rows({{2,1,0},{1,3,1},{0,1,2}}));
     M.emplace_back(ExactMatrix::from_rows({{4,1,0},{1,3,1},{0,1,5}}));

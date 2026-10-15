@@ -8,6 +8,7 @@
 #include "rfc/storage/temporal_finite.hpp"
 #include "rfc/storage/declaration_codec.hpp"
 #include "rfc/storage/declaration_adapters.hpp"
+#include "rfc/storage/algebraic_archive_history.hpp"
 
 // Application/execution layers.  These consume the fundamental relational
 // mathematics and may be excluded entirely by users who need only rfc::fundamentals.
