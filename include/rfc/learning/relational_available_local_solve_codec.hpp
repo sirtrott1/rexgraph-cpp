@@ -76,7 +76,7 @@ inline AvailableRelationalLocalResult decode_available_relational_local_result(s
         Reader q(raw_rhs, policy); inference::field_program_codec_detail::header(q, raw_rhs, available_evidence_codec_detail::choice_magic);
         family = available_evidence_codec_detail::preflight_family(q.blob(), authority, policy, limits, callback);
         free = relational_affine_codec_detail::vector(q); const auto key = q.u64(); const auto receipt = q.blob();
-        const auto payload = relational_parameter_setting_payload(family->evidence.native, family->evidence.obligations, free);
+        const auto payload = relational_parameter_setting_payload(family->evidence.native.span(), family->evidence.obligations, free);
         setting = authority.require(key, Role::Prospective, payload); canonical(receipt, setting->receipt());
         const auto native = q.blob(); choice_witness.assign(native.begin(), native.end()); require(!q.remaining(), "trailing local choice bytes");
     }

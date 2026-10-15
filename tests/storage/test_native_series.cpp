@@ -42,6 +42,11 @@ void basics(const std::filesystem::path& out) {
     }();
     check(detached.sequence==40 && *detached.bytes==encode_rfcx(h.a.source).bytes,"native component lost its immutable owner");
     equal(*decode_native_series(initial_bytes).tail().pin(), h.a);
+    auto mutable_input=initial_bytes;
+    const auto independently_owned=decode_native_series(mutable_input);
+    std::fill(mutable_input.begin(),mutable_input.end(),std::byte{0});
+    check(encode_native_series(independently_owned)==initial_bytes,
+          "reader retained a mutable caller byte alias");
     save(out / "empty.rfcxs", initial_bytes);
     s.append(h.first); s.append_encoded(encode_temporal_segment(h.second));
     auto range = s.difference(40, 42); auto before = range.before(); auto after = range.after();
@@ -163,6 +168,116 @@ void chronology() {
     rejects([&] { (void)death.difference(0, 2).field_evolution(10); }, "field removal silently bridged");
     rejects([&] { (void)death.difference(0, 2).correspondence(1); }, "carrier removal silently bridged");
 }
+void target_appends() {
+    const auto before_checks = checks;
+    PaperHistory h;
+    NativeTemporalSeries reference(h.a, 700), direct(h.a, 700);
+    const auto fork = direct;
+    const auto pin = direct.tail();
+    reference.append(h.first); direct.append_target(h.b, {{1, h.J0}});
+    reference.checkpoint(41); direct.checkpoint(41);
+    reference.append(h.second); direct.append_target(h.c, {{1, h.J1}});
+    check(encode_native_series(direct) == encode_native_series(reference), "target append changed complete bytes");
+    equal(*direct.at(41).pin(), h.b); equal(*direct.tail().pin(), h.c);
+    equal(pin.endpoint(), h.a);
+    check(fork.segment_count() == 0 && fork.last_sequence() == 40, "target append changed a fork");
+    check(direct.difference(40,42).correspondence(1) == h.J1.multiply(h.J0), "target append changed map order");
+    h.c.tensors[0] = field_tensor(10,1,{0,0});
+    check(direct.tail().pin()->tensors[0].tensor.state(0) == Q{13}, "target append retained a caller alias");
+    const auto saved = encode_native_series(direct);
+    auto invalid = *direct.tail().pin();
+    rejects([&] { direct.append_target(invalid); }, "target append accepted a repeated sequence");
+    invalid.sequence = 43;
+    rejects([&] { direct.append_target(invalid, {{1,M::identity(3)}}); }, "target append accepted a wrong map shape");
+    rejects([&] { direct.append_target(invalid, {{1,M::identity(2)},{1,M::identity(2)}}); }, "target append accepted duplicate maps");
+    invalid.tensors[0].output = 999;
+    rejects([&] { direct.append_target(invalid); }, "target append accepted an undeclared carrier");
+    check(encode_native_series(direct) == saved, "failed target append changed history");
+
+    auto zero = endpoint(0,{0,0});
+    NativeTemporalSeries ab(zero,701), ba(zero,701);
+    auto next = zero; next.sequence = 1;
+    const auto A = M::from_rows({{1,1},{0,1}}), B = M::from_rows({{1,0},{1,1}});
+    ab.append_target(next,{{1,A}}); ba.append_target(next,{{1,B}});
+    next.sequence = 2; ab.append_target(next,{{1,B}}); ba.append_target(next,{{1,A}});
+    check(!ab.same_history(ba), "target append erased equal-output operation history");
+    check(ab.difference(0,2).correspondence(1) == B.multiply(A), "target append reversed the operation word");
+    check(ba.difference(0,2).correspondence(1) == A.multiply(B), "target append merged noncommuting words");
+    next.sequence = 3;
+    next.tensors[0].tensor = {numeric::IndexDomain::linear(2), numeric::StructuralSupport::sparse(2,{0}),
+                             numeric::SparseRationalVector(2)};
+    ab.append_target(next);
+    check(ab.tail().pin()->tensors[0].tensor.state(0) == Q{0}, "target append removed supported zero");
+    check(!ab.tail().pin()->tensors[0].tensor.support().contains(1), "target append filled absent support");
+    const auto roundtrip = decode_native_series(encode_native_series(ab));
+    equal(*roundtrip.tail().pin(), next);
+    auto death = next; death.sequence = 4; death.tensors.clear(); death.carriers.clear(); ab.append_target(death);
+    next.sequence = 5; ab.append_target(next);
+    rejects([&] { (void)ab.difference(3,5).field_evolution(10); }, "target append bridged field death and rebirth");
+
+    for (unsigned mode = 0; mode < 4; ++mode) {
+        NativeSeriesLimits limits;
+        if (mode == 0) limits.max_segments = 0;
+        if (mode == 1) limits.max_archive_bytes = fork.archive_bytes();
+        if (mode == 2) limits.temporal.max_dimension = 4;
+        NativeTemporalSeries limited(h.a,700,limits);
+        if (mode == 3) limited = NativeTemporalSeries(endpoint(UINT64_MAX,{1,2}),700,limits);
+        const auto original = encode_native_series(limited);
+        rejects([&] { limited.append_target(h.b,{{1,h.J0}}); }, "target append ignored a native history limit");
+        check(encode_native_series(limited) == original, "limited target append published a prefix");
+    }
+    auto moved = std::move(direct);
+    rejects([&] { direct.append_target(next); }, "moved-from series accepted target append");
+    check(encode_native_series(moved) == saved, "target append move changed history");
+    std::cout << "target_append_checks=" << checks-before_checks << '\n';
+}
+void endpoint_visits() {
+    PaperHistory h; NativeTemporalSeries series(h.a, 700);
+    series.append(h.first); series.append(h.second); series.checkpoint(41); series.checkpoint(42);
+    const auto saved = encode_native_series(series);
+    std::vector<NativeSeriesEndpoint> pins;
+    series.visit_endpoints([&](const auto& endpoint) { pins.push_back(endpoint); });
+    check(pins.size() == 3, "endpoint visit omitted a retained endpoint");
+    std::size_t replayed = 0;
+    for (std::size_t i = 0; i < pins.size(); ++i) {
+        check(pins[i].sequence() == 40+i && pins[i].source_namespace() == 700, "endpoint visit order or owner differs");
+        const auto reference = series.at(40+i);
+        equal(pins[i].endpoint(), reference.endpoint());
+        const auto stats = pins[i].stats(); replayed += stats.replayed_segments;
+        check(!stats.used_checkpoint && stats.replayed_segments == (i ? 1u : 0u), "endpoint visit replayed a prefix");
+        check(stats.starting_sequence == (i ? 39+i : 40), "endpoint visit starting sequence differs");
+    }
+    check(replayed == 2 && encode_native_series(series) == saved, "endpoint visit changed history or repeated frames");
+    auto reentrant = series;
+    std::vector<std::uint64_t> visited;
+    reentrant.visit_endpoints([&](const auto& endpoint) {
+        visited.push_back(endpoint.sequence());
+        if (endpoint.sequence() == 40) {
+            reentrant.repack_checkpoints({});
+            auto next = h.c; next.sequence = 43; reentrant.append_target(next);
+        }
+    });
+    check(visited == std::vector<std::uint64_t>{40,41,42} && reentrant.last_sequence() == 43,
+          "endpoint visit followed a callback publication change");
+    std::size_t calls = 0;
+    rejects([&] { series.visit_endpoints([&](const auto&) {
+        if (++calls == 2) throw std::runtime_error("stop endpoint visit");
+    }); }, "endpoint visit swallowed a callback exception");
+    check(calls == 2 && encode_native_series(series) == saved, "failed endpoint visit changed history");
+    const auto detached = [&] {
+        NativeTemporalSeries local(h.a, 700); local.append(h.first); local.append(h.second);
+        std::vector<NativeSeriesEndpoint> owned;
+        local.visit_endpoints([&](const auto& endpoint) { owned.push_back(endpoint); });
+        return owned;
+    }();
+    equal(detached[0].endpoint(), h.a); equal(detached[1].endpoint(), h.b); equal(detached[2].endpoint(), h.c);
+    NativeTemporalSeries empty(h.a, 700); std::size_t count = 0;
+    empty.visit_endpoints([&](const auto& endpoint) { ++count; equal(endpoint.endpoint(), h.a); });
+    check(count == 1, "empty history did not visit its base");
+    auto moved = std::move(empty);
+    rejects([&] { empty.visit_endpoints([](const auto&) {}); }, "moved-from history accepted an endpoint visit");
+    check(moved.first_sequence() == 40, "endpoint visit move changed its owner");
+}
 void limits_and_streams() {
     PaperHistory h; auto bytes = stream(h);
     for (const auto chunk : {std::size_t{1}, std::size_t{2}, std::size_t{7}, std::size_t{31}, std::size_t{32},
@@ -199,10 +314,23 @@ void migration_and_indexes(const std::filesystem::path& out) {
     auto a = f2_fixture::endpoint(); const auto migration = f2_fixture::source_map(a.source.signature());
     auto b = f2_fixture::evolved(a, migration); auto seg = f2_fixture::segment(a, b, migration);
     NativeTemporalSeries series(a, 111); series.append(seg); series.checkpoint(1);
+    NativeTemporalSeries direct(a,111);
+    direct.append_target(b,{},{{1000,20}},RelationalCodeEncoding::Automatic,migration,
+                        make_temporal_declaration_update(a.declarations,b.declarations,f2_fixture::maps()));
+    direct.checkpoint(1);
+    check(encode_native_series(direct) == encode_native_series(series), "target append changed declaration migration bytes");
     auto c = b; c.sequence = 2; c.tensors[0] = field_tensor(1, 10, {5, 3});
     auto next = make_temporal_segment(b, c); series.append(next);
+    direct.append_target(c);
+    check(encode_native_series(direct) == encode_native_series(series), "target append changed migrated continuation");
     auto loaded = decode_native_series(encode_native_series(series));
     equal(*loaded.at(0).pin(), a); equal(*loaded.at(1).pin(), b); equal(*loaded.at(2).pin(), c);
+    std::size_t visited = 0;
+    loaded.visit_endpoints([&](const auto& endpoint) {
+        const auto reference = loaded.at(endpoint.sequence());
+        equal(endpoint.endpoint(), reference.endpoint()); ++visited;
+    });
+    check(visited == 3, "endpoint visit omitted a declaration migration");
     check(loaded.at(1).pin()->source.grade_count() == 4, "empty grades lost at checkpoint");
     check(loaded.at(1).pin()->source.grade(core::Grade{1}).incidence_count() == 5, "inactive occurrence lost");
     check(loaded.difference(0, 2).correspondence(10) == M::identity(2), "declaration recoding correspondence lost");
@@ -235,6 +363,7 @@ void migration_and_indexes(const std::filesystem::path& out) {
 }
 void random_history(const std::filesystem::path& out) {
     std::mt19937 random(0x705u); auto a = endpoint(0, {1, 2}); NativeTemporalSeries s(a, 555);
+    NativeTemporalSeries direct(a,555);
     std::vector<TemporalEndpoint> endpoints{a};
     std::vector<M> maps; std::vector<Vec> innovations; std::ofstream oracle(out / "random.txt"); vector(oracle, {1, 2});
     for (std::uint64_t step = 0; step < 32; ++step) {
@@ -246,12 +375,14 @@ void random_history(const std::filesystem::path& out) {
         const auto value = numeric::add(J.apply(native_series_detail::dense(a.tensors[0].tensor.values())), eta);
         auto b = endpoint(step + 1, value); const auto segment = make_temporal_segment(a, b, {{1, J}});
         s.append(segment); if ((step + 1) % 8 == 0) s.checkpoint(step + 1);
+        direct.append_target(b,{{1,J}}); if ((step + 1) % 8 == 0) direct.checkpoint(step + 1);
+        check(encode_native_series(direct) == encode_native_series(s), "random target append changed complete history bytes");
         endpoints.push_back(b); a = b; maps.push_back(J); innovations.push_back(eta);
         matrix(oracle, J); vector(oracle, eta); vector(oracle, value);
     }
     for (std::uint64_t seq = 0; seq <= 32; ++seq) {
-        const auto direct = s.at(seq, true), accelerated = s.at(seq);
-        equal(direct.endpoint(), endpoints.at(static_cast<std::size_t>(seq))); equal(direct.endpoint(), accelerated.endpoint());
+        const auto direct_endpoint = s.at(seq, true), accelerated = s.at(seq);
+        equal(direct_endpoint.endpoint(), endpoints.at(static_cast<std::size_t>(seq))); equal(direct_endpoint.endpoint(), accelerated.endpoint());
         check(accelerated.stats().replayed_segments <= 7, "checkpoint schedule exceeded interval");
     }
     const auto range = s.difference(0, 32); const auto expected = temporal::accumulate_innovations({1, 2}, maps, innovations);
@@ -341,7 +472,7 @@ int main(int argc, char** argv) {
         const auto out = argc > 1 ? std::filesystem::path(argv[1]) : std::filesystem::temp_directory_path() / "rfc-series-tests";
         if (std::filesystem::exists(out)) { if (argc > 1) throw std::invalid_argument("use a fresh output directory"); std::filesystem::remove_all(out); }
         std::filesystem::create_directories(out);
-        basics(out); chronology(); limits_and_streams(); migration_and_indexes(out); random_history(out); typed_moments(); malformed(out);
+        basics(out); chronology(); target_appends(); endpoint_visits(); limits_and_streams(); migration_and_indexes(out); random_history(out); typed_moments(); malformed(out);
         std::cout << "native_series_checks=" << checks << " passed\n"; return 0;
     } catch (const std::exception& e) { std::cerr << "FAIL after " << checks << ": " << e.what() << '\n'; return 1; }
 }

@@ -24,10 +24,18 @@ void history() {
     rejects([&]{(void)p.at(42);});rejects([&]{(void)p.difference(40,42);});rejects([&]{(void)p.segment_bytes(1);});
     rejects([&]{(void)NativeSeriesPrefix::capture(a,39);});rejects([&]{(void)NativeSeriesPrefix::capture(a,43);});
     auto empty=NativeSeriesPrefix::capture(a,40);check(empty.segment_count()==0,"zero prefix kept frame");
+    check(empty.tail().pin()==a.at(40).pin(),"initial prefix copied its actual base owner");
+    check(empty.segment_count()==0,"initial prefix retains future frames");
     same(empty.tail(),h.a);check(a.segment_count()==2 && b.segment_count()==2,"source history erased");
     auto evo=p.difference(40,41).field_evolution(10);check(evo.accumulation.terminal==Vec({3,1,6}),"past evolution changed");
     auto round=decode_native_series(encode_native_series(a));same(NativeSeriesPrefix::capture(round,41).tail(),p.tail());
+    const auto whole=NativeSeriesPrefix::capture(a,a.last_sequence());
+    check(whole.tail().pin()==a.tail().pin(),"complete prefix failed to retain its actual immutable owner");
+    check(whole.segment_count()==2 && whole.cutoff()==42,"complete prefix lost retained history");
     a.append(make_temporal_segment(h.c,endpoint(43,{Q{-100},Q{100}})));same(p.tail(),h.b);
+    same(whole.tail(),h.c);
+    rejects([&]{(void)whole.at(43);});rejects([&]{(void)whole.difference(40,43);});
+    check(whole.segment_count()==2 && whole.cutoff()==42,"later publication changed complete prefix");
 }
 void context() {
     using namespace models;

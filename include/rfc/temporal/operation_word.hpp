@@ -19,8 +19,14 @@ public:
     }
 
     [[nodiscard]] std::size_t length() const noexcept { return operators_.size(); }
-    [[nodiscard]] std::size_t input_dim() const noexcept { return operators_.front().cols(); }
-    [[nodiscard]] std::size_t output_dim() const noexcept { return operators_.back().rows(); }
+    [[nodiscard]] std::size_t input_dim() const {
+        if (operators_.empty()) throw std::logic_error("operation word has no declared input carrier");
+        return operators_.front().cols();
+    }
+    [[nodiscard]] std::size_t output_dim() const {
+        if (operators_.empty()) throw std::logic_error("operation word has no declared output carrier");
+        return operators_.back().rows();
+    }
     [[nodiscard]] const numeric::ExactMatrix& op(std::size_t i) const { return operators_.at(i); }
 
     [[nodiscard]] numeric::ExactMatrix composite() const {

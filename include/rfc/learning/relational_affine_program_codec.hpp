@@ -93,26 +93,51 @@ inline void field(Reader& r, const RelationalAffineField& expected) {
 }
 } // namespace relational_affine_codec_detail
 
-inline std::vector<std::byte> encode_relational_field_evidence(const PreparedRelationalFieldEvidence& evidence) {
+namespace relational_affine_codec_detail {
+struct PacketContext:inference::field_interface_codec_detail::PacketContext {
+    using inference::field_interface_codec_detail::PacketContext::PacketContext;
+    std::vector<std::pair<PreparedRelationalFieldEvidence,storage::PreparedBytePacket>> evidence_packets;
+};
+inline storage::PreparedBytePacket prepare_evidence(const PreparedRelationalFieldEvidence& evidence,PacketContext& context){
     using namespace relational_affine_codec_detail;
+    for(const auto& [actual,packet]:context.evidence_packets){if(actual.same_owner(evidence)){return packet;}}
     std::vector<PreparedRelationalFieldEvidence> lineage; auto current = evidence;
     while (true) { lineage.push_back(current); const auto parent = current.parent(); if (!parent) break; current = *parent; }
-    std::reverse(lineage.begin(), lineage.end()); auto w = envelope(evidence_magic); const auto& root = lineage.front();
+    std::reverse(lineage.begin(),lineage.end());storage::BytePacketBuilder w(evidence_magic,context.max_bytes,context.byte_guard.get());const auto& root=lineage.front();
     const auto limits = root.limits(); w.u64(limits.dimension); w.u64(limits.entries); w.u64(limits.steps); w.u64(limits.integer_bits);
-    blob(w, inference::encode_relational_field_program(root.program())); parameters(w, root.declaration()); witness(w, root);
+    w.blob(context.program(root.program()));w.write([&](auto& raw){parameters(raw,root.declaration());witness(raw,root);});
     w.u64(lineage.size()-1);
     for (std::size_t i = 1; i < lineage.size(); ++i) {
         const auto& state = lineage[i]; const auto first = lineage[i-1].observations().size(); const auto& observations = state.observations();
         w.u64(observations.size()-first);
         for (std::size_t j = first; j < observations.size(); ++j) {
-            const auto& o = observations[j]; w.u64(o.key); blob(w, inference::encode_accession_field_result(o.input));
-            blob(w, inference::encode_relational_input_use_asset(o.target_asset)); w.u64(o.target_use);
-            storage::temporal_codec_detail::tensor(w, o.target); w.u64(o.observed.size());
-            for (const auto c : o.observed) local_cell(w, c);
+            const auto& o=observations[j];if(context.check){context.check();}w.u64(o.key);
+            w.blob(inference::field_interface_codec_detail::prepare_accession(o.input,context));w.blob(context.asset(o.target_asset));
+            w.write([&](auto& raw){raw.u64(o.target_use);storage::temporal_codec_detail::tensor(raw,o.target);raw.u64(o.observed.size());for(const auto c:o.observed){local_cell(raw,c);}});
         }
-        witness(w, state);
+        w.write([&](auto& raw){witness(raw,state);});
     }
-    return finish(std::move(w));
+    auto packet=std::move(w).finish(context.check);context.evidence_packets.emplace_back(evidence,packet);return packet;
+}
+inline storage::PreparedBytePacket prepare_affine(const RelationalAffineProgramResult& result,PacketContext& context){
+    const auto pin=result;const auto evidence=pin.evidence();storage::BytePacketBuilder w(affine_magic,context.max_bytes,context.byte_guard.get());
+    w.blob(prepare_evidence(evidence,context));w.blob(inference::field_interface_codec_detail::prepare_accession(pin.input(),context));
+    const auto program=evidence.program();w.u64(program.declaration().nodes.size());
+    for(const auto& n:program.declaration().nodes){w.write([&](auto& raw){raw.u64(n.key);field(raw,pin.field(n.key));if(n.kind==inference::FieldProgramNodeKind::Boundary){field(raw,pin.occurrence_field(n.key));}});}
+    return std::move(w).finish(context.check);
+}
+inline storage::PreparedBytePacket prepare_evaluation(const RelationalAffineEvaluation& evaluation,PacketContext& context){
+    const auto pin=evaluation;storage::BytePacketBuilder w(evaluation_magic,context.max_bytes,context.byte_guard.get());
+    w.blob(prepare_affine(pin.family(),context));w.write([&](auto& raw){vector(raw,pin.free_values());});
+    w.blob(inference::field_interface_codec_detail::prepare_accession(pin.result(),context));return std::move(w).finish(context.check);
+}
+} // namespace relational_affine_codec_detail
+template<class Consume> void stream_relational_field_evidence(const PreparedRelationalFieldEvidence& evidence,Consume&& consume,std::function<void()> check={}){
+    const auto pin=evidence;relational_affine_codec_detail::PacketContext context(std::numeric_limits<std::size_t>::max(),std::move(check));
+    relational_affine_codec_detail::prepare_evidence(pin,context).stream(std::forward<Consume>(consume),context.check);
+}
+inline std::vector<std::byte> encode_relational_field_evidence(const PreparedRelationalFieldEvidence& evidence){
+    relational_affine_codec_detail::PacketContext context;return relational_affine_codec_detail::prepare_evidence(evidence,context).bytes();
 }
 inline PreparedRelationalFieldEvidence decode_relational_field_evidence(std::span<const std::byte> bytes,
     const storage::TemporalReadLimits& policy, numeric::ExactActionLimits cap = {}) {
@@ -136,18 +161,10 @@ inline PreparedRelationalFieldEvidence decode_relational_field_evidence(std::spa
         evidence = evidence.append(std::move(suffix), limits); witness(r, evidence);
     }
     inference::field_program_detail::require(r.remaining() == 0, "trailing whole-field evidence bytes");
-    canonical(bytes, encode_relational_field_evidence(evidence)); return evidence;
+    PacketContext context;canonical(bytes,prepare_evidence(evidence,context));return evidence;
 }
 inline std::vector<std::byte> encode_relational_affine_result(const RelationalAffineProgramResult& result) {
-    using namespace relational_affine_codec_detail;
-    const auto pin = result; const auto evidence = pin.evidence(); auto w = envelope(affine_magic);
-    blob(w, encode_relational_field_evidence(evidence)); blob(w, inference::encode_accession_field_result(pin.input()));
-    const auto program = evidence.program(); w.u64(program.declaration().nodes.size());
-    for (const auto& n : program.declaration().nodes) {
-        w.u64(n.key); field(w, pin.field(n.key));
-        if (n.kind == inference::FieldProgramNodeKind::Boundary) field(w, pin.occurrence_field(n.key));
-    }
-    return finish(std::move(w));
+    relational_affine_codec_detail::PacketContext context;return relational_affine_codec_detail::prepare_affine(result,context).bytes();
 }
 inline RelationalAffineProgramResult decode_relational_affine_result(std::span<const std::byte> bytes,
     const storage::TemporalReadLimits& policy, numeric::ExactActionLimits limits = {}) {
@@ -160,12 +177,10 @@ inline RelationalAffineProgramResult decode_relational_affine_result(std::span<c
         if (n.kind == inference::FieldProgramNodeKind::Boundary) field(r, result.occurrence_field(n.key));
     }
     inference::field_program_detail::require(r.remaining() == 0, "trailing affine result bytes");
-    canonical(bytes, encode_relational_affine_result(result)); return result;
+    PacketContext context;canonical(bytes,prepare_affine(result,context));return result;
 }
 inline std::vector<std::byte> encode_relational_affine_evaluation(const RelationalAffineEvaluation& evaluation) {
-    using namespace relational_affine_codec_detail;
-    const auto pin = evaluation; auto w = envelope(evaluation_magic); blob(w, encode_relational_affine_result(pin.family()));
-    vector(w, pin.free_values()); blob(w, inference::encode_accession_field_result(pin.result())); return finish(std::move(w));
+    relational_affine_codec_detail::PacketContext context;return relational_affine_codec_detail::prepare_evaluation(evaluation,context).bytes();
 }
 inline RelationalAffineEvaluation decode_relational_affine_evaluation(std::span<const std::byte> bytes,
     const storage::TemporalReadLimits& policy, numeric::ExactActionLimits limits = {}) {
@@ -174,6 +189,6 @@ inline RelationalAffineEvaluation decode_relational_affine_evaluation(std::span<
     const auto free = vector(r); auto evaluation = family.evaluate(free, limits);
     canonical(r.blob(), inference::encode_accession_field_result(evaluation.result()));
     inference::field_program_detail::require(r.remaining() == 0, "trailing affine evaluation bytes");
-    canonical(bytes, encode_relational_affine_evaluation(evaluation)); return evaluation;
+    relational_affine_codec_detail::PacketContext context;canonical(bytes,prepare_evaluation(evaluation,context));return evaluation;
 }
 } // namespace rfc::learning

@@ -91,8 +91,6 @@ if(RFC_BUILD_LOCAL_TOOLS)
     target_link_libraries(rfc_local_tool PRIVATE rfc::sqlite_interpretation)
   endif()
   install(TARGETS rfc_local_tool RUNTIME DESTINATION bin)
-  install(FILES README.md DESTINATION share/doc/rfc-local)
-  install(FILES docs/local/README.md DESTINATION share/doc/rfc-local/cli)
 endif()
 
 if(RFC_BUILD_APPS)
@@ -317,27 +315,41 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
   add_executable(rfc_binary_execution_tests tests/composite/test_execution.cpp)
   target_link_libraries(rfc_binary_execution_tests PRIVATE rfc::storage)
   add_test(NAME rfc_binary_execution COMMAND rfc_binary_execution_tests)
-  add_executable(rfc_relational_field_program_tests tests/inference/test_relational_field_program.cpp)
-  target_link_libraries(rfc_relational_field_program_tests PRIVATE rfc::inference Threads::Threads)
-  add_test(NAME rfc_relational_field_program COMMAND rfc_relational_field_program_tests)
-  add_test(NAME rfc_relational_field_program_fraction COMMAND ${Python3_EXECUTABLE}
-    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_relational_field_program.py $<TARGET_FILE:rfc_relational_field_program_tests>)
-  add_executable(rfc_relational_field_interface_tests tests/inference/test_relational_field_interface.cpp)
-  target_link_libraries(rfc_relational_field_interface_tests PRIVATE rfc::inference Threads::Threads)
-  add_test(NAME rfc_relational_field_interface COMMAND rfc_relational_field_interface_tests)
-  add_test(NAME rfc_relational_field_interface_fraction COMMAND ${Python3_EXECUTABLE}
-    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_relational_field_interface.py $<TARGET_FILE:rfc_relational_field_interface_tests>)
-  add_executable(rfc_relational_comparison_forms_tests tests/inference/test_relational_comparison_forms.cpp)
-  target_link_libraries(rfc_relational_comparison_forms_tests PRIVATE rfc::inference Threads::Threads)
-  add_test(NAME rfc_relational_comparison_forms COMMAND rfc_relational_comparison_forms_tests)
-  add_test(NAME rfc_relational_comparison_forms_fraction COMMAND ${Python3_EXECUTABLE}
-    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_relational_comparison_forms.py $<TARGET_FILE:rfc_relational_comparison_forms_tests>)
-
-  add_executable(rfc_relational_value_admission_tests tests/inference/test_relational_value_admission.cpp)
-  target_link_libraries(rfc_relational_value_admission_tests PRIVATE rfc::inference Threads::Threads)
-  add_test(NAME rfc_relational_value_admission COMMAND rfc_relational_value_admission_tests)
-  add_test(NAME rfc_relational_value_admission_fraction COMMAND ${Python3_EXECUTABLE}
-    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_relational_value_admission.py $<TARGET_FILE:rfc_relational_value_admission_tests>)
+  add_executable(rfc_native_update_tests tests/inference/test_native_updates.cpp)
+  target_link_libraries(rfc_native_update_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_updates COMMAND rfc_native_update_tests)
+  add_test(NAME rfc_native_updates_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_native_updates.py $<TARGET_FILE:rfc_native_update_tests>)
+  add_executable(rfc_native_green_tests tests/inference/test_native_green.cpp)
+  target_link_libraries(rfc_native_green_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_green COMMAND rfc_native_green_tests)
+  add_test(NAME rfc_native_green_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_native_green.py $<TARGET_FILE:rfc_native_green_tests>)
+  add_executable(rfc_native_frame_tests tests/inference/test_native_frames.cpp)
+  target_link_libraries(rfc_native_frame_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_frames COMMAND rfc_native_frame_tests)
+  add_test(NAME rfc_native_frames_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_native_frames.py $<TARGET_FILE:rfc_native_frame_tests>)
+  add_executable(rfc_native_selected_observation_tests tests/inference/test_native_selected_observation.cpp)
+  target_link_libraries(rfc_native_selected_observation_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_selected_observation COMMAND rfc_native_selected_observation_tests)
+  add_test(NAME rfc_native_selected_observation_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_native_selected_observation.py $<TARGET_FILE:rfc_native_selected_observation_tests>)
+  add_executable(rfc_native_linear_observation_tests tests/inference/test_native_linear_observation.cpp)
+  target_link_libraries(rfc_native_linear_observation_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_linear_observation COMMAND rfc_native_linear_observation_tests)
+  add_test(NAME rfc_native_linear_observation_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_native_linear_observation.py $<TARGET_FILE:rfc_native_linear_observation_tests>)
+  add_executable(rfc_native_metric_novelty_tests tests/inference/test_native_metric_novelty.cpp)
+  target_link_libraries(rfc_native_metric_novelty_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_metric_novelty COMMAND rfc_native_metric_novelty_tests)
+  add_test(NAME rfc_native_metric_novelty_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_native_metric_novelty.py $<TARGET_FILE:rfc_native_metric_novelty_tests>)
+  add_executable(rfc_native_tensor_product_tests tests/inference/test_native_tensor_product.cpp)
+  target_link_libraries(rfc_native_tensor_product_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_tensor_product COMMAND rfc_native_tensor_product_tests)
+  add_test(NAME rfc_native_tensor_product_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_native_tensor_product.py $<TARGET_FILE:rfc_native_tensor_product_tests>)
   if(RFC_BUILD_LEARNING)
     add_executable(rfc_prepared_consumer_tests tests/inference/test_prepared_consumers.cpp)
     target_link_libraries(rfc_prepared_consumer_tests PRIVATE rfc::learning rfc::native_execution)
@@ -363,6 +375,144 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
   add_executable(rfc_composite_tests tests/composite/test_machine_composite.cpp)
   target_link_libraries(rfc_composite_tests PRIVATE rfc::composite)
   add_test(NAME rfc_machine_composite_binary COMMAND rfc_composite_tests)
+
+  add_executable(rfc_native_gluing_tests tests/inference/test_native_gluing.cpp)
+  target_link_libraries(rfc_native_gluing_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_gluing COMMAND rfc_native_gluing_tests)
+  add_test(NAME rfc_native_gluing_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_native_gluing.py $<TARGET_FILE:rfc_native_gluing_tests>)
+  add_executable(rfc_relational_field_program_tests tests/inference/test_relational_field_program.cpp)
+  target_link_libraries(rfc_relational_field_program_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_relational_field_program COMMAND rfc_relational_field_program_tests)
+  add_test(NAME rfc_relational_field_program_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_relational_field_program.py $<TARGET_FILE:rfc_relational_field_program_tests>)
+  add_executable(rfc_relational_field_interface_tests tests/inference/test_relational_field_interface.cpp)
+  target_link_libraries(rfc_relational_field_interface_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_relational_field_interface COMMAND rfc_relational_field_interface_tests)
+  add_executable(rfc_relational_known_tensor_square_tests tests/inference/test_relational_known_tensor_square.cpp)
+  target_link_libraries(rfc_relational_known_tensor_square_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_relational_known_tensor_square COMMAND rfc_relational_known_tensor_square_tests)
+
+  add_executable(rfc_relational_available_tensor_square_tests tests/inference/test_relational_available_tensor_square.cpp)
+  target_link_libraries(rfc_relational_available_tensor_square_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_relational_available_tensor_square COMMAND rfc_relational_available_tensor_square_tests)
+  add_test(NAME rfc_relational_available_tensor_square_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_relational_available_tensor_square.py $<TARGET_FILE:rfc_relational_available_tensor_square_tests>)
+  add_executable(rfc_positive_semidefinite_tests tests/numeric/test_positive_semidefinite.cpp)
+  target_link_libraries(rfc_positive_semidefinite_tests PRIVATE rfc::numeric)
+  add_test(NAME rfc_positive_semidefinite COMMAND rfc_positive_semidefinite_tests)
+  add_test(NAME rfc_relational_field_interface_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_relational_field_interface.py $<TARGET_FILE:rfc_relational_field_interface_tests>)
+  add_executable(rfc_relational_comparison_forms_tests tests/inference/test_relational_comparison_forms.cpp)
+  target_link_libraries(rfc_relational_comparison_forms_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_relational_comparison_forms COMMAND rfc_relational_comparison_forms_tests)
+  add_test(NAME rfc_relational_comparison_forms_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_relational_comparison_forms.py $<TARGET_FILE:rfc_relational_comparison_forms_tests>)
+
+  add_executable(rfc_relational_value_admission_tests tests/inference/test_relational_value_admission.cpp)
+  target_link_libraries(rfc_relational_value_admission_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_relational_value_admission COMMAND rfc_relational_value_admission_tests)
+  add_test(NAME rfc_relational_value_admission_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_relational_value_admission.py $<TARGET_FILE:rfc_relational_value_admission_tests>)
+
+  add_executable(rfc_native_relative_tests tests/inference/test_native_relative.cpp)
+  target_link_libraries(rfc_native_relative_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_relative COMMAND rfc_native_relative_tests)
+  add_test(NAME rfc_native_relative_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_native_relative.py $<TARGET_FILE:rfc_native_relative_tests>)
+
+  add_executable(rfc_native_cylinder_tests tests/inference/test_native_cylinder.cpp)
+  target_link_libraries(rfc_native_cylinder_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_cylinder COMMAND rfc_native_cylinder_tests)
+  add_test(NAME rfc_native_cylinder_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_native_cylinder.py $<TARGET_FILE:rfc_native_cylinder_tests>)
+
+  add_executable(rfc_native_covering_tests tests/inference/test_native_covering.cpp)
+  target_link_libraries(rfc_native_covering_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_covering COMMAND rfc_native_covering_tests)
+  add_test(NAME rfc_native_covering_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_native_covering.py $<TARGET_FILE:rfc_native_covering_tests>)
+
+  add_executable(rfc_native_relational_homotopy_tests tests/inference/test_native_relational_homotopy.cpp)
+  target_link_libraries(rfc_native_relational_homotopy_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_relational_homotopy COMMAND rfc_native_relational_homotopy_tests)
+  add_test(NAME rfc_native_relational_homotopy_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_native_relational_homotopy.py $<TARGET_FILE:rfc_native_relational_homotopy_tests>)
+
+  add_executable(rfc_native_homotopy_composition_tests tests/inference/test_native_homotopy_composition.cpp)
+  target_link_libraries(rfc_native_homotopy_composition_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_homotopy_composition COMMAND rfc_native_homotopy_composition_tests)
+  add_test(NAME rfc_native_homotopy_composition_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_native_homotopy_composition.py $<TARGET_FILE:rfc_native_homotopy_composition_tests>)
+
+  add_executable(rfc_native_homotopy_sequence_tests tests/inference/test_native_homotopy_sequence.cpp)
+  target_link_libraries(rfc_native_homotopy_sequence_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_homotopy_sequence COMMAND rfc_native_homotopy_sequence_tests)
+  add_test(NAME rfc_native_homotopy_sequence_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_native_homotopy_sequence.py $<TARGET_FILE:rfc_native_homotopy_sequence_tests>)
+
+  add_executable(rfc_native_covering_homotopy_tests tests/inference/test_native_covering_homotopy.cpp)
+  target_link_libraries(rfc_native_covering_homotopy_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_covering_homotopy COMMAND rfc_native_covering_homotopy_tests)
+  add_test(NAME rfc_native_covering_homotopy_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_native_covering_homotopy.py $<TARGET_FILE:rfc_native_covering_homotopy_tests>)
+
+  add_executable(rfc_native_covering_homotopy_base_change_tests tests/inference/test_native_covering_homotopy_base_change.cpp)
+  target_link_libraries(rfc_native_covering_homotopy_base_change_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_covering_homotopy_base_change COMMAND rfc_native_covering_homotopy_base_change_tests)
+  add_test(NAME rfc_native_covering_homotopy_base_change_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_native_covering_homotopy_base_change.py $<TARGET_FILE:rfc_native_covering_homotopy_base_change_tests>)
+
+  add_executable(rfc_native_product_map_associativity_tests tests/inference/test_native_product_map_associativity.cpp)
+  target_link_libraries(rfc_native_product_map_associativity_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_product_map_associativity COMMAND rfc_native_product_map_associativity_tests)
+  add_test(NAME rfc_native_product_map_associativity_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_native_product_map_associativity.py $<TARGET_FILE:rfc_native_product_map_associativity_tests>)
+  set_tests_properties(rfc_native_product_map_associativity rfc_native_product_map_associativity_fraction PROPERTIES TIMEOUT 600)
+
+  add_executable(rfc_native_product_map_composition_tests tests/inference/test_native_product_map_composition.cpp)
+  target_link_libraries(rfc_native_product_map_composition_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_product_map_composition COMMAND rfc_native_product_map_composition_tests)
+  add_test(NAME rfc_native_product_map_composition_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_native_product_map_composition.py $<TARGET_FILE:rfc_native_product_map_composition_tests>)
+  set_tests_properties(rfc_native_product_map_composition rfc_native_product_map_composition_fraction PROPERTIES TIMEOUT 600)
+
+  add_executable(rfc_native_product_chain_map_tests tests/inference/test_native_product_chain_map.cpp)
+  target_link_libraries(rfc_native_product_chain_map_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_product_chain_map COMMAND rfc_native_product_chain_map_tests)
+  add_test(NAME rfc_native_product_chain_map_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_native_product_chain_map.py $<TARGET_FILE:rfc_native_product_chain_map_tests>)
+  set_tests_properties(rfc_native_product_chain_map rfc_native_product_chain_map_fraction PROPERTIES TIMEOUT 600)
+
+  add_executable(rfc_native_product_braid_tests tests/inference/test_native_product_braid.cpp)
+  target_link_libraries(rfc_native_product_braid_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_product_braid COMMAND rfc_native_product_braid_tests)
+  add_test(NAME rfc_native_product_braid_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_native_product_braid.py $<TARGET_FILE:rfc_native_product_braid_tests>)
+  set_tests_properties(rfc_native_product_braid rfc_native_product_braid_fraction PROPERTIES TIMEOUT 600)
+
+  add_executable(rfc_native_product_hexagon_tests tests/inference/test_native_product_hexagon.cpp)
+  target_link_libraries(rfc_native_product_hexagon_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_product_hexagon COMMAND rfc_native_product_hexagon_tests)
+  add_test(NAME rfc_native_product_hexagon_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_native_product_hexagon.py $<TARGET_FILE:rfc_native_product_hexagon_tests>)
+  set_tests_properties(rfc_native_product_hexagon rfc_native_product_hexagon_fraction PROPERTIES TIMEOUT 600)
+
+  add_executable(rfc_native_product_interchange_tests tests/inference/test_native_product_interchange.cpp)
+  target_link_libraries(rfc_native_product_interchange_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_product_interchange COMMAND rfc_native_product_interchange_tests)
+  add_test(NAME rfc_native_product_interchange_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_native_product_interchange.py $<TARGET_FILE:rfc_native_product_interchange_tests>)
+  add_executable(rfc_native_product_pentagon_tests tests/inference/test_native_product_pentagon.cpp)
+  target_link_libraries(rfc_native_product_pentagon_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_product_pentagon COMMAND rfc_native_product_pentagon_tests)
+  add_test(NAME rfc_native_product_pentagon_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_native_product_pentagon.py $<TARGET_FILE:rfc_native_product_pentagon_tests>)
+  add_executable(rfc_native_product_associator_tests tests/inference/test_native_product_associator.cpp)
+  target_link_libraries(rfc_native_product_associator_tests PRIVATE rfc::inference Threads::Threads)
+  add_test(NAME rfc_native_product_associator COMMAND rfc_native_product_associator_tests)
+  add_test(NAME rfc_native_product_associator_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/inference/check_native_product_associator.py $<TARGET_FILE:rfc_native_product_associator_tests>)
 
   add_executable(rfc_database_tests tests/database/test_exact_memory.cpp)
   target_link_libraries(rfc_database_tests PRIVATE rfc::database)
@@ -462,6 +612,25 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
     add_test(NAME rfc_relational_field_evidence_fraction COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/learning/check_relational_field_evidence.py $<TARGET_FILE:rfc_relational_field_evidence_tests>)
 
+    add_executable(rfc_relational_sparse_lineage_tests tests/learning/test_relational_sparse_lineage.cpp)
+    target_link_libraries(rfc_relational_sparse_lineage_tests PRIVATE rfc::learning Threads::Threads)
+    add_test(NAME rfc_relational_sparse_lineage COMMAND rfc_relational_sparse_lineage_tests)
+    add_executable(rfc_relational_available_tensor_square_evidence_tests tests/learning/test_relational_available_tensor_square_evidence.cpp)
+    target_link_libraries(rfc_relational_available_tensor_square_evidence_tests PRIVATE rfc::learning Threads::Threads)
+    add_test(NAME rfc_relational_available_tensor_square_evidence COMMAND rfc_relational_available_tensor_square_evidence_tests)
+    add_executable(rfc_relational_four_use_moment_basis_tests tests/learning/test_relational_four_use_moment_basis.cpp)
+    target_link_libraries(rfc_relational_four_use_moment_basis_tests PRIVATE rfc::learning Threads::Threads)
+    add_test(NAME rfc_relational_four_use_moment_basis COMMAND rfc_relational_four_use_moment_basis_tests)
+    add_executable(rfc_relational_initial_input_lineage_tests tests/inference/test_relational_initial_input_lineage.cpp)
+    target_link_libraries(rfc_relational_initial_input_lineage_tests PRIVATE rfc::inference Threads::Threads)
+    add_test(NAME rfc_relational_initial_input_lineage COMMAND rfc_relational_initial_input_lineage_tests)
+    add_executable(rfc_relational_four_use_grammar_codec_tests tests/learning/test_relational_four_use_grammar_codec.cpp)
+    target_link_libraries(rfc_relational_four_use_grammar_codec_tests PRIVATE rfc::learning Threads::Threads)
+    add_test(NAME rfc_relational_four_use_grammar_codec COMMAND rfc_relational_four_use_grammar_codec_tests)
+    add_executable(rfc_relational_origin_storage_tests tests/inference/test_relational_origin_storage.cpp)
+    target_link_libraries(rfc_relational_origin_storage_tests PRIVATE rfc::inference Threads::Threads)
+    add_test(NAME rfc_relational_origin_storage COMMAND rfc_relational_origin_storage_tests)
+
     add_executable(rfc_relational_finite_operator_tests tests/learning/test_relational_finite_operator.cpp)
     target_link_libraries(rfc_relational_finite_operator_tests PRIVATE rfc::learning Threads::Threads)
     add_test(NAME rfc_relational_finite_operator COMMAND rfc_relational_finite_operator_tests)
@@ -471,6 +640,15 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
     add_executable(rfc_relational_shared_finite_operator_tests tests/learning/test_relational_shared_finite_operator.cpp)
     target_link_libraries(rfc_relational_shared_finite_operator_tests PRIVATE rfc::learning Threads::Threads)
     add_test(NAME rfc_relational_shared_finite_operator COMMAND rfc_relational_shared_finite_operator_tests)
+    add_executable(rfc_shared_packet_stream_tests tests/storage/test_shared_packet_stream.cpp)
+    target_link_libraries(rfc_shared_packet_stream_tests PRIVATE rfc::storage Threads::Threads)
+    add_test(NAME rfc_shared_packet_stream COMMAND rfc_shared_packet_stream_tests)
+    add_executable(rfc_prepared_byte_packet_tests tests/storage/test_prepared_byte_packet.cpp)
+    target_link_libraries(rfc_prepared_byte_packet_tests PRIVATE rfc::storage Threads::Threads)
+    add_test(NAME rfc_prepared_byte_packet COMMAND rfc_prepared_byte_packet_tests)
+    add_executable(rfc_byte_range_tests tests/storage/test_byte_range.cpp)
+    target_link_libraries(rfc_byte_range_tests PRIVATE rfc::storage Threads::Threads)
+    add_test(NAME rfc_byte_range COMMAND rfc_byte_range_tests)
     add_test(NAME rfc_relational_shared_finite_operator_fraction COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/learning/check_relational_shared_finite_operator.py $<TARGET_FILE:rfc_relational_shared_finite_operator_tests>)
 
@@ -613,6 +791,85 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
   target_link_libraries(rfc_relational_homotopy_tests PRIVATE rfc::topology)
   add_test(NAME rfc_relational_fundamental_homotopy COMMAND rfc_relational_homotopy_tests)
 
+  add_executable(rfc_native_phase_shape_tests tests/topology/test_native_phase_shapes.cpp)
+  target_link_libraries(rfc_native_phase_shape_tests PRIVATE rfc::field rfc::geometry rfc::algebra)
+  add_test(NAME rfc_native_phase_shapes COMMAND rfc_native_phase_shape_tests)
+
+  add_executable(rfc_attaching_transport_tests tests/topology/test_attaching_transport.cpp)
+  target_link_libraries(rfc_attaching_transport_tests PRIVATE rfc::field rfc::storage)
+  add_test(NAME rfc_attaching_transport COMMAND rfc_attaching_transport_tests)
+
+  add_executable(rfc_algebraic_phase_field_tests tests/topology/test_algebraic_phase_fields.cpp)
+  target_link_libraries(rfc_algebraic_phase_field_tests PRIVATE rfc::field rfc::storage)
+  add_test(NAME rfc_algebraic_phase_fields COMMAND rfc_algebraic_phase_field_tests)
+
+  add_executable(rfc_phase_fold_history_tests tests/temporal/test_phase_fold_histories.cpp)
+  target_link_libraries(rfc_phase_fold_history_tests PRIVATE rfc::temporal rfc::storage)
+  add_test(NAME rfc_phase_fold_histories COMMAND rfc_phase_fold_history_tests)
+
+  add_executable(rfc_phase_fold_archive_tests tests/storage/test_phase_fold_archive.cpp)
+  target_link_libraries(rfc_phase_fold_archive_tests PRIVATE rfc::storage)
+  add_test(NAME rfc_phase_fold_archive COMMAND rfc_phase_fold_archive_tests
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/storage/fixtures/phase_fold_v1)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(rfc_phase_fold_durable_tests tests/storage/test_phase_fold_durable.cpp)
+    target_link_libraries(rfc_phase_fold_durable_tests PRIVATE rfc::storage)
+    add_test(NAME rfc_phase_fold_durable COMMAND rfc_phase_fold_durable_tests)
+  endif()
+
+  add_executable(rfc_algebraic_module_tests tests/local/test_algebraic_modules.cpp)
+  target_link_libraries(rfc_algebraic_module_tests PRIVATE rfc::local rfc::geometry)
+  add_test(NAME rfc_algebraic_modules COMMAND rfc_algebraic_module_tests)
+
+  add_executable(rfc_cellular_attachment_tests tests/topology/test_cellular_attachments.cpp)
+  target_link_libraries(rfc_cellular_attachment_tests PRIVATE rfc::topology rfc::storage)
+  add_test(NAME rfc_cellular_attachments COMMAND rfc_cellular_attachment_tests)
+
+  add_executable(rfc_complex_root_certificate_tests tests/geometry/test_complex_root_certificates.cpp)
+  target_link_libraries(rfc_complex_root_certificate_tests PRIVATE rfc::geometry rfc::topology)
+  add_test(NAME rfc_complex_root_certificates COMMAND rfc_complex_root_certificate_tests)
+
+  add_executable(rfc_algebraic_metric_tests tests/field/test_algebraic_metrics.cpp)
+  target_link_libraries(rfc_algebraic_metric_tests PRIVATE rfc::field)
+  add_test(NAME rfc_algebraic_metrics COMMAND rfc_algebraic_metric_tests)
+
+  add_executable(rfc_algebraic_archive_tests tests/storage/test_algebraic_archive.cpp)
+  target_link_libraries(rfc_algebraic_archive_tests PRIVATE rfc::storage)
+  add_test(NAME rfc_algebraic_archive COMMAND rfc_algebraic_archive_tests)
+
+  add_executable(rfc_algebraic_graph_tests tests/storage/test_algebraic_graph.cpp)
+  target_link_libraries(rfc_algebraic_graph_tests PRIVATE rfc::storage)
+  add_test(NAME rfc_algebraic_graph COMMAND rfc_algebraic_graph_tests)
+
+  add_executable(rfc_algebraic_graph_history_tests tests/storage/test_algebraic_graph_history.cpp)
+  target_link_libraries(rfc_algebraic_graph_history_tests PRIVATE rfc::storage)
+  add_test(NAME rfc_algebraic_graph_history COMMAND rfc_algebraic_graph_history_tests
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/storage/fixtures/graph_history_v1)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(rfc_algebraic_graph_durable_tests tests/storage/test_algebraic_graph_durable.cpp)
+    target_link_libraries(rfc_algebraic_graph_durable_tests PRIVATE rfc::storage)
+    add_test(NAME rfc_algebraic_graph_durable COMMAND rfc_algebraic_graph_durable_tests)
+  endif()
+
+  add_executable(rfc_algebraic_query_tests tests/database/test_algebraic_query.cpp)
+  target_link_libraries(rfc_algebraic_query_tests PRIVATE rfc::native_query_execution)
+  add_test(NAME rfc_algebraic_query COMMAND rfc_algebraic_query_tests
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/storage/fixtures/algebraic_v1)
+
+  add_executable(rfc_algebraic_graph_database_tests tests/database/test_algebraic_graph_database.cpp)
+  target_link_libraries(rfc_algebraic_graph_database_tests PRIVATE rfc::native_query_execution)
+  add_test(NAME rfc_algebraic_graph_database COMMAND rfc_algebraic_graph_database_tests)
+
+  add_executable(rfc_algebraic_grade_tensor_tests tests/database/test_algebraic_grade_tensor.cpp)
+  target_link_libraries(rfc_algebraic_grade_tensor_tests PRIVATE rfc::native_query_execution)
+  add_test(NAME rfc_algebraic_grade_tensor COMMAND rfc_algebraic_grade_tensor_tests
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/storage/fixtures/algebraic_v1)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(rfc_algebraic_archive_durable_tests tests/storage/test_algebraic_archive_durable.cpp)
+    target_link_libraries(rfc_algebraic_archive_durable_tests PRIVATE rfc::storage)
+    add_test(NAME rfc_algebraic_archive_durable COMMAND rfc_algebraic_archive_durable_tests)
+  endif()
+
   add_executable(rfc_branching_homotopy_homology_tests tests/topology/test_branching_homotopy_homology.cpp)
   target_link_libraries(rfc_branching_homotopy_homology_tests PRIVATE rfc::topology)
   add_test(NAME rfc_branching_homotopy_homology COMMAND rfc_branching_homotopy_homology_tests)
@@ -743,6 +1000,21 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
   add_executable(rfc_low_rank_update_tests tests/field/test_low_rank_update.cpp)
   target_link_libraries(rfc_low_rank_update_tests PRIVATE rfc::field)
   add_test(NAME rfc_low_rank_green_update COMMAND rfc_low_rank_update_tests)
+  add_executable(rfc_prepared_update_tests tests/field/test_prepared_updates.cpp)
+  target_link_libraries(rfc_prepared_update_tests PRIVATE rfc::temporal Threads::Threads)
+  add_test(NAME rfc_prepared_updates COMMAND rfc_prepared_update_tests)
+  add_test(NAME rfc_prepared_updates_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/field/check_prepared_updates.py $<TARGET_FILE:rfc_prepared_update_tests>)
+
+  add_executable(rfc_prepared_global_action_tests tests/field/test_prepared_global_action.cpp)
+  target_link_libraries(rfc_prepared_global_action_tests PRIVATE rfc::field Threads::Threads)
+  add_test(NAME rfc_prepared_global_action COMMAND rfc_prepared_global_action_tests)
+
+  add_executable(rfc_prepared_harmonic_potential_tests tests/field/test_prepared_harmonic_potential.cpp)
+  target_link_libraries(rfc_prepared_harmonic_potential_tests PRIVATE rfc::field Threads::Threads)
+  add_test(NAME rfc_prepared_harmonic_potential COMMAND rfc_prepared_harmonic_potential_tests)
+  add_test(NAME rfc_prepared_harmonic_potential_fraction COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/field/check_prepared_harmonic_potential.py $<TARGET_FILE:rfc_prepared_harmonic_potential_tests>)
   add_executable(rfc_sparse_selected_solve_tests tests/numeric/test_sparse_selected_solve.cpp)
   target_link_libraries(rfc_sparse_selected_solve_tests PRIVATE rfc::numeric Threads::Threads)
   add_test(NAME rfc_sparse_selected_solve COMMAND rfc_sparse_selected_solve_tests)
@@ -758,6 +1030,9 @@ if(BUILD_TESTING AND RFC_BUILD_TESTS)
   add_test(NAME rfc_sparse_exact_map COMMAND rfc_sparse_exact_map_tests)
   add_test(NAME rfc_sparse_exact_map_fraction COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/tests/numeric/check_sparse_exact_map.py $<TARGET_FILE:rfc_sparse_exact_map_tests>)
+  add_executable(rfc_sparse_exact_frames_tests tests/numeric/test_sparse_exact_frames.cpp)
+  target_link_libraries(rfc_sparse_exact_frames_tests PRIVATE rfc::numeric)
+  add_test(NAME rfc_sparse_exact_frames COMMAND rfc_sparse_exact_frames_tests)
 endif()
 
 if(RFC_BUILD_BENCHMARKS)
@@ -876,4 +1151,10 @@ if(RFC_BUILD_TESTS)
   add_executable(rfc_encoded_tensor_tests tests/storage/test_encoded_tensor.cpp)
   target_link_libraries(rfc_encoded_tensor_tests PRIVATE rfc::storage)
   add_test(NAME rfc_encoded_tensor COMMAND rfc_encoded_tensor_tests)
+endif()
+
+if(RFC_BUILD_TESTS)
+  add_executable(rfc_retained_publication_tests tests/storage/test_retained_publication.cpp)
+  target_link_libraries(rfc_retained_publication_tests PRIVATE rfc::storage)
+  add_test(NAME rfc_retained_publication COMMAND rfc_retained_publication_tests)
 endif()

@@ -1,4 +1,5 @@
 #include "rfc/numeric/checked_exact_actions.hpp"
+#include "rfc/field/low_rank_update.hpp"
 #include <future>
 #include <iostream>
 #include <string_view>
@@ -78,6 +79,9 @@ void fill(){
     check(ordered.stored_index_entries()>=2*n,"coordinate maps charged in retained indices");
     check(natural.factor_receipt().determinant()==ordered.factor_receipt().determinant(),"star exact determinant preserved");
     check(S(A::from_rows({{1,1,0},{2,2,1},{0,1,1}})).preparation_stats().exact_cancellations>0,"actual numeric cancellation measured");
+    const S base=S::prepare_ordered(star,order);A u(n,1);u.set(0,0,1);
+    const rfc::field::PreparedWoodburySolve update(base,u,A::identity(1),u);
+    check(update.apply(V(n,Q{1}))==star.add(u.multiply(u.transpose())).solve(V(n,Q{1})),"Woodbury reuses actual ordered base correctly");
 }
 void contracts(){
     const A a=A::identity(3);const Order reverse{{2,1,0},{2,1,0}};const auto solve=S::prepare_ordered(a,reverse);

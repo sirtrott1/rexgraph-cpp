@@ -171,11 +171,21 @@ class PreparedRelationalFieldEvidence {
             for (const auto& sample : observations) retained = add(retained, add(add(sample.target.values().nonzeros(), sample.observed.size()), 4));
             guard.entries(retained);
             if (parent) {
+                guard.entries(parent->fit.free_columns().size());
                 RelationalParameterParentRelation r{V(parent->fit.free_columns().size()), Matrix(parent->fit.free_columns().size(), fit.kernel().cols())};
+                std::map<std::size_t, std::size_t> parent_rows;
                 for (std::size_t i = 0; i < parent->fit.free_columns().size(); ++i) {
                     guard.step(); const auto j = parent->fit.free_columns()[i]; r.shift[i] = guard.sub(fit.particular()[j], parent->fit.particular()[j]);
-                    for (std::size_t k = 0; k < fit.kernel().cols(); ++k) {
-                        guard.step(); r.map.set(i, k, fit.kernel().get(j, k));
+                    parent_rows.emplace(j, i);
+                }
+                // This is the complete child kernel restricted to the actual
+                // parent's free parameter rows, including every zero column.
+                // Gather represented entries instead of probing the rectangle.
+                for (const auto& [ij, q] : fit.kernel().entries()) {
+                    guard.step(); const auto row = parent_rows.find(ij.first);
+                    if (row != parent_rows.end()) {
+                        r.map.set(row->second, ij.second, q);
+                        guard.entries(add(parent_rows.size(), r.map.nonzeros()));
                     }
                 }
                 require(sum(parent->fit.particular(), numeric::checked_apply(parent->fit.kernel(), r.shift, guard), guard) == fit.particular() &&
@@ -193,6 +203,7 @@ public:
         state_ = std::make_shared<const State>(fixed, frozen, std::move(fit), std::vector<RelationalFieldTrainingObservation>{}, nullptr, guard);
     }
     inference::OwnedRelationalFieldProgram program() const { return state_->fixed->program; }
+    bool same_owner(const PreparedRelationalFieldEvidence& other) const noexcept { return state_ == other.state_; }
     const RelationalFieldParameterDeclaration& declaration() const & { return state_->declaration; }
     const RelationalFieldParameterDeclaration& declaration() const && = delete;
     const std::vector<RelationalFieldTrainingObservation>& observations() const & { return state_->observations; }

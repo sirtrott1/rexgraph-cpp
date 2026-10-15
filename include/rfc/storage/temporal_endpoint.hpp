@@ -4,6 +4,7 @@
 #include "rfc/storage/relational_code_types.hpp"
 #include "rfc/field/exact_metric.hpp"
 #include "rfc/storage/declared_code_binding.hpp"
+#include <algorithm>
 
 namespace rfc::storage {
 
@@ -81,9 +82,20 @@ inline bool support_equal(const numeric::StructuralSupport& a, const numeric::St
 }
 inline bool values_equal(const numeric::SparseRationalVector& a, const numeric::SparseRationalVector& b) {
     if (a.size() != b.size() || a.nonzeros() != b.nonzeros()) return false;
-    for (std::size_t i = 0; i < a.nonzeros(); ++i)
-        if (a.entries()[i].index != b.entries()[i].index || a.entries()[i].value != b.entries()[i].value) return false;
-    return true;
+    if (a.retained_source() && a.retained_source() == b.retained_source()) return true;
+    auto cursor = b.retained_source() ? b.retained_source()->open() : nullptr;
+    bool same = true;
+    std::size_t offset = 0;
+    numeric::SparseRationalEntry entry;
+    a.for_each_nonzero([&](std::size_t index, const numeric::Rational& value) {
+        if (cursor) {
+            if (!cursor->next(entry) || entry.index != index || entry.value != value) same = false;
+        } else {
+            const auto& original = b.entries()[offset++];
+            if (original.index != index || original.value != value) same = false;
+        }
+    });
+    return same;
 }
 inline bool tensor_equal(const numeric::SparseRationalTensor& a, const numeric::SparseRationalTensor& b) {
     return a.domain() == b.domain() && support_equal(a.support(), b.support()) && values_equal(a.values(), b.values());
@@ -99,14 +111,7 @@ inline bool tensor_equal(const TemporalTensor& a, const TemporalTensor& b) {
 inline numeric::SparseRationalVector sparse_apply(const numeric::ExactMatrix& J,
                                                  const numeric::SparseRationalVector& x) {
     require(J.cols() == x.size(), "sparse temporal correspondence input size");
-    std::vector<numeric::SparseRationalEntry> entries;
-    for (const auto& [ij, value] : J.entries()) {
-        const auto& xs = x.entries();
-        const auto it = std::lower_bound(xs.begin(), xs.end(), ij.second,
-            [](const auto& entry, std::size_t i) { return entry.index < i; });
-        if (it != xs.end() && it->index == ij.second) entries.push_back({ij.first, value * it->value});
-    }
-    return numeric::SparseRationalVector(J.rows(), std::move(entries));
+    return J.apply_sparse(x.view());
 }
 inline numeric::SparseRationalVector sparse_sum(const numeric::SparseRationalVector& a,
                                                const numeric::SparseRationalVector& b, int sign = 1) {
@@ -162,7 +167,9 @@ inline numeric::ExactMatrix temporal_tensor_matrix(const TemporalTensor& tensor)
     const auto& shape = tensor.tensor.domain().extents();
     if (shape.size() != 2) throw std::invalid_argument("temporal map/form must have rank two");
     numeric::ExactMatrix out(shape[0], shape[1]);
-    for (const auto& entry : tensor.tensor.values().entries()) out.set(entry.index / shape[1], entry.index % shape[1], entry.value);
+    tensor.tensor.values().for_each_nonzero([&](std::size_t index, const numeric::Rational& value) {
+        out.set(index / shape[1], index % shape[1], value);
+    });
     return out;
 }
 inline numeric::SparseRationalTensor temporal_matrix_tensor(const numeric::ExactMatrix& matrix) {
@@ -240,7 +247,18 @@ inline void validate(const TemporalEndpoint& endpoint, const StableSourceIndex& 
         require(t->tensor.domain() == numeric::IndexDomain({out.domain.logical_size(), in.domain.logical_size()}), "map/form dimensions disagree with declared carriers");
         if (t->role == TemporalTensorRole::Metric) {
             require(t->input == t->output, "metric carriers differ");
-            (void)field::ExactMetric(temporal_tensor_matrix(*t)); // Exact SPD certification, not a tag.
+            const auto size = out.domain.logical_size();
+            bool diagonal = true, positive = true;
+            t->tensor.values().for_each_nonzero([&](std::size_t index, const numeric::Rational& value) {
+                diagonal = diagonal && size && index / size == index % size;
+                positive = positive && value > 0;
+            });
+            if (diagonal) {
+                // A complete positive diagonal certifies the stored form.
+                require(t->tensor.values().nonzeros() == size && positive, "metric must be positive definite");
+            } else {
+                (void)field::ExactMetric(temporal_tensor_matrix(*t));
+            }
         }
         if (t->role == TemporalTensorRole::RealizedIncidenceMap || t->role == TemporalTensorRole::CoefficientIndependentMap ||
             t->role == TemporalTensorRole::SheafRestriction) {

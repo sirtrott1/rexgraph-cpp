@@ -42,15 +42,18 @@ inline TemporalBranchDeclaration branch_declaration(Reader& r) {
 inline void declaration_state(Writer& w, const TemporalDeclarationState& s) {
     temporal_declaration_detail::validate_definitions(s);
     w.u64(s.namespace_key);
-    const composite::PreparedLayoutRegistry registry(s.registry);
+    const composite::PreparedLayoutRegistry registry(s.registry,s.resource_limits);
     const composite::CompiledLayout root(registry,s.registry.definitions().front().id,s.profile);
     declaration_blob(w,encode_declarations(root));
     const auto values=temporal_declaration_detail::keyed(s.values); w.u64(values.size());
+    std::optional<composite::CompiledLayout> value_layout;
     for(const auto& [key,p]:values) {
         w.u64(key); declaration_id(w,p->type); w.u64(p->block); w.u64(p->branch);
         w.u8(p->cell.has_value()); if(p->cell) cell(w,*p->cell);
         w.u8(p->occurrence.has_value()); if(p->occurrence) occurrence(w,*p->occurrence);
-        declared_payload(w,composite::CompiledLayout(registry,p->type,s.profile),p->value);
+        if(!value_layout || value_layout->root()!=p->type)
+            value_layout.emplace(registry,p->type,s.profile);
+        declared_payload(w,*value_layout,p->value);
     }
     const auto branches=temporal_declaration_detail::keyed(s.branches); w.u64(branches.size());
     for(const auto& [key,b]:branches) { (void)key; branch_declaration(w,*b); }
@@ -71,25 +74,30 @@ inline void declaration_state(Writer& w, const TemporalDeclarationState& s) {
     }
 }
 inline TemporalDeclarationState declaration_state(Reader& r) {
-    TemporalDeclarationState s; s.namespace_key=r.u64();
+    TemporalDeclarationState s; s.resource_limits=r.limits().declarations; s.namespace_key=r.u64();
     const auto layout=decode_declarations(r.blob(),r.limits().declarations);
     s.registry=layout.declarations(); s.profile=layout.profile();
     r.consume_records(s.registry.definitions().size());
     auto n=r.count(58); std::size_t nodes=0,allocated=machine::checked_size_mul(n,sizeof(TemporalDeclaredValue));
     require(allocated<=r.limits().declarations.max_materialized_bytes,"declared root-value decode budget");
     s.values.reserve(n);
-    const composite::PreparedLayoutRegistry registry(s.registry,r.limits().declarations);
+    std::optional<composite::PreparedLayoutRegistry> registry;
+    std::optional<composite::CompiledLayout> value_layout;
     for(std::size_t i=0;i<n;++i) {
         TemporalDeclaredValue v; v.key=r.u64(); v.type=declaration_id(r); v.block=r.u64(); v.branch=r.u64();
         if(r.flag()) v.cell=cell(r);
         if(r.flag()) v.occurrence=occurrence(r);
-        const composite::CompiledLayout value_layout(registry,v.type,s.profile);
+        if(!value_layout || value_layout->root()!=v.type) {
+            if(!registry)registry.emplace(s.registry,r.limits().declarations);
+            value_layout.emplace(*registry,v.type,s.profile);
+        }
         // Limit each subsequent allocation by the remaining aggregate allowance.
         auto policy=r.limits().declarations;
         require(nodes<policy.max_value_nodes && allocated<=policy.max_materialized_bytes,"aggregate declaration decode budget");
-        policy.max_value_nodes-=nodes; policy.max_materialized_bytes=std::max<std::size_t>(1,policy.max_materialized_bytes-allocated);
-        v.value=declared_payload(r,composite::CompiledLayout(s.registry,v.type,s.profile,policy));
-        const auto use=value_layout.allocation(v.value);
+        policy.max_value_nodes-=nodes; policy.max_materialized_bytes-=allocated;
+        const auto bit_count=machine::checked_size(r.u64());const auto bytes=r.blob();
+        v.value=decode_declared_bits(*value_layout,bytes,bit_count,policy.max_value_nodes,policy.max_materialized_bytes);
+        const auto use=value_layout->allocation(v.value);
         nodes=machine::checked_size_add(nodes,use.value_nodes); allocated=machine::checked_size_add(allocated,use.materialized_bytes);
         require(nodes<=r.limits().declarations.max_value_nodes && allocated<=r.limits().declarations.max_materialized_bytes,"aggregate declared value decode budget");
         s.values.push_back(std::move(v));
@@ -133,7 +141,7 @@ inline void declaration_update(Writer& w, const TemporalDeclarationUpdate& updat
         for(const auto& f:m.fills){
             w.u64(f.factor);const auto it=std::find_if(target.factors.begin(),target.factors.end(),[&](const auto& x){return x.key==f.factor;});
             require(it!=target.factors.end(),"unknown initialized target factor");
-            declared_payload(w,composite::CompiledLayout(update.target->registry,it->type,update.target->profile),f.value);
+            declared_payload(w,composite::CompiledLayout(update.target->registry,it->type,update.target->profile,update.target->resource_limits),f.value);
         }
     }
     auto replaced=update.replaced_values;std::sort(replaced.begin(),replaced.end());keys(w,replaced);

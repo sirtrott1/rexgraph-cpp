@@ -22,7 +22,7 @@ void record_cpp(std::size_t size) {
 [[gnu::noinline]] void release_cpp(void *p) noexcept {
     std::free(p);
 }
-void *gmp_allocate(std::size_t size) {
+[[maybe_unused]] void *gmp_allocate(std::size_t size) {
     if (accounting) {
         ++counts.gmp_calls;
         counts.gmp_bytes += size;
@@ -31,7 +31,7 @@ void *gmp_allocate(std::size_t size) {
         return p;
     std::abort();
 }
-void *gmp_reallocate(void *p, std::size_t, std::size_t size) {
+[[maybe_unused]] void *gmp_reallocate(void *p, std::size_t, std::size_t size) {
     if (accounting) {
         ++counts.gmp_reallocations;
         counts.gmp_reallocation_bytes += size;
@@ -40,7 +40,7 @@ void *gmp_reallocate(void *p, std::size_t, std::size_t size) {
         return q;
     std::abort();
 }
-void gmp_free(void *p, std::size_t) {
+[[maybe_unused]] void gmp_free(void *p, std::size_t) {
     std::free(p);
 }
 } // namespace

@@ -1,5 +1,6 @@
 #pragma once
 #include "rfc/storage/file_io.hpp"
+#include "rfc/storage/byte_range.hpp"
 
 #include "rfc/composite/execution.hpp"
 #include "rfc/core/builder.hpp"
@@ -52,6 +53,11 @@ inline std::uint64_t fnv1a64_update(std::uint64_t hash, std::span<const std::byt
 
 inline std::uint64_t fnv1a64(std::span<const std::byte> bytes) noexcept {
     return fnv1a64_update(1469598103934665603ull, bytes);
+}
+inline std::uint64_t fnv1a64(const ByteRange& bytes) {
+    std::uint64_t hash = 1469598103934665603ull;
+    bytes.for_each_span([&](std::span<const std::byte> part) { hash = fnv1a64_update(hash, part); });
+    return hash;
 }
 
 class Writer {
@@ -118,10 +124,11 @@ private:
 
 class Reader {
 public:
-    explicit Reader(std::span<const std::byte> bytes, std::size_t offset = 0) : bytes_(bytes), pos_(offset) {}
+    explicit Reader(std::span<const std::byte> bytes, std::size_t offset = 0) : bytes_(bytes), size_(bytes.size()), pos_(offset) {}
+    explicit Reader(ByteRange bytes, std::size_t offset = 0) : image_(std::move(bytes)), size_(image_->size()), pos_(offset) {}
     [[nodiscard]] std::size_t position() const noexcept { return pos_; }
     [[nodiscard]] std::size_t remaining() const {
-        require(0); return bytes_.size() - pos_;
+        require(0); return size_ - pos_;
     }
     void require_items(std::uint64_t count, std::size_t minimum_bytes) const {
         if (minimum_bytes == 0 || count > remaining() / minimum_bytes)
@@ -136,7 +143,11 @@ public:
 
     std::uint8_t u8() {
         require(1);
-        return static_cast<std::uint8_t>(bytes_[pos_++]);
+        if (!image_) return static_cast<std::uint8_t>(bytes_[pos_++]);
+        if (pos_ < cached_begin_ || pos_ - cached_begin_ >= cached_.size()) {
+            cached_ = image_->subspan(pos_).first_span(); cached_begin_ = pos_;
+        }
+        return static_cast<std::uint8_t>(cached_[pos_++ - cached_begin_]);
     }
     std::uint16_t u16() {
         std::uint32_t v = 0;
@@ -157,24 +168,30 @@ public:
 
     std::string string() {
         const auto n = static_cast<std::size_t>(u32());
-        require(n);
-        std::string out(reinterpret_cast<const char*>(bytes_.data() + pos_), n);
-        pos_ += n;
-        return out;
+        const auto bytes = slice(n);
+        return std::string(reinterpret_cast<const char*>(bytes.data()), n);
     }
 
     std::span<const std::byte> slice(std::size_t n) {
         require(n);
-        auto result = bytes_.subspan(pos_, n);
+        auto result = image_ ? image_->subspan(pos_, n).span() : bytes_.subspan(pos_, n);
         pos_ += n;
         return result;
+    }
+    ByteRange view_slice(std::size_t n) {
+        require(n);
+        auto result = image_ ? image_->subspan(pos_, n) : ByteRange(bytes_.subspan(pos_, n));
+        pos_ += n; return result;
     }
 
 private:
     void require(std::size_t n) const {
-        if (pos_ > bytes_.size() || n > bytes_.size() - pos_) throw std::runtime_error("truncated RFCX image");
+        if (pos_ > size_ || n > size_ - pos_) throw std::runtime_error("truncated RFCX image");
     }
     std::span<const std::byte> bytes_;
+    std::optional<ByteRange> image_;
+    std::span<const std::byte> cached_;
+    std::size_t size_{}, cached_begin_{};
     std::size_t pos_{};
 };
 

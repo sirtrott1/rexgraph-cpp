@@ -199,7 +199,7 @@ inline RelationalComparisonResult PreparedRelationalComparisonForms::apply(Relat
         }
         const auto metric_field = numeric::checked_apply(pin->lower_metrics[f.lower], common, guard);
         const auto adjoint = numeric::checked_transpose_apply(f.phi, metric_field, guard);
-        accumulate(covectors[f.upper], adjoint, 1, guard);
+        relational_comparison_detail::accumulate(covectors[f.upper], adjoint, 1, guard);
     }
     std::vector<V> output; Q quadrance{};
     for (std::size_t e = 0; e < covectors.size(); ++e) {

@@ -37,6 +37,10 @@ public:
           r_(bytes_), size_(bytes.size()), limits_(limits), budget_(limits.max_records) {
         require(size_ <= limits.max_file_bytes, "temporal image exceeds byte limit");
     }
+    Reader(ByteRange bytes, const TemporalReadLimits& limits)
+        : r_(std::move(bytes)), size_(r_.remaining()), limits_(limits), budget_(limits.max_records) {
+        require(size_ <= limits.max_file_bytes, "temporal image exceeds byte limit");
+    }
     std::uint8_t u8() { return r_.u8(); }
     std::uint16_t u16() { return r_.u16(); }
     std::uint32_t u32() { return r_.u32(); }
@@ -51,6 +55,11 @@ public:
         const auto n = u64();
         require(n <= remaining() && n <= limits_.max_file_bytes, "truncated/oversized temporal blob");
         return r_.slice(static_cast<std::size_t>(n));
+    }
+    ByteRange view_blob() {
+        const auto n = u64();
+        require(n <= remaining() && n <= limits_.max_file_bytes, "truncated/oversized temporal blob");
+        return r_.view_slice(static_cast<std::size_t>(n));
     }
     void consume_records(std::size_t n) {
         require(n <= budget_, "aggregate temporal record budget"); budget_ -= n;

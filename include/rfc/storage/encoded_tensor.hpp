@@ -83,6 +83,10 @@ public:
     const numeric::StructuralSupport& support() const && = delete;
     std::span<const std::byte> encoded_bytes() const & { return state().bytes; }
     std::span<const std::byte> encoded_bytes() const && = delete;
+    std::span<const std::byte> encoded_value_bytes() const & {
+        return state().bytes.subspan(state().values_offset - 8);
+    }
+    std::span<const std::byte> encoded_value_bytes() const && = delete;
     std::size_t stored_nonzeros() const { return state().nonzeros; }
 
     numeric::SparseRationalTensor select(std::span<const std::size_t> coordinates,

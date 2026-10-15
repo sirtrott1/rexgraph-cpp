@@ -12,17 +12,17 @@ build/query-tensor/query_tensor
 ```
 
 The JSON lines compare identical outputs through existing payload accessors and
-prepared bindings. Source and plan preparation, first use, warm medians and seven-use
+prepared bindings. Source and plan preparation, first use, warm medians and seven use
 totals are separate. Four workers are a cooperating admission cap, not a core count.
 No timing threshold is required.
 
 Predicate conjunction distinguishes false, true and unknown. Optional nulls do not
 contribute to sums; an empty numeric population has no sum. Tensor windows preserve
 axis order, structural absence and supported zero, with owning coordinate pins and
-a reversible map to the source's row-major positions. Sparse summaries do not
+a reversible map to the source's row major positions. Sparse summaries do not
 materialize dense values or replace the retained tensor.
 
-`rfc::native_query_execution` is an opt-in exact CPU adapter. Preparation and each
+`rfc::native_query_execution` is an optional exact CPU adapter. Preparation and each
 execution require explicit namespace/publication availability, current limits and
 cancellation admission. `NativeQueryIndex::NumericRanges` builds exact numeric
 indexes without imposing an order on finite categories. `NativeQueryCache` checks

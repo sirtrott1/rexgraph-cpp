@@ -72,6 +72,13 @@ int main() {
         for (std::size_t epoch = 0; epoch < 16 && mistakes != 0; ++epoch) mistakes = perceptron.train_epoch(samples);
         require(mistakes == 0u, "exact integer perceptron failed to separate dataset");
         for (const auto& sample : samples) require(perceptron.predict(sample.features) == sample.label, "integer perceptron prediction mismatch");
+        auto restored = rfc::learning::ExactIntegerPerceptron(perceptron.weights(), perceptron.bias());
+        for (const auto& sample : samples) require(restored.score(sample.features) == perceptron.score(sample.features), "restored integer score mismatch");
+        auto continuation = samples;
+        continuation.front().label = -1;
+        const auto resumed_mistakes = restored.train_epoch(continuation);
+        require(resumed_mistakes > 0u && resumed_mistakes == perceptron.train_epoch(continuation), "restored integer update mismatch");
+        require(restored.weights() == perceptron.weights() && restored.bias() == perceptron.bias(), "restored integer parameters mismatch");
 
         // Exact arbitrary-precision lattice path agrees with machine path.
         rfc::field::ExactLatticeField exact_edge(complex, rfc::core::Grade{1}, {2,-1,3});

@@ -2,12 +2,15 @@
 #include "rfc/field/operator_contract.hpp"
 #include "rfc/field/exact_dirac.hpp"
 #include "rfc/field/augmented_green.hpp"
+#include "rfc/field/prepared_global_action.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <utility>
 #include <vector>
 #include <memory>
+#include <span>
+#include <functional>
 
 namespace rfc::field {
 
@@ -64,6 +67,16 @@ public:
                 ExactHodgeOperator L(*complex_,request.grade,metrics_);
                 return exact_hodge_projectors(L).project_harmonic(input);
             }
+            case OperatorKind::HarmonicInverse: {
+                if (request.lambda != 0) throw std::invalid_argument("harmonic inverse has no lambda parameter");
+                return generalized_hodge_inverse_apply(ExactHodgeOperator(*complex_,request.grade,metrics_),input);
+            }
+            case OperatorKind::GradientPotential: {
+                if (request.lambda != 0) throw std::invalid_argument("potential has no lambda parameter");
+                if (!request.grade.value) throw std::invalid_argument("grade zero has no lower potential carrier");
+                return complex_->boundary_apply(request.grade,
+                    generalized_hodge_inverse_apply(ExactHodgeOperator(*complex_,request.grade,metrics_),input));
+            }
             case OperatorKind::Dirac:
                 throw std::invalid_argument("Dirac acts on an entire tower field; use apply_dirac");
         }
@@ -98,7 +111,36 @@ enum class PreparedExactProfile {FiniteActions, GlobalActions};
 // Both profiles own the same source and use the canonical field actions.
 // GlobalActions additionally retains harmonic frames and permits exact solves.
 class PreparedExactExecutionTower {
+    struct State;
 public:
+    class BatchWorkspace {
+    public:
+        std::size_t capacity() const noexcept { return capacity_; }
+        core::Grade grade() const noexcept { return grade_; }
+        std::size_t retained_slots() const {
+            auto n = machine::checked_size_add(down_.size(), up_.size());
+            for (const auto size : {middle_.size(), lower_.size(), upper_.size(), scaled_.size()})
+                n = machine::checked_size_add(n, size);
+            return n;
+        }
+    private:
+        friend class PreparedExactExecutionTower;
+        BatchWorkspace(std::shared_ptr<const State> owner, core::Grade grade, std::size_t capacity)
+            : owner_(std::move(owner)), grade_(grade), capacity_(capacity) {
+            const auto& source = *owner_->source;
+            const auto width = source.grade(grade).cell_count();
+            const auto below = grade.value ? source.grade(core::Grade{static_cast<std::uint16_t>(grade.value - 1u)}).cell_count() : 0;
+            const auto above = grade.value < source.max_grade().value
+                ? source.grade(core::Grade{static_cast<std::uint16_t>(grade.value + 1u)}).cell_count() : 0;
+            const auto slots = [capacity](auto rows) { return machine::checked_size_mul(rows, capacity); };
+            down_.resize(slots(width)); up_.resize(slots(width)); middle_.resize(slots(width));
+            lower_.resize(slots(below)); upper_.resize(slots(above)); scaled_.resize(slots(std::max(width, below)));
+        }
+        std::shared_ptr<const State> owner_;
+        core::Grade grade_;
+        std::size_t capacity_;
+        numeric::RationalVector down_, up_, middle_, lower_, upper_, scaled_;
+    };
     PreparedExactExecutionTower(std::shared_ptr<const core::RelationalComplex> source,
                                 std::vector<ExactMetric> metrics,PreparedExactProfile profile=PreparedExactProfile::FiniteActions) {
         if (!source) throw std::invalid_argument("prepared tower requires an immutable source owner");
@@ -119,7 +161,7 @@ public:
         switch(request.kind) {
         case OperatorKind::Boundary: case OperatorKind::Adjoint:
         case OperatorKind::HodgeDown: case OperatorKind::HodgeUp: case OperatorKind::Hodge: return;
-        case OperatorKind::HarmonicProjector:
+        case OperatorKind::HarmonicProjector: case OperatorKind::HarmonicInverse: case OperatorKind::GradientPotential:
             if(profile==PreparedExactProfile::GlobalActions)return;
             break;
         default: throw std::invalid_argument("operator outside prepared finite tower profile");
@@ -152,13 +194,125 @@ public:
         }
         case OperatorKind::HarmonicProjector:
             return projector_apply(pin->harmonic_frames.at(request.grade.value),hodge.metric(),input);
+        case OperatorKind::HarmonicInverse: case OperatorKind::GradientPotential:
+            return prepare_action(request).apply(input);
         default: throw std::logic_error("validated exact operator");
         }
     }
     PreparedExactProfile profile() const noexcept {return state_->profile;}
+    PreparedGlobalAction prepare_action(const OperatorRequest& request, numeric::ExactActionGuard& guard) const {
+        const auto pin = state_;
+        validate_request(request, pin->profile);
+        if (pin->profile != PreparedExactProfile::GlobalActions ||
+            (request.kind != OperatorKind::Green && request.kind != OperatorKind::HarmonicProjector &&
+             request.kind != OperatorKind::HarmonicInverse && request.kind != OperatorKind::GradientPotential))
+            throw std::invalid_argument("reusable global action requires the global exact profile");
+        if (request.grade.value >= pin->source->grade_count()) throw std::out_of_range("prepared global action grade");
+        return PreparedGlobalAction(pin->source, pin->metrics, request,
+            pin->harmonic_frames.at(request.grade.value), guard);
+    }
+    PreparedGlobalAction prepare_action(const OperatorRequest& request, numeric::ExactActionLimits limits = {},
+                                       std::function<void()> check = {}) const {
+        numeric::ExactActionGuard guard(limits, std::move(check)); return prepare_action(request, guard);
+    }
     std::size_t harmonic_frame_integer_bits() const noexcept {return state_->frame_bits;}
     const std::vector<ExactMetric>& metrics() const & {return state_->metrics;}
     const std::vector<ExactMetric>& metrics() const && = delete;
+    std::size_t batch_workspace_slots(core::Grade grade, std::size_t capacity) const {
+        if (state_->profile != PreparedExactProfile::FiniteActions)
+            throw std::invalid_argument("exact batch requires the finite action profile");
+        if (!capacity || grade.value >= state_->source->grade_count())
+            throw std::invalid_argument("exact batch workspace grade or capacity mismatch");
+        const auto& source = *state_->source;
+        const auto width = source.grade(grade).cell_count();
+        const auto below = grade.value ? source.grade(core::Grade{static_cast<std::uint16_t>(grade.value - 1u)}).cell_count() : 0;
+        const auto above = grade.value < source.max_grade().value
+            ? source.grade(core::Grade{static_cast<std::uint16_t>(grade.value + 1u)}).cell_count() : 0;
+        auto rows = machine::checked_size_add(machine::checked_size_mul(width, 3), std::max(width, below));
+        rows = machine::checked_size_add(rows, machine::checked_size_add(below, above));
+        return machine::checked_size_mul(rows, capacity);
+    }
+    BatchWorkspace make_batch_workspace(core::Grade grade, std::size_t capacity) const {
+        (void)batch_workspace_slots(grade, capacity);
+        return BatchWorkspace(state_, grade, capacity);
+    }
+    void validate_batch_workspace(core::Grade grade, std::size_t samples, const BatchWorkspace& workspace) const {
+        if (state_->profile != PreparedExactProfile::FiniteActions || workspace.owner_ != state_ ||
+            workspace.grade_ != grade || !samples || samples > workspace.capacity_)
+            throw std::invalid_argument("exact batch workspace owner, grade or capacity mismatch");
+    }
+    // Finite actions preserve the original occurrence order within each sample.
+    // A caller owns the output and exclusive scratch for the complete call.
+    void apply_batch_into(const OperatorRequest& request, std::span<const numeric::Rational> input,
+                          std::span<numeric::Rational> output, std::size_t samples,
+                          BatchWorkspace& workspace, const std::function<void()>& check = {}) const {
+        validate_request(request, PreparedExactProfile::FiniteActions);
+        validate_batch_workspace(request.grade, samples, workspace);
+        const auto pin = state_;
+        const auto& source = *pin->source;
+        const auto grade = request.grade;
+        const auto width = source.grade(grade).cell_count();
+        const auto below = grade.value ? source.grade(core::Grade{static_cast<std::uint16_t>(grade.value - 1u)}).cell_count() : 0;
+        const auto above = grade.value < source.max_grade().value
+            ? source.grade(core::Grade{static_cast<std::uint16_t>(grade.value + 1u)}).cell_count() : 0;
+        if ((request.kind == OperatorKind::Boundary || request.kind == OperatorKind::Adjoint) && !grade.value)
+            throw std::invalid_argument("grade zero has no boundary or adjoint");
+        const auto count = [samples](auto rows) { return machine::checked_size_mul(rows, samples); };
+        const auto rows_in = request.kind == OperatorKind::Adjoint ? below : width;
+        const auto rows_out = request.kind == OperatorKind::Boundary ? below : width;
+        if (input.size() != count(rows_in) || output.size() != count(rows_out))
+            throw std::invalid_argument("exact batch input or output shape mismatch");
+        const std::less<const numeric::Rational*> before;
+        if (!input.empty() && !output.empty() && before(input.data(), output.data() + output.size()) &&
+            before(output.data(), input.data() + input.size()))
+            throw std::invalid_argument("exact batch requires disjoint input and output");
+        const auto take = [&](auto& buffer, auto rows) { return std::span<numeric::Rational>(buffer).first(count(rows)); };
+        auto down = take(workspace.down_, width), up = take(workspace.up_, width);
+        auto middle = take(workspace.middle_, width), lower = take(workspace.lower_, below), upper = take(workspace.upper_, above);
+        auto scaled = take(workspace.scaled_, std::max(width, below));
+        const auto checkpoint = [&] { if (check) check(); };
+        checkpoint();
+        if (request.kind == OperatorKind::Boundary) {
+            BoundaryOperator(source, grade).apply_batch_into(input, output, samples, scaled);
+        } else if (request.kind == OperatorKind::Adjoint) {
+            pin->metrics[grade.value - 1u].apply_batch_into(input, lower, samples);
+            checkpoint();
+            BoundaryOperator(source, grade).transpose_batch_into(lower, output, samples, scaled);
+            pin->metrics[grade.value].solve_batch_into(output, output, samples);
+        } else {
+            const auto evaluate_down = [&] {
+                std::fill(down.begin(), down.end(), numeric::Rational{0});
+                if (!grade.value) return;
+                const BoundaryOperator boundary(source, grade);
+                boundary.apply_batch_into(input, lower, samples, scaled);
+                pin->metrics[grade.value - 1u].apply_batch_into(lower, lower, samples);
+                checkpoint();
+                boundary.transpose_batch_into(lower, down, samples, scaled);
+                pin->metrics[grade.value].solve_batch_into(down, down, samples);
+                checkpoint();
+            };
+            const auto evaluate_up = [&] {
+                std::fill(up.begin(), up.end(), numeric::Rational{0});
+                if (grade.value == source.max_grade().value) return;
+                const auto next = core::Grade{static_cast<std::uint16_t>(grade.value + 1u)};
+                const BoundaryOperator boundary(source, next);
+                pin->metrics[grade.value].apply_batch_into(input, middle, samples);
+                boundary.transpose_batch_into(middle, upper, samples, scaled);
+                pin->metrics[next.value].solve_batch_into(upper, upper, samples);
+                checkpoint();
+                boundary.apply_batch_into(upper, up, samples, scaled);
+                checkpoint();
+            };
+            if (request.kind == OperatorKind::HodgeDown || request.kind == OperatorKind::Hodge) evaluate_down();
+            if (request.kind == OperatorKind::HodgeUp || request.kind == OperatorKind::Hodge) evaluate_up();
+            for (std::size_t i = 0; i < output.size(); ++i) {
+                if (request.kind == OperatorKind::HodgeDown) output[i] = down[i];
+                else if (request.kind == OperatorKind::HodgeUp) output[i] = up[i];
+                else output[i] = down[i] + up[i];
+            }
+        }
+        checkpoint();
+    }
 private:
     struct State {
         std::shared_ptr<const core::RelationalComplex> source;

@@ -143,7 +143,7 @@ inline PassiveEvaluation preflight_evaluation(std::span<const std::byte> bytes, 
     std::optional<Origin> setting;
     if (const auto* evidence = std::get_if<available_evidence_codec_detail::PassiveEvidence>(&family.model.targets[*rule->target])) {
         inference::field_program_detail::require(parameter && has_setting, "affine finite choice needs global setting receipt"); if (check) { check(); }
-        setting = context.require(parameter, Role::Prospective, relational_parameter_setting_payload(evidence->native, evidence->obligations, free)); canonical(r.blob(), setting->receipt());
+        setting = context.require(parameter, Role::Prospective, relational_parameter_setting_payload(evidence->native.span(), evidence->obligations, free)); canonical(r.blob(), setting->receipt());
     } else inference::field_program_detail::require(!parameter && !has_setting && free.empty(), "fixed finite choice has a spurious parameter setting");
     const auto choice_key = r.u64(); const auto receipt = r.blob(); if (check) { check(); }
     auto origin = context.require(choice_key, Role::Prospective, completion_payload(family.archive, ordinal, free, setting)); canonical(receipt, origin.receipt());

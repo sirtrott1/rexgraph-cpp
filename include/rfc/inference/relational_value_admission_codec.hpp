@@ -9,25 +9,33 @@ inline constexpr std::array<std::byte, 8> program_magic{
 inline constexpr std::array<std::byte, 8> result_magic{
     std::byte{'R'}, std::byte{'F'}, std::byte{'C'}, std::byte{'V'}, std::byte{'R'}, std::byte{1}, std::byte{0}, std::byte{0}};
 } // namespace value_admission_codec_detail
-inline std::vector<std::byte> encode_available_relational_program(const PreparedAvailableRelationalProgram& program) {
+namespace value_admission_codec_detail {
+inline storage::PreparedBytePacket prepare_program(const PreparedAvailableRelationalProgram& program,field_interface_codec_detail::PacketContext& context){
     using namespace field_program_codec_detail;
-    const auto pin = program; auto w = envelope(value_admission_codec_detail::program_magic);
-    blob(w, encode_relational_field_program(pin.program())); const auto keys = pin.program_origins();
+    const auto pin=program;storage::BytePacketBuilder w(program_magic,context.max_bytes,context.byte_guard.get());
+    w.blob(context.program(pin.program()));const auto keys=pin.program_origins();
     w.u64(keys.program); w.u64(keys.maps); w.u64(keys.metrics);
-    for (const auto& origin : pin.obligations()) blob(w, origin.receipt());
-    return finish(std::move(w));
+    for(const auto& origin:pin.obligations()){w.receipt(origin);}
+    return std::move(w).finish(context.check);
 }
-inline std::vector<std::byte> encode_available_relational_result(const AvailableRelationalFieldResult& result) {
+inline storage::PreparedBytePacket prepare_result(const AvailableRelationalFieldResult& result,field_interface_codec_detail::PacketContext& context){
     using namespace field_program_codec_detail;
-    const auto pin = result; auto w = envelope(value_admission_codec_detail::result_magic);
-    blob(w, encode_accession_field_result(pin.result())); const auto keys = pin.program_origins();
+    const auto pin=result;storage::BytePacketBuilder w(result_magic,context.max_bytes,context.byte_guard.get());
+    w.blob(field_interface_codec_detail::prepare_accession(pin.result(),context));const auto keys=pin.program_origins();
     w.u64(keys.program); w.u64(keys.maps); w.u64(keys.metrics); w.u64(pin.input_origins().size());
     for (const auto input : pin.input_origins()) {
         w.u64(input.asset); w.u64(input.value); w.u64(input.accession); w.u64(input.reconstruction);
     }
     w.u64(pin.obligations().size());
-    for (const auto& origin : pin.obligations()) blob(w, origin.receipt());
-    return finish(std::move(w));
+    for(const auto& origin:pin.obligations()){w.receipt(origin);}
+    return std::move(w).finish(context.check);
+}
+} // namespace value_admission_codec_detail
+inline std::vector<std::byte> encode_available_relational_program(const PreparedAvailableRelationalProgram& program){
+    field_interface_codec_detail::PacketContext context;return value_admission_codec_detail::prepare_program(program,context).bytes();
+}
+inline std::vector<std::byte> encode_available_relational_result(const AvailableRelationalFieldResult& result){
+    field_interface_codec_detail::PacketContext context;return value_admission_codec_detail::prepare_result(result,context).bytes();
 }
 namespace value_admission_codec_detail {
 struct PassiveAvailableProgram {
@@ -42,28 +50,35 @@ struct PassiveInput {
     numeric::SparseRationalTensor field;
 };
 struct PassiveAvailableResult {
-    std::vector<std::byte> native, program;
+    // Views live only through replay against the public decoder's pinned bytes.
+    storage::ByteRange native;
+    std::span<const std::byte> program;
     RelationalProgramOrigins keys;
     std::vector<RelationalInputOrigins> input_keys;
     std::vector<PassiveInput> inputs;
     std::vector<OwnedRelationalValueOrigin> obligations;
 };
-inline PassiveAvailableProgram preflight_program(std::span<const std::byte> bytes,
+inline PassiveAvailableProgram preflight_program_image(storage::ByteRange bytes,
     const RelationalAvailabilityContext& context, const storage::TemporalReadLimits& policy,
     const std::function<void()>& check = {}) {
     using namespace field_program_codec_detail;
     Reader r(bytes, policy); header(r, bytes, value_admission_codec_detail::program_magic);
-    const auto native = r.blob(); const RelationalProgramOrigins keys{r.u64(), r.u64(), r.u64()};
-    PassiveAvailableProgram out{{native.begin(), native.end()}, keys, {}};
+    const auto native = r.view_blob(); const RelationalProgramOrigins keys{r.u64(), r.u64(), r.u64()};
+    PassiveAvailableProgram out{{}, keys, {}};
     const std::array<std::pair<std::uint64_t, RelationalDependencyRole>, 3> roles{{
         {keys.program, RelationalDependencyRole::Program}, {keys.maps, RelationalDependencyRole::Maps},
         {keys.metrics, RelationalDependencyRole::Metrics}}};
     for (const auto& [key, role] : roles) {
         if (check) check();
-        const auto receipt = r.blob(); const auto actual = context.require(key, role, out.native);
+        const auto receipt = r.view_blob(); const auto actual = context.require_bytes(key, role, native);
+        if(out.native.empty()){const auto payload=actual.payload_bytes();out.native.assign(payload.begin(),payload.end());}
         canonical(receipt, actual.receipt()); out.obligations.push_back(actual);
     }
     value_admission_detail::require(!r.remaining(), "trailing available program bytes"); return out;
+}
+inline PassiveAvailableProgram preflight_program(std::span<const std::byte> bytes,const RelationalAvailabilityContext& context,
+    const storage::TemporalReadLimits& policy,const std::function<void()>& check={}) {
+    return preflight_program_image(storage::ByteRange(bytes),context,policy,check);
 }
 inline PreparedAvailableRelationalProgram replay_program(const PassiveAvailableProgram& parsed,
     const RelationalAvailabilityContext& context, const storage::TemporalReadLimits& policy,
@@ -73,17 +88,17 @@ inline PreparedAvailableRelationalProgram replay_program(const PassiveAvailableP
     auto parent = decode_relational_field_program(parsed.native, policy, limits);
     return PreparedAvailableRelationalProgram(std::move(parent), parsed.keys, context);
 }
-inline PassiveAvailableResult preflight_result(std::span<const std::byte> bytes,
+inline PassiveAvailableResult preflight_result_image(storage::ByteRange bytes,
     const RelationalAvailabilityContext& context, const storage::TemporalReadLimits& policy,
     const std::function<void()>& check = {}) {
     using namespace field_program_codec_detail;
     Reader r(bytes, policy); header(r, bytes, value_admission_codec_detail::result_magic);
-    const auto native = r.blob(); const RelationalProgramOrigins keys{r.u64(), r.u64(), r.u64()};
-    PassiveAvailableResult out{{native.begin(), native.end()}, {}, keys, {}, {}, {}};
+    const auto native = r.view_blob(); const RelationalProgramOrigins keys{r.u64(), r.u64(), r.u64()};
+    PassiveAvailableResult out{native, {}, keys, {}, {}, {}};
     const auto count = r.count(32);
     for (std::size_t i = 0; i < count; ++i) out.input_keys.push_back({r.u64(), r.u64(), r.u64(), r.u64()});
-    const auto n = r.count(8); std::vector<std::vector<std::byte>> receipts;
-    for (std::size_t i = 0; i < n; ++i) { const auto image = r.blob(); receipts.emplace_back(image.begin(), image.end()); }
+    const auto n = r.count(8); std::vector<storage::ByteRange> receipts;
+    for (std::size_t i = 0; i < n; ++i) receipts.push_back(r.view_blob());
     value_admission_detail::require(!r.remaining(), "trailing available result bytes");
     std::vector<std::pair<std::uint64_t, RelationalDependencyRole>> roles{
         {keys.program, RelationalDependencyRole::Program}, {keys.maps, RelationalDependencyRole::Maps}, {keys.metrics, RelationalDependencyRole::Metrics}};
@@ -95,18 +110,19 @@ inline PassiveAvailableResult preflight_result(std::span<const std::byte> bytes,
     for (std::size_t i = 0; i < roles.size(); ++i) {
         if (check) check();
         Reader origin(receipts[i], policy); header(origin, receipts[i], value_admission_detail::origin_magic);
-        const auto key = origin.u64(); const auto role = origin.u8(); (void)origin.blob(); const auto payload = origin.blob();
+        const auto key = origin.u64(); const auto role = origin.u8(); (void)origin.view_blob(); const auto payload = origin.view_blob();
         value_admission_detail::require(!origin.remaining() && key == roles[i].first && role == static_cast<unsigned>(roles[i].second), "saved value obligation role/key differs");
-        const auto actual = context.require(key, roles[i].second, {payload.begin(), payload.end()});
+        const auto actual = context.require_bytes(key, roles[i].second, payload);
         canonical(receipts[i], actual.receipt()); out.obligations.push_back(actual);
     }
     Reader source(native, policy); header(source, native, field_interface_codec_detail::accession_magic);
-    const auto result_bytes = source.blob(); Reader result(result_bytes, policy);
+    const auto result_bytes = source.view_blob(); Reader result(result_bytes, policy);
     header(result, result_bytes, field_program_codec_detail::result_magic);
-    const auto program = result.blob(); out.program.assign(program.begin(), program.end());
-    (void)context.require(keys.program, RelationalDependencyRole::Program, out.program);
-    (void)context.require(keys.maps, RelationalDependencyRole::Maps, out.program);
-    (void)context.require(keys.metrics, RelationalDependencyRole::Metrics, out.program);
+    const auto program = result.view_blob();
+    const auto program_origin=context.require_bytes(keys.program, RelationalDependencyRole::Program, program);
+    (void)context.require_bytes(keys.maps, RelationalDependencyRole::Maps, program);
+    (void)context.require_bytes(keys.metrics, RelationalDependencyRole::Metrics, program);
+    out.program=program_origin.payload_bytes();
     const auto inputs = source.count(70); value_admission_detail::require(inputs == out.input_keys.size(), "complete input origin order required");
     for (std::size_t i = 0; i < inputs; ++i) {
         if (check) check();
@@ -120,6 +136,10 @@ inline PassiveAvailableResult preflight_result(std::span<const std::byte> bytes,
         out.inputs.push_back({std::move(asset), std::move(declaration), use, std::move(field)});
     }
     value_admission_detail::require(!source.remaining(), "trailing native accession result bytes"); return out;
+}
+inline PassiveAvailableResult preflight_result(std::span<const std::byte> bytes,const RelationalAvailabilityContext& context,
+    const storage::TemporalReadLimits& policy,const std::function<void()>& check={}) {
+    return preflight_result_image(storage::ByteRange(bytes),context,policy,check);
 }
 inline AvailableRelationalFieldResult replay_result(const PassiveAvailableResult& parsed,
     const RelationalAvailabilityContext& context, const storage::TemporalReadLimits& policy,
@@ -138,12 +158,14 @@ inline AvailableRelationalFieldResult replay_result(const PassiveAvailableResult
         inputs.push_back(program.admit_input({std::move(asset), value.declaration, value.use, value.field}, parsed.input_keys[i], context, limits, check));
     }
     auto out = program.execute(std::move(inputs), context, limits, check);
-    field_program_codec_detail::canonical(parsed.native, encode_accession_field_result(out.result())); return out;
+    field_interface_codec_detail::PacketContext packets(policy.max_file_bytes,check);
+    field_program_codec_detail::canonical(parsed.native,field_interface_codec_detail::prepare_accession(out.result(),packets),packets.check);return out;
 }
 } // namespace value_admission_codec_detail
 inline PreparedAvailableRelationalProgram decode_available_relational_program(std::span<const std::byte> bytes,
-    const RelationalAvailabilityContext& context, const storage::TemporalReadLimits& policy,
+    const RelationalAvailabilityContext& context, const storage::TemporalReadLimits& caller_policy,
     numeric::ExactActionLimits limits = {}, std::function<void()> check = {}) {
+    const auto policy=caller_policy;
     value_admission_detail::bound(bytes.size(), policy.max_file_bytes);
     const std::vector<std::byte> frozen(bytes.begin(), bytes.end()); const auto authority = context; const auto callback = std::move(check);
     if (callback) callback();
@@ -152,8 +174,9 @@ inline PreparedAvailableRelationalProgram decode_available_relational_program(st
     field_program_codec_detail::canonical(frozen, encode_available_relational_program(out)); return out;
 }
 inline AvailableRelationalFieldResult decode_available_relational_result(std::span<const std::byte> bytes,
-    const RelationalAvailabilityContext& context, const storage::TemporalReadLimits& policy,
+    const RelationalAvailabilityContext& context, const storage::TemporalReadLimits& caller_policy,
     numeric::ExactActionLimits limits = {}, std::function<void()> check = {}) {
+    const auto policy=caller_policy;
     value_admission_detail::bound(bytes.size(), policy.max_file_bytes);
     const std::vector<std::byte> frozen(bytes.begin(), bytes.end()); const auto authority = context; const auto callback = std::move(check);
     if (callback) callback();

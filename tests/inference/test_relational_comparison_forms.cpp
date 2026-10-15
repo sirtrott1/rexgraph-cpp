@@ -1,3 +1,4 @@
+#include <numeric>
 #include "rfc/inference/relational_comparison_forms_codec.hpp"
 #include "rfc/core/builder.hpp"
 #include "rfc/field/relational_channels.hpp"

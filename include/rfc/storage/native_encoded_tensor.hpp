@@ -69,6 +69,13 @@ class NativeEncodedTensor {
                 numeric::SparseRationalVector(tensor.domain().logical_size(), {}));
             if (!temporal_endpoint_detail::metadata_equal(descriptor, expected) ||
                 tensor.stored_nonzeros() != expected.tensor.values().nonzeros()) return std::nullopt;
+            if (const auto retained = std::dynamic_pointer_cast<const RetainedTemporalValues>(
+                    expected.tensor.values().retained_source())) {
+                const auto actual = tensor.encoded_value_bytes(), original = retained->encoded_bytes();
+                if (actual.size() == original.size() && std::equal(actual.begin(), actual.end(), original.begin()))
+                    return tensor;
+                return std::nullopt;
+            }
             bool same = true;
             std::size_t entry = 0;
             tensor.for_each_nonzero([&](std::size_t index, const numeric::Rational& value) {

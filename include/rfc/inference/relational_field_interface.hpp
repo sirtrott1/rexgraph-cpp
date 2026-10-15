@@ -61,15 +61,10 @@ inline void faithful(const Matrix& a, const Matrix& r, Guard& guard) {
     guard.matrix(a); guard.matrix(r);
     require(a.cols() == r.rows() && a.rows() == r.cols(), "faithful interface A/R carriers differ");
     require(numeric::checked_multiply(r, a, guard) == Matrix::identity(a.cols()), "faithful interface requires R A = I");
-    // Reuse the existing typed-family contract. Charge its dense stacking work
-    // before invocation; all exact product intermediates were checked above.
-    const auto slots = machine::checked_size_mul(a.rows(), a.cols());
-    guard.entries(add(a.nonzeros(), r.nonzeros()));
-    const auto cost = add(machine::checked_size_mul(slots, 2), machine::checked_size_mul(a.nonzeros(), r.nonzeros()));
-    for (std::size_t i = 0; i < cost; ++i) guard.step();
-    const geometry::ReconstructingTypedFamily family({geometry::ReconstructingTypedView(
-        geometry::TypedAccession("declared faithful image", a, Matrix(a.cols(), a.rows())), r)});
-    (void)family;
+    // This is exactly the single-view reconstructing-family law. Native sparse
+    // multiplication already checked every product and R A = I; repeating it
+    // through dense coordinate restacking adds no further condition. Admission
+    // below still checks each actual field and its represented image.
 }
 inline Tensor act(const Matrix& m, const Tensor& x, Guard& guard) {
     return apply(numeric::PreparedSparseExactMap(m), x, guard);

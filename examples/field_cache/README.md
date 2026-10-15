@@ -16,18 +16,18 @@ Link `rfc::native_field_cache` for synchronous calls, or `rfc::field_work` for
 `make_cached_field_work` jobs. Include the corresponding database header.
 `NativeFieldAnalysis::inspect` takes the existing authentic accession pin, field
 request, realization and host policy. It reports full native input/output dimensions,
-support, retained/active occurrences, scalar encoding costs and C++ output-object
+support, retained/active occurrences, scalar encoding costs and C++ output object
 bytes. GMP heap use and variable output encoding are separate costs.
 
 `NativeFieldCache::evaluate(analysis, lease)` returns an immutable owning
 `CachedNativeField`. Plan and result receipts differ: field values can change without
 changing a compiled plan. Full source, carrier/declaration meanings, every downward
-map including inactive maps, selected field support and the upper field-membership
+map including inactive maps, selected field support and the upper field membership
 catalog are retained dependencies. Empty catalogs cover future births. Numerical
 equality cannot replace a receipt; exact bytes follow hash prefilters. Source sequence
 and unread opaque tensors do not invalidate this action's result.
 
-Reuse stays within one accession-directory lineage. A separately opened directory
+Reuse stays within one accession directory lineage. A separately opened directory
 has a different execution authority even with equal namespace and bytes. Every call
 readmits its current execution lease; warm hits cannot bypass caps, cancellation or
 backend availability. Results retain the requested publication and complete lower
@@ -40,7 +40,7 @@ CPU execution separately from the request's current publication and policy.
 Tile size and workspace owner control physical reuse; they do not change semantic
 result identity. Every request still admits its requested execution requirements.
 
-Concurrent calls share identical in-flight work; each running computation owns
+Concurrent calls share identical in flight work; each running computation owns
 its input and scratch. Completed parallel scratch can be retained under the
 `idle_workspaces` and `idle_workspace_slots` limits. Changed fields can reuse it
 with the same compiled plan and tile size. Overlapping computations take separate
@@ -48,7 +48,7 @@ loans; failed computations discard scratch after joining their workers.
 A cancelled waiter leaves the producer running. Failed or
 cancelled producers publish no new entries. Callbacks cannot reenter the same cache.
 Keep the service alive until all calls finish; inherited live use across fork is
-unsupported. CPU tiles use the existing exact ordered field kernel and per-call
+unsupported. CPU tiles use the existing exact ordered field kernel and per call
 joined threads; the cache creates no persistent worker pool.
 
 Entry counts, charged descriptor bytes, result slots and pending jobs have explicit

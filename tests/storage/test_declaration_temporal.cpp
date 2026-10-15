@@ -13,6 +13,26 @@ void check(bool yes,const char* message){++checks;if(!yes)throw std::runtime_err
 template<class F>void rejects(F&& f,const char* message){bool threw=false;try{f();}catch(const std::exception&){threw=true;}check(threw,message);}
 void save(const std::filesystem::path& p,const Bytes& bytes){std::ofstream f(p,std::ios::binary);f.write(reinterpret_cast<const char*>(bytes.data()),static_cast<std::streamsize>(bytes.size()));if(!f)throw std::runtime_error("fixture write");}
 Bytes load(const std::filesystem::path& p){std::ifstream f(p,std::ios::binary);f.seekg(0,std::ios::end);const auto size=f.tellg();if(size<0)throw std::runtime_error("fixture read");Bytes b(static_cast<std::size_t>(size));f.seekg(0);f.read(reinterpret_cast<char*>(b.data()),size);if(!f)throw std::runtime_error("fixture read");return b;}
+void retained_resource_policy_tests() {
+    auto endpoint=TemporalEndpoint(source());
+    TemporalDeclarationState state;state.namespace_key=988;
+    state.resource_limits.max_integer_bits=2000000;
+    const auto integer_id=id(987);
+    state.registry=DeclarationRegistry({Declaration::integer(integer_id)},state.resource_limits);
+    numeric::Integer value;mpz_setbit(value.get_mpz_t(),1599999);
+    state.values.push_back({1,integer_id,0,0,{},{},V::integer(value)});
+    endpoint.declarations=state;
+    validate_temporal_endpoint(endpoint);
+    const auto wire=encode_temporal_endpoint(endpoint);
+    TemporalReadLimits read;read.declarations=state.resource_limits;
+    const auto decoded=decode_temporal_endpoint(endpoint.source,wire,read);
+    check(declared_value_equal(decoded.declarations->values.front().value,state.values.front().value),"raised resource policy lost by owned codec");
+    check(decoded.declarations->resource_limits.max_integer_bits==read.declarations.max_integer_bits,"reader policy not retained by decoded owner");
+    check(encode_temporal_endpoint(decoded)==wire,"resource policy changed canonical bytes");
+    rejects([&]{(void)decode_temporal_endpoint(endpoint.source,wire);},"default read integer budget bypassed");
+    auto tight=state.resource_limits;tight.max_integer_bits=100;
+    rejects([&]{validate_temporal_declarations(endpoint.source,{},state,tight);},"explicit tighter owned policy ignored");
+}
 void source_tests() {
     const auto base=source();const auto m=source_map(base.signature());const auto next=recode_temporal_source(base,m);
     check(next.grade_count()==4 && next.grade(core::Grade{3}).cell_count()==0,"empty grade lost");
@@ -358,7 +378,7 @@ int main(int argc,char** argv) {
     try {
         const auto out=argc>1?std::filesystem::path(argv[1]):std::filesystem::path("declaration_temporal_fixtures");
         std::filesystem::create_directories(out);
-        source_tests();recoding_tests();resource_tests();ordered_source_tests();endpoint_tests(out);observation_tests();wide_program_tests(out);
+        retained_resource_policy_tests();source_tests();recoding_tests();resource_tests();ordered_source_tests();endpoint_tests(out);observation_tests();wide_program_tests(out);
         std::cout<<"declaration_temporal_checks="<<checks<<" truncations="<<truncations
                  <<" mutation_rejected="<<mutations_rejected<<" mutation_canonical="<<mutations_accepted
                  <<" mutation_replayed="<<mutations_replayed<<"\n";return 0;

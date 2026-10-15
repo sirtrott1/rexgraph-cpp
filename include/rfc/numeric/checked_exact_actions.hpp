@@ -31,6 +31,10 @@ public:
     void vector(const RationalVector& v) {
         dimension(v.size());for(const auto& q:v){step();value(q);}
     }
+    void sparse_vector(const SparseRationalVector& v) {
+        dimension(v.size());entries(v.nonzeros());
+        for(const auto& entry:v.entries()){step();value(entry.value);}
+    }
     RationalVector canonical_input(const RationalVector& v) {
         vector(v);RationalVector out;out.reserve(v.size());
         for(const auto& q:v){step();out.push_back(canonical_rational(q));value(out.back());}

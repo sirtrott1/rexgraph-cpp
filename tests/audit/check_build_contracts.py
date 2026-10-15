@@ -2,9 +2,11 @@
 """Check embedded builds, truthful options, installed graphs and relocation."""
 import argparse
 import json
+import re
 from pathlib import Path
 import subprocess
 import tempfile
+from urllib.parse import unquote, urlsplit
 
 UNIMPLEMENTED = ('REMOTE_MODEL_HTTP', 'LOCAL_MODEL_RUNTIME', 'ONNX', 'CUDA',
                  'SPEX', 'FLINT', 'GRAPHBLAS', 'LINBOX')
@@ -94,6 +96,22 @@ endif()
                       for p in (source / 'include/rfc').rglob('*.hpp'))
     if installed_headers != expected:
         raise RuntimeError('Incomplete installed header inventory')
+    documentation = prefix / 'share/doc/rfc'
+    guides = [source / 'README.md', *sorted((source / 'docs').rglob('README.md')),
+              *sorted((source / 'examples').rglob('README.md'))]
+    for original_guide in [*guides, source / 'LICENSE']:
+        installed_guide = documentation / original_guide.relative_to(source)
+        if not installed_guide.is_file() or installed_guide.read_bytes() != original_guide.read_bytes():
+            raise RuntimeError('Missing or changed installed guide: ' + str(installed_guide))
+    for original_guide in guides:
+        installed_guide = documentation / original_guide.relative_to(source)
+        for link in re.findall(r'\[[^\]]*\]\(([^)]+)\)', installed_guide.read_text()):
+            target = urlsplit(link)
+            if target.scheme or target.netloc or not target.path:
+                continue
+            resolved = (installed_guide.parent / unquote(target.path)).resolve()
+            if not resolved.is_relative_to(documentation.resolve()) or not resolved.is_file():
+                raise RuntimeError(f'Broken installed documentation link: {installed_guide}: {link}')
     for config in prefix.rglob('*.cmake'):
         if str(source) in config.read_text() or str(original) in config.read_text():
             raise RuntimeError('Source/install path leak in ' + str(config))
@@ -182,7 +200,8 @@ target_link_libraries(probe PRIVATE rfc::fundamentals rfc::native_query_executio
         if 'unknown or was not built' not in output:
             raise RuntimeError('Component rejected for an unrelated reason: ' + component)
     return dict(commands=count, unavailable_adapters=len(UNIMPLEMENTED),
-                installed_headers=len(installed_headers), exported_targets=len(graph),
+                installed_headers=len(installed_headers), installed_guides=len(guides),
+                installed_documentation_links=True, exported_targets=len(graph),
                 installed_graph_acyclic=True, relocation=True,
                 embedded_defaults_preserved=True, disabled_learning_artifacts=True,
                 optional_adapter_imports=False, consumer_warning_flags=False,

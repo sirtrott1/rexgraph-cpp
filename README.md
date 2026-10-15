@@ -1,350 +1,257 @@
 # RexGraphCPP
 
-A C++20 library implementing **Relational Field Calculus and Tensor Algebra**.
-The primary object is a typed relational complex with retained assertion and
-occurrence identities. Boundary matrices, graph projections, and observed fields
-are derived from that source.
+RexGraphCPP is a C++20 library for relational complexes, exact tensor fields and
+versioned storage. A relation retains its identity and ordered participant
+occurrences, including repeated and inactive participation. Boundary operators,
+local fields and observations are constructed from that retained source.
 
-The library provides exact rational arithmetic, composite binary declarations,
-branching relations, local stalks and fields, native algebra, metric and Hodge
-operators, typed accessions, and ordered temporal persistence. Structural support,
-activity, zero values, and numerical cancellation remain distinct.
+The library provides integer and rational arithmetic, heterogeneous stalks,
+declared maps, compatible gluing, metric and Hodge actions, prepared exact solves
+and native queries. Structural support, a supported zero and absence remain
+distinct. Exact algebraic values and explicitly selected approximation profiles
+have separate APIs.
 
-This software is proprietary and available for use only through the author's
-personal distribution. See [LICENSE](LICENSE).
+This software is proprietary and available through the author's personal
+distribution. See [LICENSE](LICENSE). Third party dependencies retain their own
+terms.
 
-## Build and test
+## Installation
 
-Requirements: CMake 3.24 or later, a C++20 compiler, pkg-config, GMP/GMPXX,
-and Python 3 for tests. These commands use Ninja. SQLite development libraries
-are required when the optional SQLite adapter is enabled.
+The SDK requires CMake 3.24 or later, a C++20 compiler, pkg-config and the GMP and
+GMPXX development libraries. The commands below also use Ninja. Run them from
+the library source directory:
 
 ```sh
-cmake -S . -B build/release -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release -DRFC_ENABLE_SQLITE_INTERPRETATION=ON
-cmake --build build/release --parallel 1
-ctest --test-dir build/release --output-on-failure -j1
+cmake -S . -B /tmp/rexgraphcpp-sdk-build -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DRFC_BUILD_APPS=OFF -DRFC_BUILD_LOCAL_TOOLS=OFF \
+  -DRFC_BUILD_TESTS=OFF -DRFC_BUILD_BENCHMARKS=OFF \
+  -DRFC_BUILD_LEARNING=OFF
+cmake --build /tmp/rexgraphcpp-sdk-build --parallel 1
+cmake --install /tmp/rexgraphcpp-sdk-build --prefix /tmp/rexgraphcpp-sdk
 ```
 
-Compile sequentially first; several translation units use substantial memory.
-The `dev` and `release` CMake presets provide additional local configurations.
+This installs the public headers, relocatable CMake targets, license and user
+guides. The mathematical targets are supplied as headers. Compiled tools and optional
+adapters are enabled separately. The installed guides are under
+`share/doc/rfc`; their example commands refer to a supplied source checkout.
 
-## Use from CMake
+### Use from CMake
 
-Keep a pinned source checkout and add it to your application:
+An application can use the installed SDK:
 
 ```cmake
-set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
-set(RFC_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(RFC_BUILD_APPS OFF CACHE BOOL "" FORCE)
-set(RFC_BUILD_LOCAL_TOOLS OFF CACHE BOOL "" FORCE)
-set(RFC_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+find_package(RFC 0.2 CONFIG REQUIRED)
+add_executable(your_app main.cpp)
+target_link_libraries(your_app PRIVATE rfc::field)
+```
+
+Pass `-DCMAKE_PREFIX_PATH=/tmp/rexgraphcpp-sdk` when configuring the application.
+Link the target for the operations it uses:
+
+| Target | Operations |
+| --- | --- |
+| `rfc::core` | Retained relational complexes and exact coefficients |
+| `rfc::local` | Stalks, declared fiber maps and owning sections |
+| `rfc::field` | Boundary, metric, Hodge, Dirac and Green actions |
+| `rfc::fundamentals` | The mathematical layers through temporal operations |
+| `rfc::storage` | Canonical source, field and history codecs |
+| `rfc::database` | Native publications, accessions and queries |
+| `rfc::inference` | Owning field programs and prepared native actions |
+| `rfc::learning` | Declared parameter families and evidence updates |
+| `rfc::rfc` | The complete library surface |
+
+A pinned source checkout can also be embedded directly:
+
+```cmake
 add_subdirectory(path/to/rexgraphcpp rfc EXCLUDE_FROM_ALL)
 target_link_libraries(your_app PRIVATE rfc::field)
 ```
 
-Link the narrowest target your application needs. `rfc::core` provides retained
-complexes; `rfc::field` adds field operators; `rfc::storage` adds RFCX persistence;
-`rfc::database` adds native access and interpretation. `rfc::fundamentals` is the
-mathematical umbrella, and `rfc::rfc` includes the full library surface.
+Embedded builds disable applications, tools, tests, learning executables and
+benchmarks by default. They preserve the consumer's language settings and do
+not impose warning flags. `RFC_BUILD_LEARNING=OFF` leaves the header API
+available while excluding its compiled applications, tests and benchmarks.
 
-The library can also be installed and used without its source checkout:
+### Optional adapters
 
-```sh
-cmake --install build/release --prefix /your/install/prefix
-```
+SQLite import requires SQLite development libraries and
+`-DRFC_ENABLE_SQLITE_INTERPRETATION=ON`. An installed consumer requests it with
+`find_package(RFC CONFIG REQUIRED COMPONENTS SQLite)` and links
+`rfc::sqlite_interpretation`.
 
-```cmake
-find_package(RFC 0.2 CONFIG REQUIRED)
-target_link_libraries(your_app PRIVATE rfc::field)
-```
+Exact packed binary GPU operations require Vulkan 1.1 headers and loader,
+`glslangValidator` and `-DRFC_ENABLE_VULKAN=ON`. An installed consumer requests
+`COMPONENTS Vulkan` and links `rfc::vulkan_binary`. Physical devices are required
+by default; `RFC_VULKAN_TEST_SOFTWARE=ON` explicitly admits software devices for
+tests. This adapter does not provide general rational GPU kernels.
 
-Set `CMAKE_PREFIX_PATH` to the installation prefix. Headers and CMake targets are
-relocatable. Optional installed adapters require `COMPONENTS SQLite` or
-`COMPONENTS Vulkan` in `find_package`; the base package does not load those
-dependencies. A source checkout added as a subdirectory builds library targets
-only by default and does not impose warning flags on its consumer.
+The base CMake package does not load either optional dependency. Switches for
+adapters without implemented kernels reject at configuration.
 
-`RFC_BUILD_LEARNING=OFF` excludes compiled learning applications, tests and
-benchmarks while keeping the header API available. Build flags for adapters
-without implemented kernels reject at configuration. Source guards work from
-any directory; `python3 tools/check_headers.py --compiler clang++` checks all
-public headers and links two opposite include orders with warnings as errors.
-That complete header check also requires SQLite headers on the current Linux
-profile because it includes the optional adapter.
+## Run an exact field example
 
-Relations use `rfc::core::RelationalComplex`; exact boundary, metric, Hodge,
-Green and Dirac actions use `rfc::field`. These canonical implementations also
-serve the native execution adapters and applications.
-
-`rfc::native_execution` provides owning, explicitly declared rational field actions
-through `rfc/database/native_execution.hpp`. Prepare with immutable native accession
-pins, one selected cell stalk per retained cell, and complete upper field support.
-Every retained occurrence needs an explicit map or the named constant-fiber
-constructor with shared declared coordinates. `execute` retains the serial GMP
-reference. Use `make_workspace(operation)` and
-`execute_prepared(operation, workspace)` for a compiled serial action with reusable
-scratch. Both return an owned, unpublished lower field with provenance. A workspace
-belongs to one prepared operation and requires an exclusive synchronous caller.
-Required unavailable backends reject; CPU fallback requires an explicit policy.
-Host limits admit checked container/work counts and conservative integer growth;
-they do not impose a process-wide memory quota. Cancellation is checked between
-synchronous phases.
-
-`rfc::native_field_cache` provides an owning analyzer and separate compiled-plan
-and exact-result caches for that rational final-field action. Exact dependency
-receipts preserve full source/carrier/map/support meanings and membership, including
-empty selections. Concurrent callers can share identical pure work while keeping
-scratch exclusive. See the [field cache consumer](examples/field_cache/README.md)
-for authority, cancellation, limits and current-publication provenance.
-`evaluate_parallel` and `make_cached_field_work` connect these exact receipts to
-CPU tile dispatch with bounded completed workspace reuse.
-
-`rfc::parallel_native_field` adds exact CPU execution of that rational final-field
-operation with exclusive output tiles and a declared worker budget. It preserves
-the compiled contribution order within every coordinate and joins all workers
-before returning or reporting failure. See the [parallel field consumer](examples/parallel_field/README.md)
-for preparation, workspace ownership and resource limits.
-
-`rfc::native_query_execution` prepares exact scalar conjunctions and numeric
-aggregates against owned native publications. Declared product paths resolve once;
-pure CPU tiles preserve retained key order and optional null semantics. Tensor
-windows retain axis order, structural absence and supported zero, with owning
-coordinate pins and sparse summaries. Preparation and each execution admit explicit
-publication availability and current limits. See the
-[query and tensor consumer](examples/query_tensor/README.md) for measured complete
-requests and independent/dependent read jobs.
-
-`rfc::native_locality` adds owned stalk views, selected field regions and stage
-resource lifetimes. `prepare_fiber_field` retains one coefficient per default
-identity incidence and preserves explicit transport maps. `retile_field` reuses
-that sealed action and input, partitioning output ownership by incidence work
-and object traffic targets. Observed cache sizes can guide those targets;
-they do not establish cache residency or bound GMP allocations.
-
-`NativeFieldVectorView` keeps declared carrier, shape, support and publication
-ownership with each numerical span. `PreparedNativeFieldRegion::select` computes
-source-ordered selected stalks with every incoming occurrence, including cofaces
-outside a patch. The full source witness remains retained. Owned linear sections
-provide separate contribution summation and compatible gluing. Owned semantic
-boundary actions validate declared realization maps and preserve the complete
-fine residual when a checked retraction is supplied. The native semantic adapter
-admits macro and micro publication cutoffs separately.
-That native semantic profile requires an explicit static mathematical map
-declaration. Fitted or time-varying maps need a separate availability binding.
-
-`local/interior_interface_solve.hpp` prepares exact sparse interior and interface
-solves for declared square operators. It retains coupled interfaces and
-reconstructs every requested coordinate. Singular interior blocks reject this
-profile. Current arithmetic limits apply to reused factors; elimination can fill
-in. These solves do not infer an inverse, metric or chain boundary from a partition.
-
-The [work dispatch consumer](examples/work_dispatch/README.md) runs independent
-field and packed jobs against one shared budget. `rfc::field_work` and
-`rfc::binary_work` provide owned completions and explicit dependencies;
-`rfc::vulkan_work` adds device routing when Vulkan is enabled. Packed data flow
-requires declared shared carriers and complete input bindings. Native publication
-cutoffs and expected completion generations prevent future or stale results from
-being accepted as current work.
-Vulkan work factories accept an owning `VulkanBinaryWorkspaceCache` for bounded
-exclusive buffer/pipeline reuse on one device context. The consumer's `--reuse`
-mode reports cold batches, warm result reuse and retained device allocations.
-Its `--locality` mode compares exact layouts and partitions, then matched cached
-CPU/GPU batches and independent staged regions with complete field reconstruction.
-
-`storage/prepared_source_program.hpp` binds a declared binary program once to
-pinned source bitplanes. Reuse a `BinaryExecutionWorkspace` for counts, owned
-masks, or ordered word callbacks. `runtime/query_mask.hpp` provides prepared mask
-intersection through the same packed executor.
-
-`inference/native_field_execution.hpp` prepares owning boundary, metric adjoint,
-and down/up/full Hodge actions on complete declared `SourceGrade` carriers. It
-Its finite profile accepts named unit metrics or complete positive diagonal
-native metrics. The explicitly selected `GlobalActions` profile also accepts
-complete declared positive rational metrics, exact Green solves and harmonic
-projectors. Metric solves reuse their exact LDL factors. Harmonic frames are
-prepared once; Green uses sparse augmented equations and verifies its residual.
-Negative Green parameters require a nonsingular system. Dimension, fill, work
-and integer-growth admission remain explicit. These actions do not require a
-Hodge matrix, inverse matrix or eigensolve.
-`learning/native_metric_layer.hpp` retains original ordered finite channels and
-native gain/bias fields and returns prospective values. Its original finite
-channels remain the supported model profile; empty grades reject explicitly.
-
-`learning/context_transport_hypotheses.hpp` provides
-`acquire_context_transport_hypotheses` for owned grade 1 transport observations.
-Supply original target rows and a complete atlas of explicitly declared common
-frame permutations. The result retains complete ordered stars, original cell
-and occurrence maps, evidence sample indices and entry equations. Use
-`PreparedTransportParameterRelations` to certify those equations and their joint
-intersections. Acquired comparisons remain prospective and preserve the source.
-
-`learning/context_transport_rules.hpp` provides `acquire_context_transport_rules`
-for independent original map entries. Supply distinct observed training rows,
-separate target rows, the frame atlas and a positive minimum peer count. Complete
-forced peer comparisons support a conditional transfer rule. Compatible
-contradictions or unresolved training comparisons prevent admission. The result
-retains every candidate, its evidence status and the selected original maps;
-unobserved target equality remains a hypothesis.
-
-`learning/context_transport_view_rules.hpp` provides
-`acquire_context_transport_view_rules` with faithful rational views. Each
-selected target comparison requires enough agreeing independent peers whose
-shared input images contain its complete compared input image. Directions
-outside that overlap remain unidentified. The result owns its exact parameter
-relation proof for reuse. `condition_status` checks a selected joint intersection
-without constructing the complete conditional parameter family.
-
-`learning/context_transport_pattern.hpp` exports an admitted training star with
-`PreparedTransportPattern::learn`. Supply declared domain, weight and parameter
-coordinate identities and external SHA256 provenance references. The pattern
-owns its source and complete affine weight family on the shared input image of
-its agreeing peers. `response` returns exact field families and rejects inputs
-outside that domain. `context_transport_pattern_codec.hpp` stores the pattern
-in the native series format without its training observations. Full training
-provenance remains in the referenced external archives.
-
-`PreparedTransportPatternBank::learn` retains selected stars in one source and
-one joint affine weight family. Shared boundary identities occur once. Supply
-one domain coordinate identity per selected star, along with distinct weight
-and parameter identities. `response` assembles the selected boundary fields.
-`glue` compares readings on shared boundaries and any declared restriction maps.
-It returns the compatible section, its separate boundary response and the
-remaining parameter family. Inconsistent readings return an exact contradiction
-witness. `context_transport_pattern_bank_codec.hpp` stores the bank without its
-training observations.
-
-`learning/transport_evidence.hpp` provides `PreparedTransportEvidence` for
-original whole-field transport observations. Construct it from a prepared
-transport declaration and call `append` with a nonempty ordered observation
-suffix and the original action limits. Each immutable child retains the original
-equations and source owner, assembles the new fields and updates its sparse
-reduced rows. `particular`, `kernel`, `pivots` and `free_columns` return the
-complete original parameter family. Conflicting equations reject the append.
-`preparation_steps` reports the canonical complete replay cost. `update` reports
-reused and newly assembled observation counts and the current guarded work.
-
-`learning/graded_transport_fit.hpp` provides `PreparedGradedTransportFit` for
-learning one original boundary grade with all adjacent transport families fixed.
-Use `PreparedTransportObservations::at_grade` with complete original stalks,
-explicit fixed occurrence maps and independent or named parameter coordinates.
-The fit retains whole field observations and enforces every applicable chain
-equation. `chain_rank`, `observation_rank` and `rank` describe the separate and
-combined constraints. `particular` and `kernel` retain the complete parameter
-family. `materialize` requires all free values and checks the full resulting tower.
-`append` shares the fixed chain and inserts only new whole field equations.
-`update` reports reused observations and actual guarded work separately from the
-canonical complete preparation cost.
-
-`learning/context_transport_views.hpp` accepts rational accession and
-reconstruction maps into declared common carriers. Reconstruction after
-accession must recover every original direction. `acquire_context_transport_views`
-computes the exact common input image of each retained star pair and compares
-its complete realized boundary responses. Witnesses retain common inputs,
-original reconstructions and response shapes. Unshared inputs remain in the
-original parameter family. Constant response equations require explicit
-`TransportParameterSupportPolicy::IncludeConstants` when preparing certificates.
-
-`learning/context_transport_diagrams.hpp` compares explicitly selected connected
-groups of original relation rows. `acquire_context_transport_diagrams` joins
-observed star correspondences only when their shared boundary maps agree in
-both directions. It retains the complete row, cell and occurrence maps and the
-union of entry equations for each group. Certify that union jointly with
-`PreparedTransportParameterRelations`; separately feasible stars can form an
-inconsistent group. Shared boundary contributions retain their own flag signs
-and roles.
-
-`learning/native_exact_trainer.hpp` provides a declared serial rational gradient
-profile for half the metric squared error. It retains original ordered channels,
-parameters, fixed sample order, step sizes and complete updates in a separate
-native history. Event, knowledge, label, publication and fitted-parameter cutoffs
-are checked separately; evaluation labels cannot update parameters. Resume
-replays every exact update and checks the complete ordered history. This profile
-uses no random state or momentum and does not assert predictions as source facts.
-
-`field/exact_dirac.hpp` provides an explicit rational-complex Cayley action with
-separate full real and imaginary towers. `numeric/rational_function.hpp` supplies
-bounded univariate arithmetic, differentiation and sparse elimination over
-`Q(t)`; poles and singular systems reject. Original domain restrictions remain
-the caller's declarations. `geometry/chain_homotopy.hpp` owns explicit chain
-homotopy certificates. A linear certificate does not supply an undeclared
-structural cylinder morphism or a universal homotopy solver.
-
-`storage/native_series_prefix.hpp` captures an owning history through one explicit
-publication cutoff. `temporal/chronological_prefix.hpp` evaluates only the declared
-forward steps. `models/native_temporal_context.hpp` requires per-source namespace
-cutoffs alongside host authorization and rejects newer publications before access.
-Publication order is not event time; callers must declare when inputs, labels and
-fitted parameters became available. These views preserve the complete source history.
-
-The [engine consumer](examples/engine_consumer/README.md) demonstrates a separate
-application adapter. The [database preview](examples/database_preview/README.md)
-provides a POSIX file and directory envelope over native histories.
-
-`storage/native_durable_store.hpp` adds an opt-in Linux store for canonical native
-history. Immutable frame batches, linked commits and a shared transaction index
-publish through one synchronized HEAD. Exact ID/content/predecessor retries return
-the original receipt. See the [durable history consumer](examples/durable_history/README.md)
-for filesystem assumptions, unknown-outcome handling and ownership.
-
-`rfc::concurrent_history` adds one Linux service with concurrent owning readers
-and serialized writers. Authentic expected snapshots use the complete root as
-their conflict domain. Frame directories and checkpoint maps share immutable
-storage across snapshots. See the [concurrent history consumer](examples/concurrent_history/README.md).
-
-## Local tools
+The prepared field example constructs a square with four edges and two complete
+fields in one native publication. It prepares Green, harmonic and gradient
+potential actions, then reuses their exact factors for both inputs:
 
 ```sh
-./build/release/rfc_local doctor
-./build/release/rfc_local --help
+cmake -S examples/prepared_global_actions \
+  -B /tmp/rexgraphcpp-field-example -G Ninja \
+  -DCMAKE_PREFIX_PATH=/tmp/rexgraphcpp-sdk
+cmake --build /tmp/rexgraphcpp-field-example --parallel 1
+/tmp/rexgraphcpp-field-example/prepared_global_actions
 ```
 
-See the [CLI README](docs/local/README.md) for examples and supported imports.
-`cmake --install build/release --prefix /your/install/path` installs the local
-CLI and its READMEs. The installation supplies the relocatable `RFC` CMake package and
-public headers described above.
+The [example guide](examples/prepared_global_actions/README.md) explains its
+metrics, potential gauge and admission limits. Prepared actions retain the
+actual source publication, carrier and metric. Further inputs must belong to
+that publication; matching dimensions or numerical values do not establish a
+transport. Full requested fields remain available independently of a terminal
+readout.
 
-## Scope
+`LocalRelationTensor`, `GradeTensorField` and `OwnedLinearFiberSystem` retain
+local tensors, whole grade fields and complete occurrence maps. Owning sections
+distinguish contribution summation from compatible gluing. Relational field
+programs declare their input nodes, bases, metrics and maps explicitly. Learned
+parameters belong to those declared objects; evidence updates do not introduce
+new relations, coordinates or interfaces implicitly.
 
-Version 0.2.1 is a developer preview with a changing C++ API. The runtime includes
-the Lossless Integrity baseline and its owning execution, durable history,
-concurrent publication, locality, and prepared query/tensor extensions.
-Native codecs retain their canonical compatibility fixtures. Supported external interpretation is bounded;
-SQLite ingestion admits INTEGER, TEXT, and BLOB under explicit identity and role
-bindings.
+## Examples and supported operations
 
-Rational GPU kernels, broader storage qualification, and scalable training remain
-planned. Existing backend options do not establish those
-capabilities. Owning one-grade rational execution, compiled serial field actions
-and reusable scratch are available.
+Each guide describes the input declarations, executed operations, retained
+outputs and scope, with build commands and the supported source or SDK inputs
+for that example.
 
-The mathematical paper defines the semantics. New implementations must preserve
-retained identities, declared carriers, exact values, and ordered history.
+### Fields, metrics and local solves
 
-## Repository contents
+[Prepared global actions](examples/prepared_global_actions/README.md),
+[selected exact solves](examples/selected_exact_solve/README.md) and
+[ordered exact solves](examples/ordered_exact_solve/README.md) cover reusable
+factors and requested outputs. [Prepared updates](examples/prepared_updates/README.md)
+and [native updates](examples/native_updates/README.md) retain their original
+source and update declarations.
 
-Git tracks source, tests, compatibility fixtures, build configuration, and these
-READMEs. Build output and local tooling state are ignored. Run
-`python3 tools/check_public_repository.py --history` to check the public index
-and locally reachable history before publishing.
+[Native Green actions](examples/native_green/README.md),
+[Hodge frames](examples/native_frames/README.md),
+[observations](examples/native_observations/README.md),
+[linear observations](examples/native_linear_observations/README.md) and
+[metric novelty](examples/native_metric_novelty/README.md) explain the distinct
+metric, gauge and observation contracts. [Local gluing](examples/native_gluing/README.md)
+and [relative fields](examples/native_relative/README.md) retain the requested
+interfaces and reconstruction.
 
-The optional [hardware field consumer](examples/hardware_field/README.md) reports
-observed Linux CPU, cache, RAM, cgroup and PCI facts. Coordinated worker reservations
-and measured warm CPU dispatch preserve the prepared field's exact operation and
-source. Unknown GPU memory, compute access and stacked-cache status remain explicit;
-this inventory profile does not register a GPU kernel.
+### Products, coverings and homotopies
 
-The optional [Vulkan consumer](examples/vulkan_binary/README.md) uses the compiled
-`rfc::vulkan_binary` leaf for exact packed binary operations. It preserves the
-ordered program and frozen source, supports joined CPU/GPU word partitions, and
-measures complete warm candidates before choosing a fitting plan. Device queries
-report unique memory heaps and advisory budgets. Enable `RFC_ENABLE_VULKAN`; Vulkan
-1.1 headers/loader and `glslangValidator` are required. Physical GPUs are required
-by default; explicit software admission is available for API/shader tests.
+[Tensor products](examples/native_tensor_product/README.md),
+[associators](examples/native_product_associator/README.md),
+[pentagons](examples/native_product_pentagon/README.md),
+[interchange](examples/native_product_interchange/README.md),
+[hexagons](examples/native_product_hexagon/README.md) and
+[braids](examples/native_product_braid/README.md) preserve nested carriers,
+ordered occurrences and exact coherence witnesses. The
+[chain map](examples/native_product_chain_map/README.md),
+[map composition](examples/native_product_map_composition/README.md) and
+[map associativity](examples/native_product_map_associativity/README.md)
+examples retain complete factor maps and intermediate histories.
 
-Native query algebra provides explicit nested value paths, three-valued boolean and
-role predicates, and exact grouped aggregates retaining source membership.
-`cross_native_role_join.hpp` composes ordered role occurrences across two immutable
-publications using a declared participant correspondence with both exact cutoffs.
-Equal keys across namespaces never infer identity. Aggregate requests specify
-occurrence or unique assertion multiplicity; unsupported numeric values stay absent.
+[Cylinders](examples/native_cylinder/README.md),
+[coverings](examples/native_covering/README.md),
+[relational homotopies](examples/native_relational_homotopy/README.md),
+[homotopy composition](examples/native_homotopy_composition/README.md),
+[repeated composition](examples/native_homotopy_sequence/README.md),
+[covering lifts](examples/native_covering_homotopy/README.md) and
+[covering base changes](examples/native_covering_homotopy_base_change/README.md)
+check declared source maps and retain each publication's independent cutoff.
+
+### Algebraic values and attaching maps
+
+[Algebraic modules](examples/algebraic_modules/README.md),
+[complex root certificates](examples/complex_root_certificates/README.md) and
+[algebraic metrics](examples/algebraic_metrics/README.md) use exact declared
+coefficient domains, embeddings and positive pairings.
+[Cellular attachments](examples/cellular_attachments/README.md) and
+[attaching transport](examples/attaching_transport/README.md) preserve original
+charts and incidence maps. [Native phase shapes](examples/native_phase_shapes/README.md)
+and [algebraic phase fields](examples/algebraic_phase_fields/README.md)
+describe the available phase declarations.
+
+### Storage, queries and history
+
+The [database example](examples/database_preview/README.md) introduces native
+publications. [Query tensor windows](examples/query_tensor/README.md) retain
+source coordinates and endpoint pins. [Durable history](examples/durable_history/README.md)
+and [concurrent history](examples/concurrent_history/README.md) document the
+Linux filesystem, publication, retry and recovery contracts.
+
+[Algebraic storage](examples/algebraic_storage/README.md),
+[algebraic graphs](examples/algebraic_graph/README.md),
+[algebraic database queries](examples/algebraic_database/README.md),
+[phase fold storage](examples/phase_fold_storage/README.md),
+[phase fold history](examples/phase_fold_histories/README.md),
+[graph history](examples/graph_history/README.md) and
+[graph database queries](examples/graph_database/README.md) retain owner
+references, complete declarations and selected revisions.
+
+Canonical codecs check their declared record, byte and arithmetic bounds.
+Shared packets retain the complete ordered logical byte image while reusing
+identical stored chunks. Segmented readers avoid expanding the entire packet;
+requested contiguous leaves have explicit materialization limits. Byte sharing
+does not establish source identity or transport, and these bounds are not a
+total process memory guarantee.
+
+### Execution and resource use
+
+[Field caches](examples/field_cache/README.md),
+[parallel fields](examples/parallel_field/README.md),
+[work dispatch](examples/work_dispatch/README.md) and
+[hardware inventory](examples/hardware_field/README.md) cover owning jobs,
+explicit dependencies, reusable workspaces and shared resource admission.
+The [Vulkan example](examples/vulkan_binary/README.md) covers exact packed
+operations and declared CPU/GPU partitions. The
+[engine consumer](examples/engine_consumer/README.md) embeds a pinned library
+source checkout in a standalone application.
+
+### Local queries and temporal walkthroughs
+
+Enable `RFC_BUILD_LOCAL_TOOLS=ON` to build and install `rfc_local`.
+The [CLI guide](docs/local/README.md) covers native snapshots, exact queries,
+ordered histories and bounded SQLite import.
+
+The [temporal dynamics walkthrough](examples/temporal_dynamics/README.md) and
+[temporal relations walkthrough](examples/temporal_relations/README.md) combine
+retained source changes, historical queries and exact field observations.
+Their guides give the build, local server and verification commands.
+
+## Development and validation
+
+Python 3 is required for the independent checks. To build the default tools,
+examples and regression tests from the source directory:
+
+```sh
+cmake -S . -B /tmp/rexgraphcpp-tests -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build /tmp/rexgraphcpp-tests --parallel 1
+ctest --test-dir /tmp/rexgraphcpp-tests --output-on-failure -j1
+```
+
+Start with one compiler process; exact arithmetic translation units can use
+substantial memory. SQLite tests require the optional adapter above. The
+`dev` and `release` presets are also available for local development.
+
+`python3 tools/check_headers.py --compiler clang++` checks public headers
+independently and together with strict warnings. The full header check also
+requires SQLite headers because it includes that adapter.
+`python3 tests/audit/check_build_contracts.py` checks embedded defaults,
+installed dependencies, relocated consumers and offline documentation links.
+`python3 tools/check_public_repository.py --working-tree --history` checks
+repository content before distribution.
+
+Version 0.2.1 is a developer preview with a changing C++ API. Exact sparse
+elimination can fill in and increase integer sizes; work and dimension limits
+remain explicit. Rational finite evolution and general continuous evolution
+have different arithmetic requirements. Broader service, platform and model
+capabilities require their own implemented and validated profiles.
+
+Source, tests, compatibility fixtures, build configuration and canonical
+READMEs belong in this repository. Private research, reports and local run
+artifacts are maintained separately.

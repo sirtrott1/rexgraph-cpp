@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Temporal relations and field dynamics | RexGraph</title>
+  <link rel="stylesheet" href="demo.css">
+  <script src="demo-data.js" defer></script>
+  <script src="demo.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#content">Skip to demonstration</a>
+  <header>
+    <div><strong>RexGraph</strong><span class="product-name">Temporal relations and field dynamics</span></div>
+    <div class="header-actions"><button id="theme" type="button" aria-label="Switch to dark appearance">Dark appearance</button><button id="print" type="button">Print walkthrough</button></div>
+  </header>
+  <div class="layout">
+    <aside aria-label="Walkthrough">
+      <p class="nav-label">Walkthrough</p>
+      <nav id="chapters">
+        <button data-chapter="introduction" aria-current="page">Start here</button>
+        <button data-chapter="timeline">Time spans and publications</button>
+        <button data-chapter="queries">Query the native database</button>
+        <button data-chapter="structure">Boundary and composite binary</button>
+        <button data-chapter="fields">Field response and sectors</button>
+        <button data-chapter="changes">Evolution and attribution</button>
+        <button data-chapter="chronology">Ordered propagation</button>
+        <button data-chapter="tensors">Tensors and stalks</button>
+        <button data-chapter="comparisons">Exact comparison cases</button>
+        <button data-chapter="reproduce">Sources and reproduction</button>
+      </nav>
+      <div class="aside-note">Synthetic incident data.<br>Exact rational computation.<br>Native retained publications.</div>
+      <a href="temporal-dynamics.rfnb" download>Download query notebook</a>
+    </aside>
+    <main id="content">
+      <section class="cutoff" aria-label="Historical publication">
+        <label for="publication">Observe publication</label>
+        <select id="publication"></select>
+        <button id="previous" type="button">Previous publication</button>
+        <button id="next" type="button">Next publication</button>
+        <span id="availability" role="status" aria-live="polite"></span>
+      </section>
+      <article id="view" aria-live="polite"></article>
+      <div class="walk-controls"><button id="backChapter" type="button">Previous chapter</button><button id="nextChapter" type="button">Next chapter</button></div>
+      <footer>RexGraph C++ native demonstration. Proprietary software distributed by the author.<br>Figures use illustrative pixel geometry. Exact values and native files remain available.</footer>
+    </main>
+  </div>
+  <noscript><p>This presentation needs JavaScript to select retained publications. Read observations.json and the example README for the complete exact results.</p></noscript>
+</body>
+</html>

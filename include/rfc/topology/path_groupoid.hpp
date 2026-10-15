@@ -65,7 +65,10 @@ public:
         target_ = validate_and_target(source_, steps_);
     }
 
-    [[nodiscard]] const core::RelationalComplex& complex() const { return *complex_; }
+    [[nodiscard]] const core::RelationalComplex& complex() const {
+        if (complex_ == nullptr) throw std::logic_error("path has no declared source owner");
+        return *complex_;
+    }
     [[nodiscard]] std::uint32_t source() const noexcept { return source_; }
     [[nodiscard]] std::uint32_t target() const noexcept { return target_; }
     [[nodiscard]] const std::vector<EdgeStep>& steps() const noexcept { return steps_; }
@@ -75,7 +78,7 @@ public:
         std::vector<EdgeStep> reverse;
         reverse.reserve(steps_.size());
         for (auto it = steps_.rbegin(); it != steps_.rend(); ++it) reverse.push_back(EdgeStep{it->relation, !it->forward});
-        return PairwisePath(*complex_, target_, std::move(reverse));
+        return PairwisePath(complex(), target_, std::move(reverse));
     }
 
     [[nodiscard]] PairwisePath reduced() const {
@@ -89,7 +92,7 @@ public:
                 reduced_steps.push_back(step);
             }
         }
-        return PairwisePath(*complex_, source_, std::move(reduced_steps));
+        return PairwisePath(complex(), source_, std::move(reduced_steps));
     }
 
     [[nodiscard]] static PairwisePath compose(const PairwisePath& first, const PairwisePath& second) {
@@ -97,7 +100,7 @@ public:
         if (first.target_ != second.source_) throw std::invalid_argument("path composition endpoint mismatch");
         std::vector<EdgeStep> steps = first.steps_;
         steps.insert(steps.end(), second.steps_.begin(), second.steps_.end());
-        return PairwisePath(*first.complex_, first.source_, std::move(steps)).reduced();
+        return PairwisePath(first.complex(), first.source_, std::move(steps)).reduced();
     }
 
 private:

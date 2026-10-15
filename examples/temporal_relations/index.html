@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A synthetic biomedical study of native relational complexes, temporal databases and exact tensor fields.">
+  <title>Biomedical relational complexes | RexGraph</title>
+  <link rel="stylesheet" href="demo.css">
+  <script src="demo-data.js" defer></script>
+  <script src="demo.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#view">Skip to main content</a>
+  <header class="site-header">
+    <a class="brand" href="#start">RexGraph<span>Biomedical relational complexes</span></a>
+    <div class="header-actions"><button id="theme" type="button" aria-label="Use dark appearance">Dark appearance</button><button id="print" type="button">Print this page</button></div>
+  </header>
+  <div class="workspace">
+    <aside><nav id="chapters" aria-label="Analysis sections"></nav></aside>
+    <main id="main">
+      <section id="publicationControls" class="publication-controls" aria-label="Historical data selection" hidden>
+        <div><label for="publication">Data available at</label><select id="publication"></select></div>
+        <div class="step-buttons"><button id="earlier" type="button">Earlier</button><button id="later" type="button">Later</button></div>
+        <p id="availability"></p>
+      </section>
+      <article id="view" tabindex="-1"></article>
+      <nav class="page-turn" aria-label="Chapter navigation"><button id="previousChapter" type="button">Previous</button><button id="nextChapter" type="button">Next</button></nav>
+    </main>
+  </div>
+  <footer><span>RexGraph relational complex and temporal field analysis</span><a href="README.md">Source and reproduction</a></footer>
+</body>
+</html>

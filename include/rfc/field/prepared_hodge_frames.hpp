@@ -1,6 +1,7 @@
 #pragma once
 #include "rfc/core/relational_complex.hpp"
 #include "rfc/numeric/prepared_exact_frames.hpp"
+#include "rfc/numeric/prepared_positive_semidefinite.hpp"
 #include <array>
 
 namespace rfc::field {
@@ -40,28 +41,8 @@ inline Matrix boundary(const core::RelationalComplex& source,core::Grade grade,G
 // Guarded exact LDL^T certificate. This certifies a declared rational form;
 // it neither normalizes eigenvectors nor infers a metric from source incidence.
 inline void positive(const Matrix& form,Guard& guard) {
-    guard.matrix(form);if(form.rows()!=form.cols())throw std::invalid_argument("frame metric must be square");
-    for(const auto& [key,value]:form.entries()){
-        guard.step();if(value!=form.get(key.second,key.first))throw std::invalid_argument("frame metric must be symmetric");
-    }
-    std::vector<std::map<std::size_t,numeric::Rational>> lower(form.rows());Vector pivots(form.rows());
-    std::size_t entries=pivots.size();guard.entries(entries);
-    for(std::size_t i=0;i<form.rows();++i){
-        for(std::size_t j=0;j<i;++j){
-            guard.step();numeric::Rational sum=form.get(i,j);
-            for(const auto& [k,value]:lower[i]){
-                guard.step();if(k>=j)break;
-                const auto found=lower[j].find(k);
-                if(found!=lower[j].end())sum=guard.sub(sum,guard.mul(guard.mul(value,pivots[k]),found->second));
-            }
-            auto value=guard.div(sum,pivots[j]);
-            if(value!=0){guard.entries(++entries);lower[i].emplace(j,std::move(value));}
-        }
-        guard.step();numeric::Rational pivot=form.get(i,i);
-        for(const auto& [k,value]:lower[i])pivot=guard.sub(pivot,guard.mul(guard.mul(value,value),pivots[k]));
-        if(pivot<=0)throw std::invalid_argument("frame metric must be positive definite");
-        pivots[i]=std::move(pivot);
-    }
+    const numeric::PreparedPositiveSemidefinite certificate(form,guard);
+    if(certificate.rank()!=form.rows())throw std::invalid_argument("frame metric must be positive definite");
 }
 inline Matrix solve_columns(const numeric::PreparedExactSolve& solve,const Matrix& rhs,Guard& guard) {
     guard.matrix(rhs);Matrix result(rhs.rows(),rhs.cols());

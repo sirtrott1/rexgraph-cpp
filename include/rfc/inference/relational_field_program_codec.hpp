@@ -1,6 +1,7 @@
 #pragma once
 
 #include "rfc/inference/relational_field_program.hpp"
+#include "rfc/storage/prepared_byte_packet.hpp"
 
 namespace rfc::inference {
 namespace field_program_codec_detail {
@@ -19,20 +20,38 @@ inline std::vector<std::byte> finish(Writer writer) {
     writer.patch_u64(24, storage::rfcx_detail::fnv1a64(std::span<const std::byte>(writer.bytes()).subspan(32)));
     return std::move(writer).take_bytes();
 }
-inline void header(Reader& reader, std::span<const std::byte> bytes, const std::array<std::byte, 8>& magic) {
+inline void header(Reader& reader, const storage::ByteRange& bytes, const std::array<std::byte, 8>& magic) {
     field_program_detail::require(bytes.size() >= 32, "truncated field program envelope");
     for (const auto byte : magic) field_program_detail::require(reader.u8() == std::to_integer<std::uint8_t>(byte), "field program envelope magic");
     field_program_detail::require(reader.u32() == 1 && reader.u32() == 0, "unsupported field program envelope version");
     field_program_detail::require(reader.u64() == bytes.size(), "field program envelope length");
     field_program_detail::require(reader.u64() == storage::rfcx_detail::fnv1a64(bytes.subspan(32)), "field program envelope integrity");
 }
+inline void header(Reader& reader, std::span<const std::byte> bytes, const std::array<std::byte, 8>& magic) {
+    header(reader, storage::ByteRange(bytes), magic);
+}
 inline void blob(Writer& writer, std::span<const std::byte> bytes) { writer.u64(bytes.size()); writer.raw(bytes); }
-inline void canonical(std::span<const std::byte> bytes, const std::vector<std::byte>& encoded) {
+inline void canonical(std::span<const std::byte> bytes, std::span<const std::byte> encoded) {
     field_program_detail::require(bytes.size() == encoded.size() && std::equal(bytes.begin(), bytes.end(), encoded.begin()),
         "noncanonical field program image");
 }
 inline bool same_field(const numeric::SparseRationalTensor& a, const numeric::SparseRationalTensor& b) {
     return storage::temporal_endpoint_detail::tensor_equal(a, b);
+}
+inline void canonical(std::span<const std::byte> bytes,const storage::PreparedBytePacket& packet,std::function<void()> check={}) {
+    packet.require_equal(bytes,std::move(check));
+}
+inline void canonical(const storage::ByteRange& bytes, std::span<const std::byte> encoded) { bytes.require_equal(encoded); }
+inline void canonical(std::span<const std::byte> bytes, const storage::ByteRange& encoded) { encoded.require_equal(bytes); }
+inline void canonical(const storage::ByteRange& bytes, const storage::ByteRange& encoded) {
+    field_program_detail::require(bytes.size() == encoded.size(), "noncanonical field program image");
+    std::size_t offset{};
+    bytes.for_each_span([&](std::span<const std::byte> part) { encoded.subspan(offset, part.size()).require_equal(part); offset += part.size(); });
+}
+inline void canonical(const storage::ByteRange& bytes, const storage::PreparedBytePacket& packet, std::function<void()> check = {}) {
+    field_program_detail::require(bytes.size() == packet.size(), "noncanonical field program image");
+    const auto pin = bytes; std::size_t offset{};
+    packet.stream([&](std::span<const std::byte> part) { pin.subspan(offset, part.size()).require_equal(part); offset += part.size(); }, std::move(check));
 }
 } // namespace field_program_codec_detail
 
@@ -102,19 +121,44 @@ inline OwnedRelationalFieldProgram decode_relational_field_program(std::span<con
     canonical(bytes, encode_relational_field_program(program)); return program;
 }
 
-inline std::vector<std::byte> encode_relational_field_result(const OwnedRelationalFieldResult& result) {
+namespace field_program_codec_detail {
+// A preparation-local cache pins actual immutable owners. Equal bytes or
+// dimensions cannot substitute an owner, and no availability result is cached.
+struct PacketContext {
+    explicit PacketContext(std::size_t maximum=std::numeric_limits<std::size_t>::max(),std::function<void()> callback={}) :max_bytes(maximum) {
+        if(callback){const auto held=std::make_shared<std::function<void()>>(std::move(callback));check=[held]{(*held)();};}
+    }
+    explicit PacketContext(storage::SharedPacketLimits limits,std::function<void()> callback={}) :PacketContext(limits.max_expanded_bytes,std::move(callback)) {
+        byte_guard=std::make_shared<storage::shared_packet_detail::Guard>(limits,check);
+    }
+    storage::PreparedBytePacket program(const OwnedRelationalFieldProgram& owner){
+        for(const auto& [actual,packet]:programs){if(actual.same_owner(owner)){return packet;}}
+        if(check){check();}const auto encoded=encode_relational_field_program(owner);
+        value_bound(encoded.size());auto packet=storage::PreparedBytePacket::freeze(encoded);if(byte_guard){byte_guard->work(encoded.size());}programs.emplace_back(owner,packet);return packet;
+    }
+    void value_bound(std::size_t size) const {storage::shared_packet_detail::bound(size,max_bytes,"prepared native packet byte admission");}
+    std::size_t max_bytes;
+    std::function<void()> check;
+    std::shared_ptr<storage::shared_packet_detail::Guard> byte_guard;
+    std::vector<std::pair<OwnedRelationalFieldProgram,storage::PreparedBytePacket>> programs;
+};
+inline storage::PreparedBytePacket prepare_result(const OwnedRelationalFieldResult& result,PacketContext& context){
     using namespace field_program_codec_detail;
-    auto writer = envelope(result_magic); const auto program = result.program();
-    blob(writer, encode_relational_field_program(program)); writer.u64(result.inputs().size());
-    for (const auto& input : result.inputs()) {
-        writer.u64(input.node); writer.u64(input.use); storage::temporal_codec_detail::tensor(writer, input.field);
+    const auto pin=result;const auto program=pin.program();storage::BytePacketBuilder writer(result_magic,context.max_bytes,context.byte_guard.get());
+    writer.blob(context.program(program));writer.u64(pin.inputs().size());
+    for (const auto& input : pin.inputs()) {
+        writer.write([&](auto& w){w.u64(input.node);w.u64(input.use);storage::temporal_codec_detail::tensor(w,input.field);});
     }
     writer.u64(program.declaration().nodes.size());
     for (const auto& node : program.declaration().nodes) {
-        writer.u64(node.key); storage::temporal_codec_detail::tensor(writer, result.field(node.key));
-        if (node.kind == FieldProgramNodeKind::Boundary) storage::temporal_codec_detail::tensor(writer, result.occurrence_field(node.key));
+        writer.write([&](auto& w){w.u64(node.key);storage::temporal_codec_detail::tensor(w,pin.field(node.key));
+            if(node.kind==FieldProgramNodeKind::Boundary){storage::temporal_codec_detail::tensor(w,pin.occurrence_field(node.key));}});
     }
-    return finish(std::move(writer));
+    return std::move(writer).finish(context.check);
+}
+} // namespace field_program_codec_detail
+inline std::vector<std::byte> encode_relational_field_result(const OwnedRelationalFieldResult& result){
+    field_program_codec_detail::PacketContext context;return field_program_codec_detail::prepare_result(result,context).bytes();
 }
 
 inline OwnedRelationalFieldResult decode_relational_field_result(std::span<const std::byte> bytes,

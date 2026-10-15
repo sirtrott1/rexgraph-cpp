@@ -3,6 +3,7 @@
 #include "rfc/inference/relational_field_interface_codec.hpp"
 #include "rfc/runtime/work_graph.hpp"
 #include "rfc/storage/native_series_prefix.hpp"
+#include <mutex>
 
 namespace rfc::inference {
 enum class RelationalDependencyRole : std::uint8_t {
@@ -39,7 +40,15 @@ class OwnedRelationalValueOrigin {
         std::uint64_t key;
         storage::NativeSeriesPrefix publication;
         RelationalDependencyRole role;
-        value_admission_detail::Bytes payload, receipt;
+        value_admission_detail::Bytes receipt;
+        std::size_t payload_offset, payload_size;
+        mutable std::once_flag payload_once;
+        mutable std::mutex payload_mutex;
+        mutable value_admission_detail::Bytes payload_cache;
+        State(std::uint64_t k, storage::NativeSeriesPrefix p, RelationalDependencyRole r,
+            value_admission_detail::Bytes bytes, std::size_t size)
+            : key(k), publication(std::move(p)), role(r), receipt(std::move(bytes)),
+              payload_offset(receipt.size()-size), payload_size(size) {}
     };
 public:
     OwnedRelationalValueOrigin(std::uint64_t key, storage::NativeSeriesPrefix publication,
@@ -53,13 +62,32 @@ public:
         field_program_codec_detail::blob(w, payload);
         auto receipt = field_program_codec_detail::finish(std::move(w));
         bound(receipt.size(), limits.total_bytes);
-        state_ = std::make_shared<const State>(State{key, std::move(publication), role, std::move(payload), std::move(receipt)});
+        // A long-lived origin retains exact receipt bytes, not the encoder's
+        // spare capacity and a second eager copy of the same payload.
+        Bytes compact(receipt.begin(),receipt.end());
+        state_ = std::make_shared<const State>(key, std::move(publication), role, std::move(compact), payload.size());
     }
     std::uint64_t key() const { return state_->key; }
     RelationalDependencyRole role() const { return state_->role; }
     storage::NativeSeriesPrefix publication() const { return state_->publication; }
-    const value_admission_detail::Bytes& payload() const & { return state_->payload; }
+    std::span<const std::byte> payload_bytes() const & {
+        return std::span<const std::byte>(state_->receipt).subspan(state_->payload_offset,state_->payload_size);
+    }
+    std::span<const std::byte> payload_bytes() const && = delete;
+    const value_admission_detail::Bytes& payload() const & {
+        const auto pin=state_;
+        std::call_once(pin->payload_once,[&]{
+            const std::lock_guard lock(pin->payload_mutex);
+            const auto bytes=std::span<const std::byte>(pin->receipt).subspan(pin->payload_offset,pin->payload_size);
+            pin->payload_cache.assign(bytes.begin(),bytes.end());
+        });
+        return pin->payload_cache;
+    }
     const value_admission_detail::Bytes& payload() const && = delete;
+    std::size_t retained_byte_count() const {
+        const auto pin=state_;const std::lock_guard lock(pin->payload_mutex);
+        return machine::checked_size_add(pin->receipt.capacity(),pin->payload_cache.capacity());
+    }
     const value_admission_detail::Bytes& receipt() const & { return state_->receipt; }
     const value_admission_detail::Bytes& receipt() const && = delete;
     bool same_owner(const OwnedRelationalValueOrigin& other) const { return state_ == other.state_; }
@@ -80,7 +108,7 @@ public:
         bound(grants.size(), limits.origins); std::map<std::uint64_t, RelationalOriginGrant> values;
         std::size_t total{};
         for (auto& grant : grants) {
-            bound(grant.origin.payload().size(), limits.payload_bytes);
+            bound(grant.origin.payload_bytes().size(), limits.payload_bytes);
             total = machine::checked_size_add(total, grant.origin.receipt().size()); bound(total, limits.total_bytes);
             value_admission_detail::require(values.emplace(grant.origin.key(), std::move(grant)).second, "duplicate actual origin authority key");
         }
@@ -88,20 +116,32 @@ public:
     }
     OwnedRelationalValueOrigin require(std::uint64_t key, RelationalDependencyRole role,
         const value_admission_detail::Bytes& payload) const {
+        return require_bytes(key, role, payload);
+    }
+    OwnedRelationalValueOrigin require_bytes(std::uint64_t key, RelationalDependencyRole role,
+        std::span<const std::byte> payload) const {
+        return require_content(key,role,[&](std::span<const std::byte> bytes){
+            return bytes.size()==payload.size()&&std::equal(bytes.begin(),bytes.end(),payload.begin());});
+    }
+    OwnedRelationalValueOrigin require_bytes(std::uint64_t key, RelationalDependencyRole role,
+        const storage::ByteRange& payload) const {
+        return require_content(key,role,[&](std::span<const std::byte> bytes){return payload.equals(bytes);});
+    }
+    void recheck(const OwnedRelationalValueOrigin& expected) const {
+        const auto actual = require_bytes(expected.key(), expected.role(), expected.payload_bytes());
+        value_admission_detail::require(actual.same_owner(expected), "different actual live value origin owner");
+    }
+private:
+    template<class Matches> OwnedRelationalValueOrigin require_content(std::uint64_t key, RelationalDependencyRole role,Matches&& matches) const {
         const auto found = grants_->find(key);
         value_admission_detail::require(found != grants_->end(), "missing actual value origin authority");
         const auto& grant = found->second; const auto origin = grant.origin;
-        value_admission_detail::require(origin.role() == role && origin.payload() == payload,
+        value_admission_detail::require(origin.role() == role && matches(origin.payload_bytes()),
             "actual value origin role or complete content differs");
         const auto publication = origin.publication();
         runtime::admit_work_availability(publication.source_namespace(), publication.cutoff(), grant.availability);
         return origin;
     }
-    void recheck(const OwnedRelationalValueOrigin& expected) const {
-        const auto actual = require(expected.key(), expected.role(), expected.payload());
-        value_admission_detail::require(actual.same_owner(expected), "different actual live value origin owner");
-    }
-private:
     std::shared_ptr<const std::map<std::uint64_t, RelationalOriginGrant>> grants_;
 };
 

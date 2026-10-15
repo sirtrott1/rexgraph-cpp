@@ -1,8 +1,12 @@
 #pragma once
 #include "rfc/learning/operator_basis.hpp"
 #include "rfc/numeric/checked_int.hpp"
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
+#include <span>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -30,6 +34,41 @@ inline std::int64_t apply_integer_activation(IntegerActivation activation, std::
     }
     throw std::invalid_argument("unknown integer activation");
 }
+
+class IntegerNetworkWorkspace {
+public:
+    IntegerNetworkWorkspace(const core::RelationalComplex& complex, core::Grade grade, std::size_t samples)
+        : complex_(&complex), grade_(grade), capacity_(samples) {
+        if (grade.value >= complex.grade_count() || !samples) throw std::invalid_argument("integer workspace grade or capacity");
+        const auto width = complex.grade(grade).cell_count();
+        const auto lower = grade.value ? complex.grade(core::Grade{static_cast<std::uint16_t>(grade.value - 1u)}).cell_count() : 0;
+        const auto upper = grade.value < complex.max_grade().value ? complex.grade(core::Grade{static_cast<std::uint16_t>(grade.value + 1u)}).cell_count() : 0;
+        current_.resize(slots(width, samples)); next_.resize(slots(width, samples));
+        down_.resize(slots(width, samples)); up_.resize(slots(width, samples)); sum_.resize(slots(width, samples));
+        lower_.resize(slots(lower, samples)); upper_.resize(slots(upper, samples));
+    }
+    IntegerNetworkWorkspace(const core::RelationalComplex&&, core::Grade, std::size_t) = delete;
+    [[nodiscard]] std::size_t capacity() const noexcept { return capacity_; }
+    [[nodiscard]] std::size_t retained_slots() const {
+        const auto a = slots(current_.size(), 5);
+        if (lower_.size() > std::numeric_limits<std::size_t>::max() - a ||
+            upper_.size() > std::numeric_limits<std::size_t>::max() - a - lower_.size())
+            throw std::overflow_error("integer workspace slot count overflow");
+        return a + lower_.size() + upper_.size();
+    }
+    static std::size_t slots(std::size_t width, std::size_t samples) {
+        if (samples && width > std::numeric_limits<std::size_t>::max() / samples)
+            throw std::overflow_error("integer batch slot count overflow");
+        return width * samples;
+    }
+private:
+    const core::RelationalComplex* complex_;
+    core::Grade grade_;
+    std::size_t capacity_;
+    std::vector<std::int64_t> current_, next_, down_, up_, sum_, lower_, upper_;
+    friend class CompiledIntegerRelationalLayer;
+    friend class IntegerRelationalNetwork;
+};
 
 class CompiledIntegerRelationalLayer {
 public:
@@ -71,12 +110,64 @@ public:
     }
 
 private:
+    void forward_batch_into(IntegerNetworkWorkspace& work, std::span<const std::int64_t> input,
+                            std::span<std::int64_t> output, std::size_t samples,
+                            const std::function<void()>& check) const {
+        std::fill(output.begin(), output.end(), bias_);
+        bool have_down = false, have_up = false, have_sum = false;
+        const auto n = input.size();
+        auto down = std::span(work.down_).first(n);
+        auto up = std::span(work.up_).first(n);
+        auto sum = std::span(work.sum_).first(n);
+        auto make_down = [&] {
+            if (have_down) return;
+            std::fill(down.begin(), down.end(), 0);
+            if (grade_.value) {
+                field::LatticeBoundaryOperator boundary(*complex_, grade_);
+                const auto lower_size = complex_->grade(boundary.lower_grade()).cell_count() * samples;
+                auto lower = std::span(work.lower_).first(lower_size);
+                boundary.apply_batch_into(input, lower, samples);
+                boundary.transpose_batch_into(lower, down, samples);
+            }
+            have_down = true;
+        };
+        auto make_up = [&] {
+            if (have_up) return;
+            std::fill(up.begin(), up.end(), 0);
+            if (grade_.value < complex_->max_grade().value) {
+                field::LatticeBoundaryOperator boundary(*complex_, core::Grade{static_cast<std::uint16_t>(grade_.value + 1u)});
+                const auto upper_size = complex_->grade(boundary.upper_grade()).cell_count() * samples;
+                auto upper = std::span(work.upper_).first(upper_size);
+                boundary.transpose_batch_into(input, upper, samples);
+                boundary.apply_batch_into(upper, up, samples);
+            }
+            have_up = true;
+        };
+        for (std::size_t c = 0; c < channels_.size(); ++c) {
+            if (check) check();
+            if (!gains_[c]) continue;
+            auto response = input;
+            if (channels_[c] == OperatorChannelKind::HodgeDown) { make_down(); response = down; }
+            else if (channels_[c] == OperatorChannelKind::HodgeUp) { make_up(); response = up; }
+            else if (channels_[c] == OperatorChannelKind::Hodge) {
+                if (!have_sum) {
+                    make_down(); make_up();
+                    for (std::size_t i = 0; i < n; ++i) sum[i] = numeric::checked_add_i64(down[i], up[i]);
+                    have_sum = true;
+                }
+                response = sum;
+            }
+            for (std::size_t i = 0; i < n; ++i) output[i] = numeric::checked_mac_i64(output[i], gains_[c], response[i]);
+        }
+        for (auto& value : output) value = apply_integer_activation(activation_, value);
+    }
     const core::RelationalComplex* complex_{};
     core::Grade grade_{};
     std::vector<OperatorChannelKind> channels_;
     std::vector<std::int64_t> gains_;
     std::int64_t bias_{};
     IntegerActivation activation_{IntegerActivation::Identity};
+    friend class IntegerRelationalNetwork;
 };
 
 struct CompiledIntegerLayerPlan {
@@ -118,6 +209,25 @@ public:
         field::MachineLatticeField current = input;
         for (const auto& layer : layers_) current = layer.forward(current);
         return current;
+    }
+
+    // Each sample follows the declared channel and occurrence order independently.
+    [[nodiscard]] std::vector<std::int64_t> forward_batch(std::span<const std::int64_t> input,
+        std::size_t samples, IntegerNetworkWorkspace& work, const std::function<void()>& check = {}) const {
+        if (work.complex_ != complex_ || work.grade_ != grade_ || !samples || samples > work.capacity_ ||
+            input.size() != IntegerNetworkWorkspace::slots(complex_->grade(grade_).cell_count(), samples))
+            throw std::invalid_argument("integer network batch source, grade or shape mismatch");
+        if (check) check();
+        auto current = std::span(work.current_).first(input.size());
+        auto next = std::span(work.next_).first(input.size());
+        std::copy(input.begin(), input.end(), current.begin());
+        for (const auto& layer : layers_) {
+            if (check) check();
+            layer.forward_batch_into(work, current, next, samples, check);
+            std::swap(current, next);
+        }
+        if (check) check();
+        return {current.begin(), current.end()};
     }
 
 private:

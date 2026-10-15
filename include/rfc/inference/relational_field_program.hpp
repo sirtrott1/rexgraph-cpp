@@ -243,6 +243,7 @@ public:
     const RelationalFieldProgramDeclaration& declaration() const & { return state_->declaration; }
     const RelationalFieldProgramDeclaration& declaration() const && = delete;
     storage::NativeSeriesEndpoint publication() const { return state_->publication; }
+    bool same_owner(const OwnedRelationalFieldProgram& other) const noexcept { return state_ == other.state_; }
     const local::OwnedLinearFiberSystem& fibers() const & { return state_->fibers; }
     const local::OwnedLinearFiberSystem& fibers() const && = delete;
     // Owning prepared actions retain the exact same node and occurrence maps

@@ -59,7 +59,7 @@ operations with no current numerical effect.
 ## Contracts
 
 Successful commands emit JSON; errors return a nonzero status. Numeric values and
-64-bit identities are JSON strings. The display is a derived observation; native
+64 bit identities are JSON strings. The display is a derived observation; native
 archives supply canonical replay. Every invocation loads and validates its input.
 The CLI uses exclusive output creation. Crash recovery, multiwriter transactions,
 and an authorization service are outside the current local profile.

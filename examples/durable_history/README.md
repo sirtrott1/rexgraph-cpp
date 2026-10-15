@@ -14,7 +14,7 @@ cmake --build build/durable --parallel 1
 Use a new store directory. The API is in `rfc/storage/native_durable_store.hpp`,
 linked through `rfc::storage`. `create(path, base, namespace)` accepts a validated
 native endpoint and a nonzero namespace. `append(transaction, expected_root,
-frames)` accepts a nonzero 64-bit transaction ID, the exact expected root, and one
+frames)` accepts a nonzero 64 bit transaction ID, the exact expected root, and one
 or more canonical RFCXT frames. It returns a receipt after synchronization.
 
 Retry with the same ID, predecessor and exact ordered bytes returns the original

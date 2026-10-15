@@ -112,15 +112,32 @@ inline OwnedRelationalInputUseAsset decode_relational_input_use_asset(std::span<
     field_program_detail::require(r.remaining() == 0, "trailing input asset bytes");
     OwnedRelationalInputUseAsset out(std::move(history), std::move(d), limits); canonical(bytes, encode_relational_input_use_asset(out)); return out;
 }
-inline std::vector<std::byte> encode_accession_field_result(const OwnedAccessionFieldResult& result) {
+namespace field_interface_codec_detail {
+struct PacketContext:field_program_codec_detail::PacketContext {
+    using field_program_codec_detail::PacketContext::PacketContext;
+    storage::PreparedBytePacket asset(const OwnedRelationalInputUseAsset& owner){
+        for(const auto& [actual,packet]:assets){if(actual.same_owner(owner)){return packet;}}
+        if(check){check();}const auto encoded=encode_relational_input_use_asset(owner);value_bound(encoded.size());
+        auto packet=storage::PreparedBytePacket::freeze(encoded);if(byte_guard){byte_guard->work(encoded.size());}assets.emplace_back(owner,packet);return packet;
+    }
+    std::vector<std::pair<OwnedRelationalInputUseAsset,storage::PreparedBytePacket>> assets;
+    std::vector<std::pair<OwnedAccessionFieldResult,storage::PreparedBytePacket>> accessions;
+};
+inline storage::PreparedBytePacket prepare_accession(const OwnedAccessionFieldResult& result,PacketContext& context) {
     using namespace field_interface_codec_detail;
-    const auto pin = result; auto w = envelope(accession_magic); blob(w, encode_relational_field_result(pin.result()));
+    for(const auto& [actual,packet]:context.accessions){if(actual.same_owner(result)){return packet;}}
+    const auto pin=result;storage::BytePacketBuilder w(accession_magic,context.max_bytes,context.byte_guard.get());
+    w.blob(field_program_codec_detail::prepare_result(pin.result(),context));
     w.u64(pin.inputs().size());
     for (const auto& input : pin.inputs()) {
-        const auto a = input.accession(); blob(w, encode_relational_input_use_asset(a.asset())); accession(w, a.declaration());
-        w.u64(input.use()); storage::temporal_codec_detail::tensor(w, input.source_field());
+        const auto a=input.accession();w.blob(context.asset(a.asset()));
+        w.write([&](auto& raw){accession(raw,a.declaration());raw.u64(input.use());storage::temporal_codec_detail::tensor(raw,input.source_field());});
     }
-    return finish(std::move(w));
+    auto packet=std::move(w).finish(context.check);context.accessions.emplace_back(pin,packet);return packet;
+}
+} // namespace field_interface_codec_detail
+inline std::vector<std::byte> encode_accession_field_result(const OwnedAccessionFieldResult& result){
+    field_interface_codec_detail::PacketContext context;return field_interface_codec_detail::prepare_accession(result,context).bytes();
 }
 inline OwnedAccessionFieldResult decode_accession_field_result(std::span<const std::byte> bytes,
     const storage::TemporalReadLimits& policy, numeric::ExactActionLimits limits = {}) {

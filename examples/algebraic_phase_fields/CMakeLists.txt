@@ -1,0 +1,13 @@
+cmake_minimum_required(VERSION 3.24)
+project(rfc_algebraic_phase_fields_example LANGUAGES CXX)
+if(RFC_SOURCE_DIR)
+  foreach(option RFC_BUILD_APPS RFC_BUILD_LOCAL_TOOLS RFC_BUILD_TESTS RFC_BUILD_BENCHMARKS
+                 RFC_BUILD_CAPABILITY_DEMO RFC_BUILD_LEARNING)
+    set(${option} OFF CACHE BOOL "" FORCE)
+  endforeach()
+  add_subdirectory("${RFC_SOURCE_DIR}" rfc EXCLUDE_FROM_ALL)
+else()
+  find_package(RFC CONFIG REQUIRED)
+endif()
+add_executable(algebraic_phase_fields main.cpp)
+target_link_libraries(algebraic_phase_fields PRIVATE rfc::topology rfc::geometry)

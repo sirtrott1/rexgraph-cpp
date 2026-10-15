@@ -27,19 +27,19 @@ struct PassiveEvidence {
     numeric::ExactActionLimits limits;
     Origin root;
     std::vector<std::vector<PassiveObservation>> updates;
-    Bytes native;
+    storage::ByteRange native;
     std::vector<Origin> obligations;
 };
-inline PassiveEvidence preflight_evidence(std::span<const std::byte> bytes, const Context& context,
+inline PassiveEvidence preflight_evidence_image(storage::ByteRange bytes, const Context& context,
     const storage::TemporalReadLimits& policy, numeric::ExactActionLimits cap, const std::function<void()>& check = {}) {
     Reader r(bytes, policy); header(r, bytes, evidence_magic);
-    auto program = inference::value_admission_codec_detail::preflight_program(r.blob(), context, policy, check);
+    auto program = inference::value_admission_codec_detail::preflight_program_image(r.view_blob(), context, policy, check);
     auto declaration = relational_affine_codec_detail::parameters(r);
     const numeric::ExactActionLimits limits{inference::field_interface_codec_detail::size(r), inference::field_interface_codec_detail::size(r),
         inference::field_interface_codec_detail::size(r), inference::field_interface_codec_detail::size(r)};
     inference::value_admission_detail::require(limits.dimension <= cap.dimension && limits.entries <= cap.entries &&
         limits.steps <= cap.steps && limits.integer_bits <= cap.integer_bits, "available evidence policy exceeds caller cap");
-    const auto root_key = r.u64(); const auto receipt = r.blob();
+    const auto root_key = r.u64(); const auto receipt = r.view_blob();
     const auto root_payload = relational_evidence_root_payload(program.native, declaration, limits);
     const auto root = context.require(root_key, Role::Evidence, root_payload); canonical(receipt, root.receipt());
     auto obligations = program.obligations; obligations.push_back(root);
@@ -49,12 +49,12 @@ inline PassiveEvidence preflight_evidence(std::span<const std::byte> bytes, cons
         const auto count = r.count(66); std::vector<PassiveObservation> suffix;
         for (std::size_t j = 0; j < count; ++j) {
             if (check) check();
-            const auto key = r.u64(); auto input = inference::value_admission_codec_detail::preflight_result(r.blob(), context, policy, check);
+            const auto key = r.u64(); auto input = inference::value_admission_codec_detail::preflight_result_image(r.view_blob(), context, policy, check);
             canonical(input.program, out.program.native);
             const auto asset = r.blob(); const auto use = r.u64(); auto target = storage::temporal_codec_detail::tensor(r);
             const auto mask = r.count(6); std::vector<core::CellId> observed;
             for (std::size_t k = 0; k < mask; ++k) observed.push_back(inference::field_interface_codec_detail::local_cell(r));
-            const RelationalTargetOrigins keys{r.u64(), r.u64()}; const auto asset_receipt = r.blob(), value_receipt = r.blob();
+            const RelationalTargetOrigins keys{r.u64(), r.u64()}; const auto asset_receipt = r.view_blob(), value_receipt = r.view_blob();
             const Bytes asset_bytes(asset.begin(), asset.end());
             const auto payload = relational_target_value_payload(out.program.native, out.declaration.node, asset_bytes, use, target);
             const auto target_asset = context.require(keys.asset, Role::TargetAsset, asset_bytes);
@@ -66,8 +66,12 @@ inline PassiveEvidence preflight_evidence(std::span<const std::byte> bytes, cons
         }
         out.updates.push_back(std::move(suffix));
     }
-    const auto witness = r.blob(); out.native.assign(witness.begin(), witness.end());
+    out.native = r.view_blob();
     inference::value_admission_detail::require(!r.remaining(), "trailing available evidence bytes"); return out;
+}
+inline PassiveEvidence preflight_evidence(std::span<const std::byte> bytes, const Context& context,
+    const storage::TemporalReadLimits& policy, numeric::ExactActionLimits cap, const std::function<void()>& check = {}) {
+    return preflight_evidence_image(storage::ByteRange(bytes), context, policy, cap, check);
 }
 inline PreparedAvailableRelationalEvidence replay_evidence(const PassiveEvidence& parsed, const Context& context,
     const storage::TemporalReadLimits& policy, const std::function<void()>& check = {}) {
@@ -84,12 +88,13 @@ inline PreparedAvailableRelationalEvidence replay_evidence(const PassiveEvidence
         }
         evidence = evidence.append(std::move(suffix), context, check);
     }
-    canonical(parsed.native, encode_relational_field_evidence(evidence.evidence())); return evidence;
+    relational_affine_codec_detail::PacketContext packets(std::numeric_limits<std::size_t>::max(),check);
+    canonical(parsed.native,relational_affine_codec_detail::prepare_evidence(evidence.evidence(),packets),packets.check);return evidence;
 }
 struct PassiveFamily {
     PassiveEvidence evidence;
     inference::value_admission_codec_detail::PassiveAvailableResult input;
-    Bytes native;
+    std::span<const std::byte> native;
 };
 inline PassiveFamily preflight_family(std::span<const std::byte> bytes, const Context& context,
     const storage::TemporalReadLimits& policy, numeric::ExactActionLimits cap, const std::function<void()>& check = {}) {
@@ -98,7 +103,7 @@ inline PassiveFamily preflight_family(std::span<const std::byte> bytes, const Co
     auto input = inference::value_admission_codec_detail::preflight_result(r.blob(), context, policy, check);
     canonical(input.program, evidence.program.native); const auto witness = r.blob();
     inference::value_admission_detail::require(!r.remaining(), "trailing available family bytes");
-    return {std::move(evidence), std::move(input), {witness.begin(), witness.end()}};
+    return {std::move(evidence), std::move(input), witness};
 }
 inline AvailableRelationalAffineResult replay_family(const PassiveFamily& parsed, const Context& context,
     const storage::TemporalReadLimits& policy, numeric::ExactActionLimits cap, const std::function<void()>& check = {}) {
@@ -107,23 +112,24 @@ inline AvailableRelationalAffineResult replay_family(const PassiveFamily& parsed
     const auto program = evidence.program();
     auto input = inference::value_admission_codec_detail::replay_result(parsed.input, context, policy, cap, check, program.program());
     auto result = evidence.execute(std::move(input), context, cap, check);
-    canonical(parsed.native, encode_relational_affine_result(result.result())); return result;
+    relational_affine_codec_detail::PacketContext packets(std::numeric_limits<std::size_t>::max(),check);
+    canonical(parsed.native,relational_affine_codec_detail::prepare_affine(result.result(),packets),packets.check);return result;
 }
 struct PassiveEvaluation {
     PassiveFamily family;
     numeric::RationalVector free;
     Origin setting;
-    Bytes native;
+    std::span<const std::byte> native;
 };
 inline PassiveEvaluation preflight_evaluation(std::span<const std::byte> bytes, const Context& context,
     const storage::TemporalReadLimits& policy, numeric::ExactActionLimits limits, const std::function<void()>& check = {}) {
     Reader r(bytes, policy); header(r, bytes, choice_magic);
     auto family = preflight_family(r.blob(), context, policy, limits, check);
     auto free = relational_affine_codec_detail::vector(r); const auto key = r.u64(); const auto receipt = r.blob();
-    const auto payload = relational_parameter_setting_payload(family.evidence.native, family.evidence.obligations, free);
+    const auto payload = relational_parameter_setting_payload(family.evidence.native.span(), family.evidence.obligations, free);
     auto setting = context.require(key, Role::Prospective, payload); canonical(receipt, setting.receipt());
     const auto witness = r.blob(); inference::value_admission_detail::require(!r.remaining(), "trailing available evaluation bytes");
-    return {std::move(family), std::move(free), std::move(setting), Bytes(witness.begin(), witness.end())};
+    return {std::move(family), std::move(free), std::move(setting), witness};
 }
 inline AvailableRelationalAffineEvaluation replay_evaluation(const PassiveEvaluation& parsed, const Context& context,
     const storage::TemporalReadLimits& policy, numeric::ExactActionLimits limits, const std::function<void()>& check = {}) {
@@ -133,68 +139,81 @@ inline AvailableRelationalAffineEvaluation replay_evaluation(const PassiveEvalua
 }
 } // namespace available_evidence_codec_detail
 
-inline std::vector<std::byte> encode_available_relational_evidence(const PreparedAvailableRelationalEvidence& evidence) {
+namespace available_evidence_codec_detail {
+inline storage::PreparedBytePacket prepare_evidence(const PreparedAvailableRelationalEvidence& evidence,relational_affine_codec_detail::PacketContext& context){
     using namespace available_evidence_codec_detail;
     std::vector<PreparedAvailableRelationalEvidence> lineage; auto current = evidence;
     while (true) { lineage.push_back(current); const auto parent = current.parent(); if (!parent) break; current = *parent; }
-    std::reverse(lineage.begin(), lineage.end()); const auto root = lineage.front(); auto w = envelope(evidence_magic);
-    blob(w, inference::encode_available_relational_program(root.program())); relational_affine_codec_detail::parameters(w, root.root_declaration());
+    std::reverse(lineage.begin(),lineage.end());const auto root=lineage.front();storage::BytePacketBuilder w(evidence_magic,context.max_bytes,context.byte_guard.get());
+    w.blob(inference::value_admission_codec_detail::prepare_program(root.program(),context));w.write([&](auto& raw){relational_affine_codec_detail::parameters(raw,root.root_declaration());});
     const auto limits = root.limits(); w.u64(limits.dimension); w.u64(limits.entries); w.u64(limits.steps); w.u64(limits.integer_bits);
-    const auto origin = root.root_origin(); w.u64(origin.key()); blob(w, origin.receipt()); w.u64(lineage.size()-1);
+    const auto origin=root.root_origin();w.u64(origin.key());w.receipt(origin);w.u64(lineage.size()-1);
     for (std::size_t i = 1; i < lineage.size(); ++i) {
         const auto& suffix = lineage[i].suffix(); w.u64(suffix.size());
         std::size_t offset = lineage[i-1].obligations().size();
         for (const auto& o : suffix) {
-            w.u64(o.key); blob(w, inference::encode_available_relational_result(o.input));
-            blob(w, inference::encode_relational_input_use_asset(o.target_asset)); w.u64(o.target_use);
-            storage::temporal_codec_detail::tensor(w, o.target); w.u64(o.observed.size());
-            for (const auto c : o.observed) inference::field_interface_codec_detail::local_cell(w, c);
+            if(context.check){context.check();}w.u64(o.key);w.blob(inference::value_admission_codec_detail::prepare_result(o.input,context));w.blob(context.asset(o.target_asset));
+            w.write([&](auto& raw){raw.u64(o.target_use);storage::temporal_codec_detail::tensor(raw,o.target);raw.u64(o.observed.size());for(const auto c:o.observed){inference::field_interface_codec_detail::local_cell(raw,c);}});
             w.u64(o.origins.asset); w.u64(o.origins.value); offset = machine::checked_size_add(offset, o.input.obligations().size());
-            blob(w, lineage[i].obligations().at(offset).receipt()); blob(w, lineage[i].obligations().at(offset+1).receipt()); offset += 2;
+            w.receipt(lineage[i].obligations().at(offset));w.receipt(lineage[i].obligations().at(offset+1));offset+=2;
         }
     }
-    blob(w, encode_relational_field_evidence(evidence.evidence())); return finish(std::move(w));
+    w.blob(relational_affine_codec_detail::prepare_evidence(evidence.evidence(),context));return std::move(w).finish(context.check);
+}
+inline storage::PreparedBytePacket prepare_family(const AvailableRelationalAffineResult& result,relational_affine_codec_detail::PacketContext& context){
+    const auto pin=result;storage::BytePacketBuilder w(family_magic,context.max_bytes,context.byte_guard.get());
+    w.blob(prepare_evidence(pin.evidence(),context));w.blob(inference::value_admission_codec_detail::prepare_result(pin.input(),context));
+    w.blob(relational_affine_codec_detail::prepare_affine(pin.result(),context));return std::move(w).finish(context.check);
+}
+inline storage::PreparedBytePacket prepare_evaluation(const AvailableRelationalAffineEvaluation& evaluation,relational_affine_codec_detail::PacketContext& context){
+    const auto pin=evaluation;storage::BytePacketBuilder w(choice_magic,context.max_bytes,context.byte_guard.get());
+    w.blob(prepare_family(pin.family(),context));const auto native=pin.result();w.write([&](auto& raw){relational_affine_codec_detail::vector(raw,native.free_values());});
+    const auto setting=pin.setting();w.u64(setting.key());w.receipt(setting);w.blob(relational_affine_codec_detail::prepare_evaluation(native,context));return std::move(w).finish(context.check);
+}
+} // namespace available_evidence_codec_detail
+inline std::vector<std::byte> encode_available_relational_evidence(const PreparedAvailableRelationalEvidence& evidence){
+    relational_affine_codec_detail::PacketContext context;return available_evidence_codec_detail::prepare_evidence(evidence,context).bytes();
 }
 inline PreparedAvailableRelationalEvidence decode_available_relational_evidence(std::span<const std::byte> bytes,
-    const inference::RelationalAvailabilityContext& context, const storage::TemporalReadLimits& policy,
+    const inference::RelationalAvailabilityContext& context, const storage::TemporalReadLimits& caller_policy,
     numeric::ExactActionLimits limits = {}, std::function<void()> check = {}) {
+    const auto policy=caller_policy;
     inference::value_admission_detail::bound(bytes.size(), policy.max_file_bytes);
     const std::vector<std::byte> frozen(bytes.begin(), bytes.end()); const auto authority = context; const auto callback = std::move(check);
     if (callback) callback();
     const auto parsed = available_evidence_codec_detail::preflight_evidence(frozen, authority, policy, limits, callback);
     auto out = available_evidence_codec_detail::replay_evidence(parsed, authority, policy, callback);
-    inference::field_program_codec_detail::canonical(frozen, encode_available_relational_evidence(out)); return out;
+    relational_affine_codec_detail::PacketContext packets(policy.max_file_bytes,callback);
+    inference::field_program_codec_detail::canonical(frozen,available_evidence_codec_detail::prepare_evidence(out,packets),packets.check);return out;
 }
 inline std::vector<std::byte> encode_available_relational_affine_result(const AvailableRelationalAffineResult& result) {
-    using namespace available_evidence_codec_detail;
-    const auto pin = result; auto w = envelope(family_magic); blob(w, encode_available_relational_evidence(pin.evidence()));
-    blob(w, inference::encode_available_relational_result(pin.input())); blob(w, encode_relational_affine_result(pin.result())); return finish(std::move(w));
+    relational_affine_codec_detail::PacketContext context;return available_evidence_codec_detail::prepare_family(result,context).bytes();
 }
 inline AvailableRelationalAffineResult decode_available_relational_affine_result(std::span<const std::byte> bytes,
-    const inference::RelationalAvailabilityContext& context, const storage::TemporalReadLimits& policy,
+    const inference::RelationalAvailabilityContext& context, const storage::TemporalReadLimits& caller_policy,
     numeric::ExactActionLimits limits = {}, std::function<void()> check = {}) {
+    const auto policy=caller_policy;
     inference::value_admission_detail::bound(bytes.size(), policy.max_file_bytes);
     const std::vector<std::byte> frozen(bytes.begin(), bytes.end()); const auto authority = context; const auto callback = std::move(check);
     if (callback) callback();
     const auto parsed = available_evidence_codec_detail::preflight_family(frozen, authority, policy, limits, callback);
     auto out = available_evidence_codec_detail::replay_family(parsed, authority, policy, limits, callback);
-    inference::field_program_codec_detail::canonical(frozen, encode_available_relational_affine_result(out)); return out;
+    relational_affine_codec_detail::PacketContext packets(policy.max_file_bytes,callback);
+    inference::field_program_codec_detail::canonical(frozen,available_evidence_codec_detail::prepare_family(out,packets),packets.check);return out;
 }
 inline std::vector<std::byte> encode_available_relational_affine_evaluation(const AvailableRelationalAffineEvaluation& evaluation) {
-    using namespace available_evidence_codec_detail;
-    const auto pin = evaluation; auto w = envelope(choice_magic); blob(w, encode_available_relational_affine_result(pin.family()));
-    const auto native = pin.result(); relational_affine_codec_detail::vector(w, native.free_values()); const auto setting = pin.setting();
-    w.u64(setting.key()); blob(w, setting.receipt()); blob(w, encode_relational_affine_evaluation(native)); return finish(std::move(w));
+    relational_affine_codec_detail::PacketContext context;return available_evidence_codec_detail::prepare_evaluation(evaluation,context).bytes();
 }
 inline AvailableRelationalAffineEvaluation decode_available_relational_affine_evaluation(std::span<const std::byte> bytes,
-    const inference::RelationalAvailabilityContext& context, const storage::TemporalReadLimits& policy,
+    const inference::RelationalAvailabilityContext& context, const storage::TemporalReadLimits& caller_policy,
     numeric::ExactActionLimits limits = {}, std::function<void()> check = {}) {
+    const auto policy=caller_policy;
     using namespace available_evidence_codec_detail;
     inference::value_admission_detail::bound(bytes.size(), policy.max_file_bytes);
     const std::vector<std::byte> frozen(bytes.begin(), bytes.end()); const auto authority = context; const auto callback = std::move(check);
     if (callback) callback();
     const auto parsed = preflight_evaluation(frozen, authority, policy, limits, callback);
     auto out = replay_evaluation(parsed, authority, policy, limits, callback);
-    canonical(frozen, encode_available_relational_affine_evaluation(out)); return out;
+    relational_affine_codec_detail::PacketContext packets(policy.max_file_bytes,callback);canonical(frozen,prepare_evaluation(out,packets),packets.check);return out;
 }
 } // namespace rfc::learning

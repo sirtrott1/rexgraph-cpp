@@ -20,7 +20,7 @@ ctest --test-dir build/database --output-on-failure
 cmp build/sample.rfcxdb build/copy.rfcxdb
 ```
 
-Use fresh output paths. The field reading `211/243` is a synthetic discrete-model
+Use fresh output paths. The field reading `211/243` is a synthetic discrete model
 value. Native source identities, repeated and inactive occurrences, tensor
 declarations, and complete history survive the round trip.
 
@@ -33,7 +33,7 @@ The separate `sample-action` profile retains scalar cell stalks and upper fields
 in a native history. `execute` applies the compiled owning field contribution and prints
 the selected declarations, occurrence bindings, resource bounds, decision
 provenance, and complete exact lower support. Coordinates `0` require explicit
-maps; a nonzero argument invokes the named constant-fiber constructor and checks
+maps; a nonzero argument invokes the named constant fiber constructor and checks
 the declared common coordinate identity.
 
 ```sh

@@ -13,7 +13,9 @@ enum class OperatorKind : std::uint8_t {
     Hodge,
     Dirac,
     Green,
-    HarmonicProjector
+    HarmonicProjector,
+    HarmonicInverse,
+    GradientPotential
 };
 
 struct OperatorRequest {
