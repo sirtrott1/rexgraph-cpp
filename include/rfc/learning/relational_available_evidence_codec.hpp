@@ -7,6 +7,7 @@ namespace available_evidence_codec_detail {
 using namespace available_evidence_detail;
 inline constexpr std::array<std::byte, 8> evidence_magic{
     std::byte{'R'}, std::byte{'F'}, std::byte{'C'}, std::byte{'V'}, std::byte{'E'}, std::byte{1}, std::byte{0}, std::byte{0}};
+inline constexpr auto occurrence_evidence_magic=[] {auto out=evidence_magic;out[5]=std::byte{2};return out;}();
 inline constexpr std::array<std::byte, 8> family_magic{
     std::byte{'R'}, std::byte{'F'}, std::byte{'C'}, std::byte{'V'}, std::byte{'F'}, std::byte{1}, std::byte{0}, std::byte{0}};
 inline constexpr std::array<std::byte, 8> choice_magic{
@@ -20,6 +21,8 @@ struct PassiveObservation {
     std::vector<core::CellId> observed;
     RelationalTargetOrigins keys;
     std::vector<Origin> targets;
+    std::optional<RelationalOccurrenceTargetDeclaration> port{};
+    std::vector<std::uint64_t> observed_coordinates{};
 };
 struct PassiveEvidence {
     inference::value_admission_codec_detail::PassiveAvailableProgram program;
@@ -32,7 +35,8 @@ struct PassiveEvidence {
 };
 inline PassiveEvidence preflight_evidence_image(storage::ByteRange bytes, const Context& context,
     const storage::TemporalReadLimits& policy, numeric::ExactActionLimits cap, const std::function<void()>& check = {}) {
-    Reader r(bytes, policy); header(r, bytes, evidence_magic);
+    const bool version2=bytes.size()>5&&bytes.subspan(5,1).first_span()[0]==std::byte{2};
+    Reader r(bytes,policy);header(r,bytes,version2?occurrence_evidence_magic:evidence_magic);
     auto program = inference::value_admission_codec_detail::preflight_program_image(r.view_blob(), context, policy, check);
     auto declaration = relational_affine_codec_detail::parameters(r);
     const numeric::ExactActionLimits limits{inference::field_interface_codec_detail::size(r), inference::field_interface_codec_detail::size(r),
@@ -54,15 +58,31 @@ inline PassiveEvidence preflight_evidence_image(storage::ByteRange bytes, const 
             const auto asset = r.blob(); const auto use = r.u64(); auto target = storage::temporal_codec_detail::tensor(r);
             const auto mask = r.count(6); std::vector<core::CellId> observed;
             for (std::size_t k = 0; k < mask; ++k) observed.push_back(inference::field_interface_codec_detail::local_cell(r));
-            const RelationalTargetOrigins keys{r.u64(), r.u64()}; const auto asset_receipt = r.view_blob(), value_receipt = r.view_blob();
+            std::optional<RelationalOccurrenceTargetDeclaration> port;std::vector<std::uint64_t> coordinates;
+            if(version2&&r.flag()) {
+                port=relational_affine_codec_detail::occurrence_port(r);const auto n=r.count(8);
+                for(std::size_t k=0;k<n;++k)coordinates.push_back(r.u64());
+            }
+            RelationalTargetOrigins keys{r.u64(),r.u64()};if(port)keys.port=r.u64();
+            const auto asset_receipt=r.view_blob(),value_receipt=r.view_blob();
+            storage::ByteRange port_receipt;if(port)port_receipt=r.view_blob();
             const Bytes asset_bytes(asset.begin(), asset.end());
-            const auto payload = relational_target_value_payload(out.program.native, out.declaration.node, asset_bytes, use, target);
+            std::vector<Bytes> input_accessions;
+            if(port)for(const auto& item:input.inputs)input_accessions.push_back(inference::relational_input_accession_payload(
+                out.program.native,item.asset,item.declaration,item.use,item.field));
+            const auto payload=port?relational_occurrence_target_value_payload(out.program.native,*port,asset_bytes,use,target,coordinates,input_accessions):
+                relational_target_value_payload(out.program.native,out.declaration.node,asset_bytes,use,target);
             const auto target_asset = context.require(keys.asset, Role::TargetAsset, asset_bytes);
             const auto target_value = context.require(keys.value, Role::TargetValue, payload);
             canonical(asset_receipt, target_asset.receipt()); canonical(value_receipt, target_value.receipt());
             out.obligations.insert(out.obligations.end(), input.obligations.begin(), input.obligations.end());
             out.obligations.push_back(target_asset); out.obligations.push_back(target_value);
-            suffix.push_back({key, std::move(input), asset_bytes, use, std::move(target), std::move(observed), keys, {target_asset, target_value}});
+            std::vector<Origin> targets{target_asset,target_value};
+            if(port) {
+                const auto actual=context.require(keys.port,Role::Interface,relational_occurrence_target_port_payload(out.program.native,*port));
+                canonical(port_receipt,actual.receipt());out.obligations.push_back(actual);targets.push_back(actual);
+            }
+            suffix.push_back({key,std::move(input),asset_bytes,use,std::move(target),std::move(observed),keys,std::move(targets),std::move(port),std::move(coordinates)});
         }
         out.updates.push_back(std::move(suffix));
     }
@@ -84,7 +104,9 @@ inline PreparedAvailableRelationalEvidence replay_evidence(const PassiveEvidence
             auto input = inference::value_admission_codec_detail::replay_result(o.input, context, policy, parsed.limits, check, program.program());
             if (check) check();
             auto asset = inference::decode_relational_input_use_asset(o.asset, policy, parsed.limits);
-            suffix.push_back({o.key, std::move(input), std::move(asset), o.use, o.target, o.observed, o.keys});
+            std::optional<OwnedRelationalOccurrenceTargetPort> port;
+            if(o.port)port=OwnedRelationalOccurrenceTargetPort(program.program(),*o.port,parsed.limits,check);
+            suffix.push_back({o.key,std::move(input),std::move(asset),o.use,o.target,o.observed,o.keys,std::move(port),o.observed_coordinates});
         }
         evidence = evidence.append(std::move(suffix), context, check);
     }
@@ -144,7 +166,8 @@ inline storage::PreparedBytePacket prepare_evidence(const PreparedAvailableRelat
     using namespace available_evidence_codec_detail;
     std::vector<PreparedAvailableRelationalEvidence> lineage; auto current = evidence;
     while (true) { lineage.push_back(current); const auto parent = current.parent(); if (!parent) break; current = *parent; }
-    std::reverse(lineage.begin(),lineage.end());const auto root=lineage.front();storage::BytePacketBuilder w(evidence_magic,context.max_bytes,context.byte_guard.get());
+    std::reverse(lineage.begin(),lineage.end());const auto root=lineage.front();const bool version2=evidence.evidence().has_occurrence_observations();
+    storage::BytePacketBuilder w(version2?occurrence_evidence_magic:evidence_magic,context.max_bytes,context.byte_guard.get());
     w.blob(inference::value_admission_codec_detail::prepare_program(root.program(),context));w.write([&](auto& raw){relational_affine_codec_detail::parameters(raw,root.root_declaration());});
     const auto limits = root.limits(); w.u64(limits.dimension); w.u64(limits.entries); w.u64(limits.steps); w.u64(limits.integer_bits);
     const auto origin=root.root_origin();w.u64(origin.key());w.receipt(origin);w.u64(lineage.size()-1);
@@ -153,9 +176,10 @@ inline storage::PreparedBytePacket prepare_evidence(const PreparedAvailableRelat
         std::size_t offset = lineage[i-1].obligations().size();
         for (const auto& o : suffix) {
             if(context.check){context.check();}w.u64(o.key);w.blob(inference::value_admission_codec_detail::prepare_result(o.input,context));w.blob(context.asset(o.target_asset));
-            w.write([&](auto& raw){raw.u64(o.target_use);storage::temporal_codec_detail::tensor(raw,o.target);raw.u64(o.observed.size());for(const auto c:o.observed){inference::field_interface_codec_detail::local_cell(raw,c);}});
-            w.u64(o.origins.asset); w.u64(o.origins.value); offset = machine::checked_size_add(offset, o.input.obligations().size());
-            w.receipt(lineage[i].obligations().at(offset));w.receipt(lineage[i].obligations().at(offset+1));offset+=2;
+            w.write([&](auto& raw){raw.u64(o.target_use);storage::temporal_codec_detail::tensor(raw,o.target);raw.u64(o.observed.size());for(const auto c:o.observed){inference::field_interface_codec_detail::local_cell(raw,c);}
+                if(version2){raw.u8(o.port?1:0);if(o.port){relational_affine_codec_detail::occurrence_port(raw,o.port->declaration());raw.u64(o.observed_coordinates.size());for(const auto key:o.observed_coordinates)raw.u64(key);}}});
+            w.u64(o.origins.asset);w.u64(o.origins.value);if(o.port)w.u64(o.origins.port);offset = machine::checked_size_add(offset, o.input.obligations().size());
+            w.receipt(lineage[i].obligations().at(offset));w.receipt(lineage[i].obligations().at(offset+1));if(o.port)w.receipt(lineage[i].obligations().at(offset+2));offset+=o.port?3u:2u;
         }
     }
     w.blob(relational_affine_codec_detail::prepare_evidence(evidence.evidence(),context));return std::move(w).finish(context.check);

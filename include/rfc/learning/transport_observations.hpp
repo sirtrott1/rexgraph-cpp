@@ -5,6 +5,7 @@
 #include <optional>
 #include <set>
 #include <tuple>
+#include <variant>
 
 namespace rfc::learning {
 struct TransportCoordinate { std::size_t occurrence{}, row{}, column{}; };
@@ -12,7 +13,17 @@ struct TransportObservation {
     numeric::RationalVector input, target;
     std::vector<std::size_t> observed;
 };
-struct TransportConstraint { std::size_t sample{}, cell{}, axis{}; };
+enum class TransportObservationDomain : std::uint8_t { LowerStalk, OriginalOccurrenceImage };
+struct TransportMappedObservation {
+    numeric::RationalVector input, target;
+    numeric::ExactMatrix projection;
+    std::vector<std::size_t> coordinates;
+};
+using TransportFieldObservation = std::variant<TransportObservation, TransportMappedObservation>;
+struct TransportConstraint {
+    std::size_t sample{}, cell{}, axis{};
+    TransportObservationDomain domain{TransportObservationDomain::LowerStalk};
+};
 struct TransportObservationSystem {
     numeric::ExactMatrix design, augmented;
     numeric::RationalVector target;
@@ -230,5 +241,47 @@ public:
         }
         return out;
     }
+    TransportObservationSystem assemble_mapped(const std::vector<TransportMappedObservation>& observations, Guard& guard) const {
+        guard.dimension(observations.size()); std::size_t count{}, retained{};
+        for (const auto& o : observations) {
+            guard.step(); field(o.input, guard); guard.vector(o.target); guard.matrix(o.projection);
+            if (o.target.empty() || o.projection.rows() != o.target.size() || o.projection.cols() != occurrences_.back() ||
+                    o.coordinates.size() != o.target.size())
+                throw std::invalid_argument("mapped observation requires original flag action, target and coordinate identities");
+            std::set<std::size_t> unique;
+            for (const auto coordinate : o.coordinates) {
+                guard.step(); if (!unique.insert(coordinate).second) throw std::invalid_argument("mapped observation repeats a coordinate");
+            }
+            count = machine::checked_size_add(count, o.target.size()); guard.dimension(count);
+            retained = machine::checked_size_add(retained, machine::checked_size_add(o.input.size(),
+                machine::checked_size_add(o.target.size(), machine::checked_size_add(o.coordinates.size(), o.projection.nonzeros()))));
+            workspace(retained, guard);
+        }
+        const auto n = parameter_count();
+        TransportObservationSystem out{M(count,n),M(count,machine::checked_size_add(n,1)),{}, {}};
+        out.target.reserve(count); out.constraints.reserve(count); std::size_t offset{};
+        for (std::size_t sample=0; sample<observations.size(); ++sample) {
+            const auto& o=observations[sample]; const auto h=observation_map(o.input,false,guard);
+            const auto fixed=fixed_response(o.input,guard);
+            const auto action=numeric::checked_multiply(o.projection,h,guard);
+            const auto base=numeric::checked_apply(o.projection,fixed.occurrences,guard);
+            const auto scratch=machine::checked_size_add(retained,machine::checked_size_add(h.nonzeros(),
+                machine::checked_size_add(action.nonzeros(),machine::checked_size_add(base.size(),
+                machine::checked_size_add(fixed.boundary.size(),fixed.occurrences.size())))));
+            const auto admit=[&] { workspace(machine::checked_size_add(scratch,machine::checked_size_add(
+                machine::checked_size_mul(count,5),machine::checked_size_add(out.design.nonzeros(),out.augmented.nonzeros()))),guard); };
+            admit();
+            for (std::size_t i=0;i<o.target.size();++i) {
+                guard.step();const auto q=guard.sub(o.target[i],base[i]);out.target.push_back(q);out.augmented.set(offset+i,n,q);
+                out.constraints.push_back({sample,o.coordinates[i],0,TransportObservationDomain::OriginalOccurrenceImage});admit();
+            }
+            for (const auto& [key,q]:action.entries()) {
+                guard.step();out.design.set(offset+key.first,key.second,q);out.augmented.set(offset+key.first,key.second,q);admit();
+            }
+            offset=machine::checked_size_add(offset,o.target.size());
+        }
+        return out;
+    }
+
 };
 } // namespace rfc::learning

@@ -8,6 +8,9 @@ namespace relational_affine_codec_detail {
 using namespace inference::field_interface_codec_detail;
 inline constexpr std::array<std::byte, 8> evidence_magic{
     std::byte{'R'}, std::byte{'F'}, std::byte{'C'}, std::byte{'F'}, std::byte{'E'}, std::byte{1}, std::byte{0}, std::byte{0}};
+inline constexpr auto occurrence_evidence_magic=[] {auto out=evidence_magic;out[5]=std::byte{2};return out;}();
+inline constexpr std::array<std::byte,8> occurrence_port_magic{
+    std::byte{'R'},std::byte{'F'},std::byte{'C'},std::byte{'O'},std::byte{'P'},std::byte{1},std::byte{0},std::byte{0}};
 inline constexpr std::array<std::byte, 8> affine_magic{
     std::byte{'R'}, std::byte{'F'}, std::byte{'C'}, std::byte{'A'}, std::byte{'F'}, std::byte{1}, std::byte{0}, std::byte{0}};
 inline constexpr std::array<std::byte, 8> evaluation_magic{
@@ -31,19 +34,51 @@ inline RelationalFieldParameterDeclaration parameters(Reader& r) {
     for (std::size_t i = 0; i < count; ++i) d.parameters.push_back(r.u64());
     return d;
 }
-inline void witness(Writer& w, const PreparedRelationalFieldEvidence& e) {
+inline void occurrence_port(Writer& w,const RelationalOccurrenceTargetDeclaration& d) {
+    w.u64(d.key);w.u64(d.revision);w.u64(d.node);w.u64(d.frame);w.u64(d.coordinates.size());
+    for(const auto& c:d.coordinates) {
+        w.u64(c.key);w.u16(c.occurrence.upper_grade.value);w.u64(c.occurrence.key.value);w.u64(c.basis);w.u64(c.direction);
+    }
+    storage::temporal_codec_detail::matrix(w,d.accession);storage::temporal_codec_detail::matrix(w,d.reconstruction);
+}
+inline RelationalOccurrenceTargetDeclaration occurrence_port(Reader& r) {
+    RelationalOccurrenceTargetDeclaration d;d.key=r.u64();d.revision=r.u64();d.node=r.u64();d.frame=r.u64();const auto count=r.count(34);
+    inference::field_program_detail::require(count<=r.limits().max_dimension,"target coordinate read dimension");
+    for(std::size_t i=0;i<count;++i) {
+        const auto key=r.u64();const core::Grade grade{r.u16()};const core::OccurrenceKey occurrence{r.u64()};
+        const auto basis=r.u64(),direction=r.u64();d.coordinates.push_back({key,{grade,occurrence},basis,direction});
+    }
+    d.accession=storage::temporal_codec_detail::matrix(r);d.reconstruction=storage::temporal_codec_detail::matrix(r);return d;
+}
+inline void occurrence_observation(Writer& w,const RelationalFieldTrainingObservation& o) {
+    w.u8(o.port?1:0);if(o.port) {
+        occurrence_port(w,o.port->declaration());w.u64(o.observed_coordinates.size());for(const auto key:o.observed_coordinates)w.u64(key);
+    }
+}
+inline void occurrence_observation(Reader& r,RelationalFieldTrainingObservation& o,
+        const inference::OwnedRelationalFieldProgram& program,numeric::ExactActionLimits limits) {
+    if(r.flag()) {
+        o.port=OwnedRelationalOccurrenceTargetPort(program,occurrence_port(r),limits);
+        const auto count=r.count(8);for(std::size_t i=0;i<count;++i)o.observed_coordinates.push_back(r.u64());
+    }
+}
+inline void witness(Writer& w, const PreparedRelationalFieldEvidence& e,bool version2=false) {
     vector(w, e.particular()); storage::temporal_codec_detail::matrix(w, e.kernel());
     storage::temporal_codec_detail::matrix(w, e.chain_constraints());
     w.u64(e.chain_coordinates().size());
     for (const auto& c : e.chain_coordinates()) { w.u64(c.grade); w.u64(c.row); w.u64(c.column); }
     const auto& system = e.observation_system(); storage::temporal_codec_detail::matrix(w, system.design);
     storage::temporal_codec_detail::matrix(w, system.augmented); vector(w, system.target); w.u64(system.constraints.size());
-    for (const auto& c : system.constraints) { w.u64(c.sample); w.u64(c.cell); w.u64(c.axis); }
+    for (const auto& c : system.constraints) {
+        w.u64(c.sample);w.u64(c.cell);w.u64(c.axis);
+        if(version2)w.u8(static_cast<std::uint8_t>(c.domain));
+        else inference::field_program_detail::require(c.domain==TransportObservationDomain::LowerStalk,"typed constraints require versioned history");
+    }
     w.u64(e.free_parameters().size()); for (const auto key : e.free_parameters()) w.u64(key);
     w.u8(e.parent_relation() ? 1 : 0);
     if (e.parent_relation()) { vector(w, e.parent_relation()->shift); storage::temporal_codec_detail::matrix(w, e.parent_relation()->map); }
 }
-inline void witness(Reader& r, const PreparedRelationalFieldEvidence& e) {
+inline void witness(Reader& r, const PreparedRelationalFieldEvidence& e,bool version2=false) {
     using inference::field_program_detail::require;
     require(vector(r) == e.particular(), "cold whole-field evidence particular differs");
     require(storage::temporal_codec_detail::matrix(r) == e.kernel(), "cold whole-field evidence kernel differs");
@@ -54,7 +89,11 @@ inline void witness(Reader& r, const PreparedRelationalFieldEvidence& e) {
     require(storage::temporal_codec_detail::matrix(r) == system.design && storage::temporal_codec_detail::matrix(r) == system.augmented &&
         vector(r) == system.target, "cold complete original observation system differs");
     const auto n = r.count(24); require(n == system.constraints.size(), "cold observation attribution count");
-    for (const auto& c : system.constraints) require(size(r) == c.sample && size(r) == c.cell && size(r) == c.axis, "cold original constraint attribution");
+    for (const auto& c : system.constraints) {
+        require(size(r)==c.sample&&size(r)==c.cell&&size(r)==c.axis,"cold original constraint attribution");
+        if(version2)require(r.u8()==static_cast<std::uint8_t>(c.domain),"cold original constraint domain");
+        else require(c.domain==TransportObservationDomain::LowerStalk,"old history has occurrence constraints");
+    }
     const auto free = r.count(8); require(free == e.free_parameters().size(), "cold common named free axes");
     for (const auto key : e.free_parameters()) require(r.u64() == key, "cold free parameter identity");
     require(r.flag() == e.parent_relation().has_value(), "cold evidence parent relationship absent");
@@ -103,9 +142,10 @@ inline storage::PreparedBytePacket prepare_evidence(const PreparedRelationalFiel
     for(const auto& [actual,packet]:context.evidence_packets){if(actual.same_owner(evidence)){return packet;}}
     std::vector<PreparedRelationalFieldEvidence> lineage; auto current = evidence;
     while (true) { lineage.push_back(current); const auto parent = current.parent(); if (!parent) break; current = *parent; }
-    std::reverse(lineage.begin(),lineage.end());storage::BytePacketBuilder w(evidence_magic,context.max_bytes,context.byte_guard.get());const auto& root=lineage.front();
+    std::reverse(lineage.begin(),lineage.end());const bool version2=evidence.has_occurrence_observations();
+    storage::BytePacketBuilder w(version2?occurrence_evidence_magic:evidence_magic,context.max_bytes,context.byte_guard.get());const auto& root=lineage.front();
     const auto limits = root.limits(); w.u64(limits.dimension); w.u64(limits.entries); w.u64(limits.steps); w.u64(limits.integer_bits);
-    w.blob(context.program(root.program()));w.write([&](auto& raw){parameters(raw,root.declaration());witness(raw,root);});
+    w.blob(context.program(root.program()));w.write([&](auto& raw){parameters(raw,root.declaration());witness(raw,root,version2);});
     w.u64(lineage.size()-1);
     for (std::size_t i = 1; i < lineage.size(); ++i) {
         const auto& state = lineage[i]; const auto first = lineage[i-1].observations().size(); const auto& observations = state.observations();
@@ -113,9 +153,9 @@ inline storage::PreparedBytePacket prepare_evidence(const PreparedRelationalFiel
         for (std::size_t j = first; j < observations.size(); ++j) {
             const auto& o=observations[j];if(context.check){context.check();}w.u64(o.key);
             w.blob(inference::field_interface_codec_detail::prepare_accession(o.input,context));w.blob(context.asset(o.target_asset));
-            w.write([&](auto& raw){raw.u64(o.target_use);storage::temporal_codec_detail::tensor(raw,o.target);raw.u64(o.observed.size());for(const auto c:o.observed){local_cell(raw,c);}});
+            w.write([&](auto& raw){raw.u64(o.target_use);storage::temporal_codec_detail::tensor(raw,o.target);raw.u64(o.observed.size());for(const auto c:o.observed){local_cell(raw,c);}if(version2)occurrence_observation(raw,o);});
         }
-        w.write([&](auto& raw){witness(raw,state);});
+        w.write([&](auto& raw){witness(raw,state,version2);});
     }
     auto packet=std::move(w).finish(context.check);context.evidence_packets.emplace_back(evidence,packet);return packet;
 }
@@ -142,12 +182,13 @@ inline std::vector<std::byte> encode_relational_field_evidence(const PreparedRel
 inline PreparedRelationalFieldEvidence decode_relational_field_evidence(std::span<const std::byte> bytes,
     const storage::TemporalReadLimits& policy, numeric::ExactActionLimits cap = {}) {
     using namespace relational_affine_codec_detail;
-    Reader r(bytes, policy); header(r, bytes, evidence_magic);
+    const bool version2=bytes.size()>5&&bytes[5]==std::byte{2};
+    Reader r(bytes,policy);header(r,bytes,version2?occurrence_evidence_magic:evidence_magic);
     const numeric::ExactActionLimits limits{size(r), size(r), size(r), size(r)};
     inference::field_program_detail::require(limits.dimension <= cap.dimension && limits.entries <= cap.entries &&
         limits.steps <= cap.steps && limits.integer_bits <= cap.integer_bits, "archived whole-field evidence policy exceeds caller admission");
     const auto program = inference::decode_relational_field_program(r.blob(), policy, limits);
-    auto d = parameters(r); PreparedRelationalFieldEvidence evidence(program, std::move(d), limits); witness(r, evidence);
+    auto d = parameters(r); PreparedRelationalFieldEvidence evidence(program, std::move(d), limits); witness(r, evidence,version2);
     const auto updates = r.count(9);
     for (std::size_t i = 0; i < updates; ++i) {
         const auto count = r.count(50); std::vector<RelationalFieldTrainingObservation> suffix;
@@ -156,12 +197,29 @@ inline PreparedRelationalFieldEvidence decode_relational_field_evidence(std::spa
             auto asset = inference::decode_relational_input_use_asset(r.blob(), policy, limits); const auto use = r.u64();
             auto target = storage::temporal_codec_detail::tensor(r); const auto observed_count = r.count(6); std::vector<core::CellId> observed;
             for (std::size_t k = 0; k < observed_count; ++k) observed.push_back(local_cell(r));
-            suffix.push_back({key, std::move(original), std::move(asset), use, std::move(target), std::move(observed)});
+            RelationalFieldTrainingObservation o{key,std::move(original),std::move(asset),use,std::move(target),std::move(observed)};
+            if(version2)occurrence_observation(r,o,program,limits);
+            suffix.push_back(std::move(o));
         }
-        evidence = evidence.append(std::move(suffix), limits); witness(r, evidence);
+        evidence = evidence.append(std::move(suffix), limits); witness(r, evidence,version2);
     }
     inference::field_program_detail::require(r.remaining() == 0, "trailing whole-field evidence bytes");
     PacketContext context;canonical(bytes,prepare_evidence(evidence,context));return evidence;
+}
+inline std::vector<std::byte> relational_occurrence_target_port_payload(std::span<const std::byte> program,
+    const RelationalOccurrenceTargetDeclaration& declaration) {
+    using namespace relational_affine_codec_detail;auto w=envelope(occurrence_port_magic);blob(w,program);occurrence_port(w,declaration);return finish(std::move(w));
+}
+inline std::vector<std::byte> encode_relational_occurrence_target_port(const OwnedRelationalOccurrenceTargetPort& port) {
+    const auto pin=port;return relational_occurrence_target_port_payload(inference::encode_relational_field_program(pin.program()),pin.declaration());
+}
+inline OwnedRelationalOccurrenceTargetPort decode_relational_occurrence_target_port(std::span<const std::byte> bytes,
+    const storage::TemporalReadLimits& policy,numeric::ExactActionLimits limits={}) {
+    using namespace relational_affine_codec_detail;Reader r(bytes,policy);header(r,bytes,occurrence_port_magic);
+    const auto program=inference::decode_relational_field_program(r.blob(),policy,limits);
+    const OwnedRelationalOccurrenceTargetPort out(program,occurrence_port(r),limits);
+    inference::field_program_detail::require(!r.remaining(),"trailing original occurrence target port bytes");
+    canonical(bytes,encode_relational_occurrence_target_port(out));return out;
 }
 inline std::vector<std::byte> encode_relational_affine_result(const RelationalAffineProgramResult& result) {
     relational_affine_codec_detail::PacketContext context;return relational_affine_codec_detail::prepare_affine(result,context).bytes();

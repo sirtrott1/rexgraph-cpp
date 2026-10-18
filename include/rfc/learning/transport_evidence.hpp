@@ -22,7 +22,7 @@ class PreparedTransportEvidence {
         numeric::ExactActionLimits limits;
         std::shared_ptr<const M> fixed_equations;
         std::shared_ptr<const V> fixed_target;
-        using Observation=std::variant<TransportObservation,TransportColumnObservation>;
+        using Observation=std::variant<TransportObservation,TransportColumnObservation,TransportMappedObservation>;
         std::vector<Observation> history;
         std::shared_ptr<const PreparedColumnTransportObservations> columns;
         mutable std::once_flag materialization;
@@ -43,7 +43,7 @@ class PreparedTransportEvidence {
             auto count=add(model->retained_entries(),input_entries);
             if(columns)count=add(count,columns->retained_entries()-model->retained_entries());
             for(const auto n:{system.design.nonzeros(),system.augmented.nonzeros(),system.target.size(),
-                    machine::checked_size_mul(system.constraints.size(),3),row_entries,rows.size(),
+                    machine::checked_size_mul(system.constraints.size(),4),row_entries,rows.size(),
                     particular.size(),kernel.nonzeros(),pivots.size(),free_columns.size()}) count=add(count,n);
             if(fixed_equations) {
                 count=add(count,add(fixed_equations->nonzeros(),add(observation_row_entries,observation_rows.size())));
@@ -160,6 +160,9 @@ class PreparedTransportEvidence {
             workspace(guard,add(external,add(row.size(),1)));retained_rows=add(retained_rows,row.size());
             if(!family.emplace(pivot,std::move(row)).second) throw std::logic_error("duplicate transport evidence pivot");
         }
+        void append(const TransportFieldObservation& observation,Guard& guard) {
+            std::visit([&](const auto& item){append(item,guard);},observation);
+        }
         template<class ObservationType>
         void append(const ObservationType& observation,Guard& guard) {
             const auto start=guard.steps();
@@ -167,8 +170,11 @@ class PreparedTransportEvidence {
             std::size_t entries{};
             if constexpr(std::is_same_v<ObservationType,TransportColumnObservation>) {
                 block=columns->assemble({observation},guard);entries=columns->observation_entries(observation);
+            } else if constexpr(std::is_same_v<ObservationType,TransportMappedObservation>) {
+                block=model->assemble_mapped(std::vector<TransportMappedObservation>{observation},guard);
+                entries=add(observation.input.size(),add(observation.target.size(),add(observation.coordinates.size(),observation.projection.nonzeros())));
             } else {
-                block=model->assemble({observation},guard);
+                block=model->assemble(std::vector<TransportObservation>{observation},guard);
                 entries=add(observation.input.size(),add(observation.target.size(),observation.observed.size()));
             }
             const auto offset=system.design.rows(),count=add(offset,block.design.rows()),n=model->parameter_count();
@@ -192,7 +198,7 @@ class PreparedTransportEvidence {
             }
             for(const auto& value:block.target){guard.step();system.target.push_back(value);workspace(guard);}
             for(const auto& constraint:block.constraints) {
-                guard.step();system.constraints.push_back({history.size(),constraint.cell,constraint.axis});workspace(guard);
+                guard.step();system.constraints.push_back({history.size(),constraint.cell,constraint.axis,constraint.domain});workspace(guard);
             }
             auto next=block.augmented.entries().begin();
             for(std::size_t i=0;i<block.augmented.rows();++i) {
@@ -235,7 +241,10 @@ class PreparedTransportEvidence {
             workspace(guard);family_steps=guard.steps()-start;
         }
         const std::vector<TransportObservation>& materialize(Guard& guard) const {
-            guard.step();std::size_t complete{};
+            guard.step();
+            for(const auto& record:history) if(std::holds_alternative<TransportMappedObservation>(record))
+                throw std::invalid_argument("mapped occurrence history cannot be materialized as lower-stalk observations");
+            std::size_t complete{};
             const auto& fibers=model->owner().fibers();
             for(const auto grade:{core::Grade{static_cast<std::uint16_t>(model->grade().value-1)},model->grade()})
                 for(std::size_t i=0;i<fibers.complex().grade(grade).cell_count();++i) {
@@ -281,6 +290,11 @@ public:
     PreparedTransportEvidence append(const std::vector<TransportObservation>& suffix,Guard& guard) const {
         return PreparedTransportEvidence(std::make_shared<const State>(*state_,suffix,guard));
     }
+    PreparedTransportEvidence append_fields(const std::vector<TransportFieldObservation>& suffix,Guard& guard) const {
+        return PreparedTransportEvidence(std::make_shared<const State>(*state_,suffix,guard));
+    }
+    const auto& original_observations() const & {return state_->history;}
+    const auto& original_observations() const &&=delete;
     const PreparedTransportObservations& model() const & {return *state_->model;}
     const std::vector<TransportObservation>& observations() const & {
         Guard guard(state_->limits);return state_->materialize(guard);
@@ -300,6 +314,9 @@ public:
         if(const auto* dense=std::get_if<TransportObservation>(&record)) {
             const auto& offsets=model.input_stalk_offsets();
             for(std::size_t i=0;i<n;++i){guard.step();guard.value(dense->input[offsets[cell]+i]);out[i]=dense->input[offsets[cell]+i];}
+        } else if(const auto* mapped=std::get_if<TransportMappedObservation>(&record)) {
+            const auto& offsets=model.input_stalk_offsets();
+            for(std::size_t i=0;i<n;++i){guard.step();guard.value(mapped->input[offsets[cell]+i]);out[i]=mapped->input[offsets[cell]+i];}
         } else {
             const auto& fields=std::get<TransportColumnObservation>(record).input;
             const auto found=std::lower_bound(fields.begin(),fields.end(),cell,
@@ -319,6 +336,12 @@ public:
                 bool active=false;for(auto i=offsets[cell];i<offsets[cell+1];++i){guard.step();guard.value(dense->input[i]);active=active || dense->input[i]!=0;}
                 if(active){out.push_back(cell);state_->workspace(guard,out.size());}
             }
+        } else if(const auto* mapped=std::get_if<TransportMappedObservation>(&record)) {
+            const auto& offsets=state_->model->input_stalk_offsets();
+            for(std::size_t cell=0;cell+1<offsets.size();++cell) {
+                bool active=false;for(auto i=offsets[cell];i<offsets[cell+1];++i){guard.step();guard.value(mapped->input[i]);active=active||mapped->input[i]!=0;}
+                if(active){out.push_back(cell);state_->workspace(guard,out.size());}
+            }
         } else for(const auto& field:std::get<TransportColumnObservation>(record).input) {
             guard.step();if(field.tensor.stored_nonzeros()){out.push_back(field.cell);state_->workspace(guard,out.size());}
         }
@@ -330,6 +353,8 @@ public:
             throw std::invalid_argument("original observation and boundary stalk required");
         const auto& record=state_->history[sample];
         if(const auto* dense=std::get_if<TransportObservation>(&record))return dense->observed[cell]!=0;
+        if(std::holds_alternative<TransportMappedObservation>(record))
+            throw std::invalid_argument("mapped occurrence observation does not declare observed lower stalks");
         const auto& fields=std::get<TransportColumnObservation>(record).target;
         const auto found=std::lower_bound(fields.begin(),fields.end(),cell,
             [](const auto& field,std::size_t wanted){return field.cell<wanted;});

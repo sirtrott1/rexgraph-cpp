@@ -19,46 +19,74 @@ class PreparedExactFrames {
             // admit that index family before allocating it.
             guard.entries(original.cols());
             std::vector<std::map<std::size_t,Rational>> rows;
+            std::map<std::size_t,std::set<std::size_t>> columns;
             std::optional<std::size_t> previous_row;
-            std::size_t entries=original.nonzeros();
+            std::size_t entries{};
+            const auto admit=[&](std::size_t count,std::size_t row_count,std::size_t column_count){
+                guard.entries(machine::checked_size_add(original.nonzeros(),machine::checked_size_add(
+                    machine::checked_size_mul(count,2),machine::checked_size_add(row_count,column_count))));
+            };
             for(const auto& [key,value]:original.entries()){
                 guard.step();
-                if(!previous_row || *previous_row!=key.first){rows.emplace_back();previous_row=key.first;}
+                const bool new_row=!previous_row || *previous_row!=key.first;
+                const bool new_column=!columns.contains(key.second);
+                admit(machine::checked_size_add(entries,1),machine::checked_size_add(rows.size(),new_row?1u:0u),
+                    machine::checked_size_add(columns.size(),new_column?1u:0u));
+                if(new_row){rows.emplace_back();previous_row=key.first;}
                 rows.back().emplace(key.second,value);
+                columns[key.second].insert(rows.size()-1);++entries;
             }
-            guard.entries(machine::checked_size_add(original.nonzeros(),entries));
             for(std::size_t j=0,k=0;j<original.cols() && k<rows.size();++j){
                 guard.step();std::size_t pivot=rows.size(),best=std::numeric_limits<std::size_t>::max();
-                for(std::size_t i=k;i<rows.size();++i){
-                    guard.step();if(rows[i].contains(j) && rows[i].size()<best){pivot=i;best=rows[i].size();}
+                const auto column_found=columns.find(j);if(column_found==columns.end())continue;
+                auto& support=column_found->second;
+                for(auto at=support.lower_bound(k);at!=support.end();++at){
+                    guard.step();const auto i=*at;
+                    if(rows[i].size()<best){pivot=i;best=rows[i].size();}
                 }
                 if(pivot==rows.size())continue;
-                if(pivot!=k)std::swap(rows[pivot],rows[k]);
+                if(pivot!=k){
+                    for(const auto& [column,value]:rows[k]){(void)value;guard.step();columns.at(column).erase(k);}
+                    for(const auto& [column,value]:rows[pivot]){(void)value;guard.step();columns.at(column).erase(pivot);}
+                    std::swap(rows[pivot],rows[k]);
+                    for(const auto& [column,value]:rows[k]){(void)value;guard.step();columns.at(column).insert(k);}
+                    for(const auto& [column,value]:rows[pivot]){(void)value;guard.step();columns.at(column).insert(pivot);}
+                }
                 const Rational scale=rows[k].at(j);
                 for(auto& [column,value]:rows[k]){(void)column;value=guard.div(value,scale);}
-                for(std::size_t i=0;i<rows.size();++i){
-                    guard.step();if(i==k || !rows[i].contains(j))continue;
+                // Updating one row can erase only its own position from this
+                // column's support. Advance before elimination, without a copy.
+                for(auto at=support.begin();at!=support.end();){
+                    const auto i=*at;++at;guard.step();if(i==k)continue;
                     const Rational ratio=rows[i].at(j);
                     for(const auto& [column,value]:rows[k]){
                         const auto found=rows[i].find(column);
                         const Rational old=found==rows[i].end()?Rational{0}:found->second;
                         auto updated=guard.sub(old,guard.mul(ratio,value));
-                        if(updated==0){if(found!=rows[i].end()){rows[i].erase(found);--entries;}}
+                        if(updated==0){if(found!=rows[i].end()){
+                            rows[i].erase(found);columns.at(column).erase(i);--entries;
+                        }}
                         else{
-                            if(found==rows[i].end())++entries;
-                            guard.entries(machine::checked_size_add(original.nonzeros(),entries));
+                            if(found==rows[i].end()){
+                                admit(machine::checked_size_add(entries,1),rows.size(),columns.size());
+                                columns.at(column).insert(i);++entries;
+                            }
                             rows[i][column]=std::move(updated);
                         }
                     }
                 }
                 pivots.push_back(j);++k;
             }
+            columns.clear();
             reduced=ExactMatrix(original.rows(),original.cols());
             coordinates=ExactMatrix(pivots.size(),original.cols());
             image=ExactMatrix(original.rows(),pivots.size());
             for(std::size_t i=0;i<rows.size();++i)for(const auto& [j,value]:rows[i]){
                 guard.step();reduced.set(i,j,value);if(i<pivots.size())coordinates.set(i,j,value);
+                guard.entries(machine::checked_size_add(original.nonzeros(),machine::checked_size_add(entries,
+                    machine::checked_size_add(reduced.nonzeros(),coordinates.nonzeros()))));
             }
+            rows.clear();
             std::vector<std::size_t> pivot_axis(original.cols(),original.cols());
             for(std::size_t i=0;i<pivots.size();++i){guard.step();pivot_axis[pivots[i]]=i;}
             for(std::size_t j=0;j<original.cols();++j){guard.step();if(pivot_axis[j]==original.cols())free_columns.push_back(j);}
@@ -66,9 +94,15 @@ class PreparedExactFrames {
                 guard.step();if(pivot_axis[key.second]!=original.cols())image.set(key.first,pivot_axis[key.second],value);
             }
             kernel=ExactMatrix(original.cols(),free_columns.size());
+            for(auto& axis:pivot_axis){guard.step();axis=original.cols();}
             for(std::size_t i=0;i<free_columns.size();++i){
-                guard.step();kernel.set(free_columns[i],i,1);
-                for(std::size_t j=0;j<pivots.size();++j){guard.step();kernel.set(pivots[j],i,guard.sub(0,reduced.get(j,free_columns[i])));}
+                guard.step();kernel.set(free_columns[i],i,1);pivot_axis[free_columns[i]]=i;
+            }
+            // Only represented free coefficients contribute to pivot rows.
+            // Keep every free axis, including structurally zero columns.
+            for(const auto& [key,value]:coordinates.entries()){
+                guard.step();const auto free=pivot_axis[key.second];
+                if(free!=original.cols())kernel.set(pivots[key.first],free,guard.sub(0,value));
             }
             for(const auto* map:{&original,&reduced,&image,&coordinates,&kernel}){
                 guard.matrix(*map);retained=machine::checked_size_add(retained,map->nonzeros());guard.entries(retained);

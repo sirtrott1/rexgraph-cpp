@@ -127,7 +127,22 @@ public:
         const storage::ByteRange& payload) const {
         return require_content(key,role,[&](std::span<const std::byte> bytes){return payload.equals(bytes);});
     }
+    OwnedRelationalValueOrigin require_packet(std::uint64_t key, RelationalDependencyRole role,
+        const storage::PreparedBytePacket& payload, std::function<void()> check = {}) const {
+        const auto pin = *this; const auto packet = payload;
+        return pin.require_content(key, role, [&](std::span<const std::byte> bytes) {
+            packet.require_equal(bytes, check); return true;
+        });
+    }
     void recheck(const OwnedRelationalValueOrigin& expected) const {
+        const auto found = grants_->find(expected.key());
+        if (found != grants_->end() && found->second.origin.same_owner(expected)) {
+            // The actual owner fixes the complete immutable value. Availability
+            // remains a current obligation even when its bytes are already held.
+            const auto publication = expected.publication();
+            runtime::admit_work_availability(publication.source_namespace(), publication.cutoff(), found->second.availability);
+            return;
+        }
         const auto actual = require_bytes(expected.key(), expected.role(), expected.payload_bytes());
         value_admission_detail::require(actual.same_owner(expected), "different actual live value origin owner");
     }

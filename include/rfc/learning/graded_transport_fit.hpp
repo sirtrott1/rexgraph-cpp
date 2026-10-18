@@ -200,6 +200,10 @@ class PreparedGradedTransportFit {
         :started_(guard.steps()),fixed_(parent.fixed_),evidence_(parent.evidence_.append(suffix,guard)) {
         update_.chain_reused=true;retain(guard);
     }
+    PreparedGradedTransportFit(const PreparedGradedTransportFit& parent,const std::vector<TransportFieldObservation>& suffix,Guard& guard)
+        :started_(guard.steps()),fixed_(parent.fixed_),evidence_(parent.evidence_.append_fields(suffix,guard)) {
+        update_.chain_reused=true;retain(guard);
+    }
 public:
     PreparedGradedTransportFit(PreparedTransportObservations observations,std::vector<TransportObservation> samples,Guard& guard)
         :started_(guard.steps()),fixed_(std::make_shared<const Fixed>(std::move(observations),guard)),evidence_(prepare(*fixed_,samples,guard)) {
@@ -208,6 +212,9 @@ public:
     PreparedGradedTransportFit append(const std::vector<TransportObservation>& suffix,Guard& guard) const {
         guard.entries(mul(retained_,2));
         return PreparedGradedTransportFit(*this,suffix,guard);
+    }
+    PreparedGradedTransportFit append_fields(const std::vector<TransportFieldObservation>& suffix,Guard& guard) const {
+        guard.entries(mul(retained_,2));return PreparedGradedTransportFit(*this,suffix,guard);
     }
     const PreparedTransportObservations& model() const & {return fixed_->observations_;}
     const std::vector<TransportObservation>& observations() const & {return evidence_.observations();}

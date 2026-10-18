@@ -1,6 +1,6 @@
 #pragma once
 
-#include "rfc/inference/relational_field_interface.hpp"
+#include "rfc/learning/relational_occurrence_target.hpp"
 #include "rfc/learning/graded_transport_fit.hpp"
 
 namespace rfc::learning {
@@ -17,6 +17,8 @@ struct RelationalFieldTrainingObservation {
     std::uint64_t target_use{};
     numeric::SparseRationalTensor target;
     std::vector<core::CellId> observed;
+    std::optional<OwnedRelationalOccurrenceTargetPort> port{};
+    std::vector<std::uint64_t> observed_coordinates{};
 };
 struct RelationalParameterParentRelation {
     numeric::RationalVector shift;
@@ -32,15 +34,9 @@ using V = numeric::RationalVector;
 using Program = inference::OwnedRelationalFieldProgram;
 using Input = inference::OwnedAccessionFieldResult;
 inline void program_values(const Program& program, Guard& guard) {
-    const auto p = program.publication(); source_values(p.endpoint().source, guard);
-    std::size_t retained = program.declaration().nodes.size();
-    for (const auto& s : program.declaration().stalks) {
-        guard.matrix(s.metric); retained = add(retained, add(s.metric.nonzeros(), s.directions.size()));
-    }
-    for (const auto& o : program.declaration().occurrences) { guard.matrix(o.map); retained = add(retained, add(3, o.map.nonzeros())); }
-    for (const auto& n : program.declaration().nodes) { guard.matrix(n.map); retained = add(retained, n.map.nonzeros()); }
-    guard.entries(retained);
+    occurrence_target_detail::program_values(program,guard);
 }
+
 inline void same_limits(const numeric::ExactActionLimits& a, const numeric::ExactActionLimits& b) {
     require(a.dimension == b.dimension && a.entries == b.entries && a.steps == b.steps && a.integer_bits == b.integer_bits,
         "field evidence append must retain its declared action policy");
@@ -118,7 +114,7 @@ struct Fixed {
         }
     }
     TransportObservation observation(const RelationalFieldTrainingObservation& o, Guard& guard) const {
-        require(o.key && o.target_use && !o.observed.empty(), "whole field observation identity/use/mask");
+        require(o.key && o.target_use && !o.observed.empty() && !o.port && o.observed_coordinates.empty(), "whole lower field observation identity/use/mask/domain");
         const auto target_asset = o.target_asset; (void)target_asset.use(o.target_use);
         const auto result = o.input.result(); const auto actual = result.program();
         require(program.fibers().same_owner(actual.fibers()), "training evidence targets a different actual source program owner");
@@ -137,6 +133,22 @@ struct Fixed {
         for (std::size_t cell = 0; cell < mask.size(); ++cell) if (mask[cell])
             for (std::size_t i = offsets[cell]; i < offsets[cell+1]; ++i) residual[i] = guard.sub(target[i], base[i]);
         return {input, std::move(residual), std::move(mask)};
+    }
+    TransportMappedObservation mapped_observation(const RelationalFieldTrainingObservation& o, Guard& guard) const {
+        require(o.key&&o.target_use&&o.port&&o.observed.empty(),"original occurrence observation identity/use/port/domain");
+        const auto target_asset=o.target_asset;(void)target_asset.use(o.target_use);
+        const auto result=o.input.result();const auto actual=result.program();const auto port_program=o.port->program();
+        require(program.fibers().same_owner(actual.fibers())&&program.fibers().same_owner(port_program.fibers())&&
+            o.port->declaration().node==declaration.node,"occurrence observation targets a foreign actual program or learned node");
+        const auto indices=o.port->observed_indices(o.observed_coordinates,guard);
+        const auto coordinates=o.port->target_coordinates(o.target,indices,guard);
+        auto projection=o.port->observation_map(indices,guard);
+        const auto& learned=node(program,declaration.node);
+        const auto base=numeric::checked_apply(projection,result.occurrence_field(learned.key).values().dense(),guard);
+        V residual(indices.size());for(std::size_t i=0;i<indices.size();++i) {
+            guard.step();residual[i]=guard.sub(coordinates[indices[i]],base[i]);
+        }
+        return {result.field(*learned.input).values().dense(),std::move(residual),std::move(projection),indices};
     }
 };
 struct ResultNode {
@@ -168,7 +180,11 @@ class PreparedRelationalFieldEvidence {
             using namespace relational_evidence_detail;
             for (const auto i : fit.free_columns()) { guard.step(); free_names.push_back(declaration.parameters.at(i)); }
             std::size_t retained = fit.retained_entries();
-            for (const auto& sample : observations) retained = add(retained, add(add(sample.target.values().nonzeros(), sample.observed.size()), 4));
+            for (const auto& sample : observations) {
+                retained=add(retained,add(add(sample.target.values().nonzeros(),sample.observed.size()),4));
+                retained=add(retained,sample.observed_coordinates.size());
+                if(sample.port)retained=add(retained,sample.port->retained_entries());
+            }
             guard.entries(retained);
             if (parent) {
                 guard.entries(parent->fit.free_columns().size());
@@ -225,6 +241,10 @@ public:
     const std::optional<RelationalParameterParentRelation>& parent_relation() const & { return state_->relationship; }
     const std::optional<RelationalParameterParentRelation>& parent_relation() const && = delete;
     numeric::ExactActionLimits limits() const { return state_->fixed->limits; }
+    GradedTransportUpdate update() const noexcept {return state_->fit.update();}
+    bool has_occurrence_observations() const noexcept {
+        return std::any_of(state_->observations.begin(),state_->observations.end(),[](const auto& o){return o.port.has_value();});
+    }
     std::optional<PreparedRelationalFieldEvidence> parent() const {
         if (state_->parent) return PreparedRelationalFieldEvidence(state_->parent);
         return {};
@@ -236,12 +256,13 @@ public:
         same_limits(pin->fixed->limits, limits); require(!frozen.empty(), "nonempty source-backed evidence suffix required");
         require(pin->declaration.revision != std::numeric_limits<std::uint64_t>::max(), "field evidence revision overflow");
         std::set<std::uint64_t> keys; for (const auto& o : pin->observations) keys.insert(o.key);
-        guard.dimension(add(pin->observations.size(), frozen.size())); std::vector<TransportObservation> observations;
+        guard.dimension(add(pin->observations.size(), frozen.size())); std::vector<TransportFieldObservation> observations;
         for (const auto& o : frozen) {
             guard.step(); require(keys.insert(o.key).second, "source-backed evidence key already exists");
-            observations.push_back(pin->fixed->observation(o, guard));
+            if(o.port)observations.emplace_back(pin->fixed->mapped_observation(o,guard));
+            else observations.emplace_back(pin->fixed->observation(o,guard));
         }
-        auto fit = pin->fit.append(observations, guard); auto all = pin->observations;
+        auto fit = pin->fit.append_fields(observations, guard); auto all = pin->observations;
         all.insert(all.end(), frozen.begin(), frozen.end()); auto d = pin->declaration; ++d.revision;
         return PreparedRelationalFieldEvidence(std::make_shared<const State>(pin->fixed, std::move(d), std::move(fit), std::move(all), pin, guard));
     }
@@ -252,6 +273,7 @@ public:
         numeric::ExactActionLimits limits = {}, std::function<void()> check = {}) const;
 private:
     friend class RelationalAffineProgramResult;
+    friend class PreparedRelationalFieldFamily;
     explicit PreparedRelationalFieldEvidence(std::shared_ptr<const State> state) : state_(std::move(state)) {}
     std::shared_ptr<const State> state_;
 };
@@ -393,6 +415,9 @@ public:
     RelationalAffineProgramResult response() const { return response_; }
     PreparedRelationalFieldEvidence evidence() const { return response_.evidence(); }
     std::size_t observation() const noexcept { return observation_; }
+    std::optional<OwnedRelationalOccurrenceTargetPort> target_port() const {
+        const auto pin=evidence();return pin.observations().at(observation_).port;
+    }
     const RelationalAffineField& field() const & { return field_; }
     const RelationalAffineField& field() const && = delete;
 private:
@@ -410,6 +435,23 @@ inline RelationalFieldResidual PreparedRelationalFieldEvidence::residual(std::si
     require(observation < pin.observations().size(), "original residual observation index");
     const auto& o = pin.observations()[observation];
     auto response = pin.execute(o.input, limits, [&] { guard.step(); });
+    if(o.port) {
+        const auto& complete=response.occurrence_field(pin.declaration().node);
+        auto values=numeric::checked_apply(o.port->action(),complete.particular.values().dense(),guard);
+        const auto measured=o.target.values().dense();
+        for(std::size_t i=0;i<values.size();++i)values[i]=guard.sub(values[i],measured[i]);
+        const auto directions=numeric::checked_multiply(o.port->action(),complete.directions,guard);
+        const auto selected=numeric::checked_apply(o.port->declaration().reconstruction,values,guard);
+        const auto selected_directions=numeric::checked_multiply(o.port->declaration().reconstruction,directions,guard);
+        const auto indices=o.port->observed_indices(o.observed_coordinates,guard);
+        for(const auto i:indices) {
+            guard.step();require(selected[i]==0,"native feasible occurrence evidence has nonzero observed residual");
+            for(const auto& [ij,q]:selected_directions.entries()) {
+                (void)q;guard.step();require(ij.first!=i,"native feasible family leaves observed occurrence coordinates");
+            }
+        }
+        return {std::move(response),observation,{tensor(values,guard),directions}};
+    }
     const auto& complete = response.field(pin.declaration().node);
     auto values = complete.particular.values().dense(); const auto measured = o.target.values().dense();
     guard.vector(values); guard.vector(measured);

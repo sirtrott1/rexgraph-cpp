@@ -106,7 +106,7 @@ void edge_and_budget() {
     auto l=PositiveCompileLimits{};l.max_facts=2;reject([&]{(void)FinitePositiveProgram::compile(owner,universe(),{},l);});
     l={};l.max_rules=1;reject([&]{(void)FinitePositiveProgram::compile(owner,universe(),rules(3),l);});
     l={};l.max_premises=0;reject([&]{(void)FinitePositiveProgram::compile(owner,universe(),rules(1),l);});
-    const auto saved=[] { const auto p=FinitePositiveProgram::compile(source(),universe(),rules(3));const auto v=p.run(seeds(1));return *v.closure(); }();
+    const auto saved=[] { const auto owned_program=FinitePositiveProgram::compile(source(),universe(),rules(3));const auto owned_result=owned_program.run(seeds(1));return *owned_result.closure(); }();
     check(mask_of(saved)==3 && saved.source().grade({1}).cell_count()==9,"owner lifetime lost");
 }
 void long_chain() {
