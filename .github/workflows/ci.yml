@@ -149,13 +149,17 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
       VK_INSTANCE_LAYERS: VK_LAYER_KHRONOS_validation
       VK_LAYER_VALIDATE_SYNC: "1"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install Vulkan build and software qualification dependencies
         run: sudo apt-get update && sudo apt-get install -y ninja-build pkg-config libgmp-dev libvulkan-dev glslang-tools spirv-tools mesa-vulkan-drivers vulkan-validationlayers python3
+      - name: Select installed Lavapipe driver
+        run: |
+          driver="$(dpkg -L mesa-vulkan-drivers | sed -n '\|/vulkan/icd.d/lvp_icd[^/]*\.json$|p')"
+          test -f "$driver"
+          printf 'VK_DRIVER_FILES=%s\n' "$driver" >> "$GITHUB_ENV"
       - name: Build exact Vulkan profile
         run: |
           cmake -S . -B build/vulkan -G Ninja -DCMAKE_BUILD_TYPE=Release -DRFC_ENABLE_VULKAN=ON -DRFC_VULKAN_TEST_SOFTWARE=ON -DRFC_BUILD_APPS=OFF -DRFC_BUILD_LOCAL_TOOLS=OFF -DRFC_BUILD_BENCHMARKS=OFF
