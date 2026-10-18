@@ -19,7 +19,7 @@ local sections glue when their shared interfaces agree; versioned storage keeps
 the owners and cutoffs needed to interpret a result. Algebraic coefficient
 domains and approximation profiles have separately selected APIs.
 
-Copyright (c) 2026 Andrew Trotter.
+Copyright (c) 2026.
 
 This software is licensed under the Apache License, Version 2.0. See
 [LICENSE](LICENSE) and [NOTICE](NOTICE). Third party dependencies retain their own

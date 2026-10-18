@@ -147,5 +147,4 @@ native reference history for principal directions. `manifest.json` lists portabl
 artifact hashes. Scientific figure coordinates are display observations only.
 
 RexGraphCPP is licensed under the Apache License, Version 2.0. See
-[LICENSE](../../LICENSE) and [NOTICE](../../NOTICE). Copyright (c) 2026 Andrew
-Trotter. Third party dependencies retain their own terms.
+[LICENSE](../../LICENSE) and [NOTICE](../../NOTICE). Copyright (c) 2026. Third party dependencies retain their own terms.
