@@ -80,7 +80,7 @@ def write_manifest(out, exe, events, records, verification):
     manifest = {"format": "rfc-temporal-demo-v1", "events_sha256": hashlib.sha256(events.read_bytes()).hexdigest(),
                 "consumer_sha256": hashlib.sha256(exe.read_bytes()).hexdigest(),
                 "files": files, "native_checks": records[-1]["checks"], "verification": verification,
-                "terms": "Proprietary. Use through the author's personal distribution only.",
+                "terms": "RexGraphCPP: Apache-2.0; Copyright (c) 2026 Andrew Trotter. Other components retain their own licenses.",
                 "display": "Recorded native observations; pixel geometry is illustrative.",
                 "file_scope": "Portable presentation, inputs, native histories and completed observations. Live stores and notebook caches are excluded."}
     (out/"manifest.json").write_text(json.dumps(manifest, indent=2)+"\n")

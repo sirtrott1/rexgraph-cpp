@@ -1,9 +1,14 @@
 # Native gluing
 
-Two filled triangles share a declared edge and its complete occurrence fiber.
-Their pushout has four vertices, five edges and two faces. Equal raw keys outside
-the interface remain separate. Inactive, zero and cancelling occurrences survive
-with their full original source maps.
+Two filled triangles share an edge. Gluing them should keep that edge once,
+while keeping unrelated cells separate even if their raw keys match. The example
+supplies the common edge and its complete occurrence fiber as the interface.
+Their pushout has four vertices, five edges and two faces; inactive, zero and
+cancelling occurrences remain in the original source maps.
+
+Section gluing has an additional requirement: the two local values must agree
+on that shared edge. The operations below distinguish constructing the combined
+source, combining compatible sections and adding chain contributions.
 
 ```sh
 cmake -S examples/native_gluing -B build/native_gluing -G Ninja \

@@ -134,7 +134,7 @@ reduction. Displaying results in two dimensions is a separate choice.
 ## Verification and artifacts
 
 `verify.py` independently reconstructs the rational results with `Fraction`,
-compares six genuinely truncated histories, and changes nonempty future value
+compares six histories truncated at their own cutoffs, and changes nonempty future value
 and structure suffixes. Historical database bytes and derived group complexes
 are compared exactly. These checks qualify this bounded example, not every
 library platform, application or statistical objective.
@@ -146,6 +146,6 @@ the portable field history. `analysis/` contains derived group complexes and the
 native reference history for principal directions. `manifest.json` lists portable
 artifact hashes. Scientific figure coordinates are display observations only.
 
-The software is proprietary and available through its author's personal
-distribution. This package grants no Apache or other open source license.
-Third party terms remain separate.
+RexGraphCPP is licensed under the Apache License, Version 2.0. See
+[LICENSE](../../LICENSE) and [NOTICE](../../NOTICE). Copyright (c) 2026 Andrew
+Trotter. Third party dependencies retain their own terms.

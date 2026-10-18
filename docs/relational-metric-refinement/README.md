@@ -1,30 +1,34 @@
 # Exact metric choice within the relational complex
 
-## Result
+## What a metric choice changes
 
-The C++ certificates exercise metric choice as admissible data attached to a
-retained relational complex. Primary identities, occurrence multiplicities,
-Boolean aspects and the chain condition remain structural. Positive rational
-metrics determine exact pairings, adjoints, Hodge representatives and response
-measurements. Compatible refinements and local descriptions preserve their
-declared identities; incompatible choices produce exact obstructions.
+Splitting one relation into two can preserve its outer boundary while changing
+the response computed on it. To recover the original terminal response, the
+refined relations need compatible metric coefficients as well as a chain map.
+The example below makes both requirements visible on a filled cycle.
+
+The relation identities, occurrence multiplicities, Boolean aspects and chain
+condition describe the source. Positive rational metrics determine pairings,
+adjoints, Hodge representatives and response measurements on that source.
+Keeping these declarations separate lets a failed comparison identify whether
+the structure, metric or field interface is responsible.
 
 The tests use the native relational builder, boundary/coface actions, sparse
 fields/tensors, metric actions, Hodge actions, chain maps, local sections and
 multivariate exact polynomials. No ambient spatial grid, floating arithmetic,
 eigensolver or dense field conversion is used by these experiments.
 
-## Native implementation change
+## Transporting a sparse field
 
-`geometry::RelationalChainMap::push_field(Grade, SparseRationalView)` now
+`geometry::RelationalChainMap::push_field(Grade, SparseRationalView)`
 transports an exact sparse field through an existing chain realization. It
 visits active source amplitudes and their retained image terms, accumulates
 only reached target coordinates, and removes exact numerical cancellations.
-It preserves the existing full-vector overload for callers that select it.
+It preserves the existing full vector overload for callers that select it.
 
 The sparse overload never allocates a numerical array by source or target
 carrier width. Removing a zero amplitude cannot remove a retained primary cell
-or its occurrence history. The new experiment tests zero input, cancellation,
+or its occurrence history. The regression tests zero input, cancellation,
 wrong carrier size, every relevant boundary column, and metric pullback pairs.
 
 ## Universal local refinement certificate
@@ -56,18 +60,18 @@ z_* = \frac{bu+av}{a+b},\qquad
 E(z_*)=\frac{(v-u)^2}{a+b}.
 \]
 
-The test also checks the two universal voltage-increment identities obtained
+The test also checks the two universal voltage increment identities obtained
 by substituting the numerator `bu+av`, and confirms that a deliberately
 altered polynomial retains a nonzero residual. Positivity and nonzero
 denominators are stated hypotheses of the energy interpretation.
 
 ## Native chain refinement, metric choice and coarsening
 
-The executable fixture is a filled three-relation cycle. One relation is split
-into two, producing a four-relation cycle with the same outer boundary. Its
+The executable fixture is a filled three relation cycle. One relation is split
+into two, producing a four relation cycle with the same outer boundary. Its
 grade counts are `(3,3,1)` before refinement and `(4,4,1)` afterward. No geometric
-embedding is supplied. The retained grade-two filling makes `B1 B2=0` a
-non-vacuous assertion.
+embedding is supplied. The retained grade two filling makes `B1 B2=0` a
+nonvacuous assertion.
 
 The native chain map `J` includes old objects and sends the split relation to
 the sum of its two replacements:
@@ -76,7 +80,7 @@ the sum of its two replacements:
 J_1e=e_1+e_2,\qquad B_fJ=JB_c.
 \]
 
-Put `s=a+b`, `alpha=a/s`, `beta=b/s`. A metric-dependent native coarsening `R`
+Put `s=a+b`, `alpha=a/s`, `beta=b/s`. A metric dependent native coarsening `R`
 sends the new object to `beta*u + alpha*v`, and sends `e1` to `alpha*e`, `e2`
 to `beta*e`. Other cells are retained. Exact certificates establish
 
@@ -84,7 +88,7 @@ to `beta*e`. Other cells are retained. Exact certificates establish
 B_cR=RB_f,\qquad RJ=I.
 \]
 
-Current-space resistance metrics are
+Current space resistance metrics are
 
 \[
 M_c=\operatorname{diag}(a+b,2,3),\qquad
@@ -104,7 +108,7 @@ the original terminal response, with exact zero internal Kirchhoff residual.
 ### Orientation convention
 
 The native boundary column for an arrow `from -> to` is `(-1,+1)`. Consequently
-`B^T V` is `V_to - V_from`. The test calls `C B^T V` its gradient-oriented branch
+`B^T V` is `V_to - V_from`. The test calls `C B^T V` its gradient oriented branch
 response. Conventional passive current along the arrow is its negative. A
 common sign reversal preserves all stated KCL and energy identities.
 
@@ -132,7 +136,7 @@ It verifies:
 
 - Agreement on the shared object produces one exact global section.
 - Restricting that result recovers the local section.
-- A present zero-valued stalk remains an explicit section key with no stored
+- A present zero valued stalk remains an explicit section key with no stored
   numerical amplitude.
 - Conflicting overlap values and missing required overlap values are rejected.
 - Positive scalar local pairing choices glue after exact coordinate pullback.
@@ -164,36 +168,36 @@ relations whose numerical boundaries vanish, an ordinary relation between two
 objects, and a filling relating the loops. Grade counts are `(2,3,1)`.
 
 All 13 occurrences remain present, including cancellation pairs, existing
-zero-valued occurrences, an absent occurrence, and signature-owned Boolean
+zero valued occurrences, an absent occurrence, and signature owned Boolean
 role and provenance bits. Copies of retained identities, occurrence ownership,
 coefficient scales, sparse routing and aspect words are compared after every
 metric choice.
 
 For the same input `x=(1,0,1)` the exact results are:
 
-| Metric | `M0`; `M1`; `M2` diagonals | Curl | Harmonic | Proposed-defect quadrance |
+| Metric | `M0`; `M1`; `M2` diagonals | Curl | Harmonic | Proposed defect quadrance |
 | --- | --- | --- | --- | --- |
 | Unweighted | `(1,1)`; `(1,1,1)`; `(1)` | `(1/2,1/2,0)` | `(1/2,-1/2,0)` | `2` |
 | Integer weighted | `(2,3)`; `(2,5,7)`; `(11)` | `(2/7,2/7,0)` | `(5/7,-2/7,0)` | `5` |
 | Rational weighted | `(1/2,4/3)`; `(3/2,7/4,5/3)`; `(2/5)` | `(6/13,6/13,0)` | `(7/13,-6/13,0)` | `11/6` |
 
-The gradient is `(0,0,1)` for each choice. The proposed extra higher-boundary
+The gradient is `(0,0,1)` for each choice. The proposed extra higher boundary
 column `(1,1,1)` has chain defect `(-1,1)` in every case. Its metric quadrance
 changes; the existence of its defect does not. The strict builder rejects that
 nonclosed assertion.
 
-All 593 checks pass, including 27 adjoint basis pairs, 18 complete graded basis
-columns for `D^2=L`, anti-Dirac square and anticommutation, and 81 cross-sector
-orthogonality pairs. The experiment also checks full finite reconstruction,
-projector identities, harmonic kernel conditions, metric solves, positivity
-and four negative controls.
+The regression checks adjoint basis pairs, complete graded basis columns for
+`D^2=L`, anti Dirac square and anticommutation, and cross sector orthogonality.
+It also checks full finite reconstruction, projector identities, harmonic
+kernel conditions, metric solves and positivity. Negative controls make a
+failed hypothesis visible as a failed certificate.
 
-The fixture's one-dimensional gradient and curl image ranks are certified
+The fixture's one dimensional gradient and curl image ranks are certified
 against every native image column. Their projections use exact native pairings
 and division by positive quadrance. This is a complete certificate for this
-fixture, not a test of a general projector-construction routine. Its sparse
+fixture, not a test of a general projector construction routine. Its sparse
 Dirac helper composes the native boundary and adjoint ports; it does not invoke
-the full-vector core tower convenience wrapper.
+the full vector core tower convenience wrapper.
 
 ## Build and integration
 
@@ -219,8 +223,8 @@ and exact defect measurement. Local section
 gluing is performed on actual relational patches.
 
 The symbolic identity is a universal finite algebraic certificate. The
-complete-basis checks cover every rational field on their finite carriers for
+complete basis checks cover every rational field on their finite carriers for
 the specified metric choices. These tests establish the exact compatibility
-claims described here; an infinite completion, smooth-manifold identification
-or a quantitative discrete-to-smooth limit remains a separate theorem whose
+claims described here; an infinite completion, smooth manifold identification
+or a quantitative discrete to smooth limit remains a separate theorem whose
 hypotheses and earlier proof must be cited.

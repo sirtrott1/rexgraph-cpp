@@ -62,7 +62,7 @@ def write_manifest(directory, exe, events, verification):
         "native_arithmetic":"GMP rationals; exact images, kernels, Gram solves and temporal maps",
         "references":"Optional numerical PCA/UMAP observations fitted separately at each cutoff",
         "presentation":"Scientific display coordinates are derived observations, not native source identities",
-        "terms":"Proprietary; use only through the author's personal distribution. Third-party terms remain separate."}
+        "terms":"RexGraphCPP: Apache-2.0; Copyright (c) 2026 Andrew Trotter. Third party terms remain separate."}
     (directory/"manifest.json").write_text(json.dumps(manifest,indent=2)+"\n")
 
 
@@ -84,7 +84,7 @@ def package(directory, target=None):
         "python3 -B rexgraphcpp/examples/temporal_relations/serve.py presentation --exe build/temporal-relations-demo/cpp/temporal_relations\n```\n\n"
         "See presentation/README.md for optional numerical dependencies, analysis declarations and reproduction commands. "
         "Native data and public source are included; compiled binaries and live caches are excluded. "
-        "RexGraph is proprietary and is distributed by its author. Third-party terms remain separate.\n")
+        "RexGraphCPP is licensed under Apache-2.0. Copyright (c) 2026 Andrew Trotter. Third party terms remain separate.\n")
     with zipfile.ZipFile(target,"x",compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("temporal-relations/README.md",start)
         for p in portable_files(directory):

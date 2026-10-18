@@ -102,7 +102,7 @@ endif()
     documentation = prefix / 'share/doc/rfc'
     guides = [source / 'README.md', *sorted((source / 'docs').rglob('README.md')),
               *sorted((source / 'examples').rglob('README.md'))]
-    for original_guide in [*guides, source / 'LICENSE']:
+    for original_guide in [*guides, source / 'LICENSE', source / 'NOTICE']:
         installed_guide = documentation / original_guide.relative_to(source)
         if not installed_guide.is_file() or installed_guide.read_bytes() != original_guide.read_bytes():
             raise RuntimeError('Missing or changed installed guide: ' + str(installed_guide))

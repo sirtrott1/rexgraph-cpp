@@ -1,12 +1,15 @@
 # Gluing complete transport families
 
-This example declares a filled triangle twice, with separate owned transports.
-Each member learns its three grade-two occurrence coefficients subject to the
-fixed grade-one boundary. Closure leaves one parameter in each member. The
-interface identifies the actual retained cells and occurrences in every grade
-and supplies exact accession/reconstruction maps for every original stalk.
-The joint family keeps one common free parameter. It does not select a value
-until `materialize({7/3}, guard)` is called.
+Two local fits can each satisfy closure and still disagree on their shared
+interface. This example declares a filled triangle twice and learns each copy's
+three grade two occurrence coefficients with the grade one boundary fixed.
+Closure leaves one parameter in each copy.
+
+The interface identifies the common cells and occurrences and supplies exact
+accession/reconstruction maps for the original stalks. Comparing the complete
+families leaves one common free parameter. Calling `materialize({7/3}, guard)`
+selects a value only after compatibility has been established; the family remains
+available for other choices.
 
 `fixture.hpp` is a reusable fixture; `main.cpp` checks the resulting occurrence
 responses and a forced equality between original member parameters. Include
@@ -24,15 +27,15 @@ different grades. Interfaces may be strict retained subcomplexes. Both source
 maps must preserve every common cell, occurrence, sign, coefficient, type,
 attaching order and identity. Views are indexed by the common cells in every
 grade. Reconstruction after accession must be the identity on the original
-stalk. Only the intersection of the represented upper-input images is shared;
+stalk. Only the intersection of the represented upper input images is shared;
 unshared directions remain free.
 
 `particular()` and `kernel()` retain the complete affine family in concatenated
 original member parameter coordinates. `coordinate_origin()` and
-`coordinate_kernel()` describe the same family in concatenated member-free
+`coordinate_kernel()` describe the same family in concatenated member free
 coordinates. `statuses()` reports whether each interface equation was forced,
 excluded or open before the interfaces were imposed jointly. An inconsistent
-joint family retains `contradiction()`, a left-null vector whose pairing with
+joint family retains `contradiction()`, a left null vector whose pairing with
 `residual_origin()` is nonzero. It cannot be materialized.
 
 Equation assembly stores only active `(output,input)` coordinate keys and
@@ -40,7 +43,7 @@ nonzero parameter contributions. Tautological zero equations are omitted.
 Every original interface occurrence and its common input/output dimensions
 remain in `witnesses()`, including when the whole occurrence comparison is
 already forced. A larger declared common carrier therefore does not allocate
-an output-by-input numerical rectangle.
+an output by input numerical rectangle.
 
 `classify(terms, expected, guard)` classifies a claim against every compatible
 member parameter assignment. `materialize(free, guard)` returns the compatible

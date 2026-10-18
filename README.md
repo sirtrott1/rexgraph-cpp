@@ -1,30 +1,42 @@
 # RexGraphCPP
 
-RexGraphCPP is a C++20 library for relational complexes, exact tensor fields and
-versioned storage. A relation retains its identity and ordered participant
-occurrences, including repeated and inactive participation. Boundary operators,
-local fields and observations are constructed from that retained source.
+RexGraphCPP is a C++20 library for constructing relational complexes and
+computing with fields on them. A relation keeps its own identity and the ordered
+occurrences of its participants. If a participant appears twice, or an occurrence
+is inactive, those records remain part of the source even when their numerical
+boundary contributions cancel or vanish. Later queries and updates can therefore
+refer to the original relation without trying to recover it from a matrix.
 
-The library provides integer and rational arithmetic, heterogeneous stalks,
-declared maps, compatible gluing, metric and Hodge actions, prepared exact solves
-and native queries. Structural support, a supported zero and absence remain
-distinct. Exact algebraic values and explicitly selected approximation profiles
-have separate APIs.
+Each cell can carry its own local value space, called a stalk. Tensor fields
+assemble values on these spaces, and occurrence maps specify how values pass
+between adjacent grades. Metrics then determine pairings and adjoints. This
+separates the source, the field and the operations on it: changing a metric
+changes the response calculation without silently replacing the relations.
 
-This software is proprietary and available through the author's personal
-distribution. See [LICENSE](LICENSE). Third party dependencies retain their own
+The library uses integers and rationals for its ordinary exact operations.
+Prepared solves reuse factors across fields on the same declared source;
+local sections glue when their shared interfaces agree; versioned storage keeps
+the owners and cutoffs needed to interpret a result. Algebraic coefficient
+domains and approximation profiles have separately selected APIs.
+
+Copyright (c) 2026 Andrew Trotter.
+
+This software is licensed under the Apache License, Version 2.0. See
+[LICENSE](LICENSE) and [NOTICE](NOTICE). Third party dependencies retain their own
 terms.
 
 ## Exact native consumers
 
-The [native exact system guide](docs/native-exact-system/README.md) describes the
-implemented C++ APIs, their declared hypotheses, retained certificates and
-remaining scope boundaries. The same exact library components serve the native
-execution adapters and the logic/electrodynamics companion.
+Start with the [field example](#run-an-exact-field-example) to reuse an exact
+calculation on two inputs. The
+[native exact system guide](docs/native-exact-system/README.md) explains how
+source ownership, metrics, prepared factors and learned families fit together.
+The execution adapters and the logic/electrodynamics companion use these same
+library components.
 
-The [exact metric-choice and refinement certificates](docs/relational-metric-refinement/README.md)
+The [exact metric choice and refinement certificates](docs/relational-metric-refinement/README.md)
 verify admissible metric choices on retained complexes, a universal rational
-subdivision identity, sparse chain-map transport, and compatible local field
+subdivision identity, sparse chain map transport, and compatible local field
 and metric gluing.
 
 - [Transport family gluing](examples/transport_family_gluing/README.md) combines
@@ -35,7 +47,7 @@ and metric gluing.
   retain exact equation witnesses.
 - [Batch harmonic attachment](examples/batch_harmonic_attachment/README.md)
   stages actual source cells, reuses prepared Hodge frames and retains new
-  upper-cycle witnesses. Native factored actions (`include/rfc/inference/native_factored_action.hpp`),
+  upper cycle witnesses. Native factored actions (`include/rfc/inference/native_factored_action.hpp`),
   tower operators (`include/rfc/inference/native_tower_operators.hpp`) and
   selected moments (`include/rfc/inference/native_moments.hpp`), including
   multitime moment changes (`include/rfc/inference/native_multitime_moments.hpp`),
@@ -43,7 +55,7 @@ and metric gluing.
 - [Finite algebra](examples/finite_algebra/README.md),
   [radix carries](examples/radix_carry/README.md) and
   [algebraic phase fields](examples/algebraic_phase_fields/README.md) provide
-  retained law certificates, invariant-preserving carries and checked algebraic
+  retained law certificates, invariant preserving carries and checked algebraic
   field/phase declarations, including bounded cyclotomic construction.
 - Integral periods (`include/rfc/field/period_lattice.hpp`),
   finite Jacobians (`include/rfc/field/finite_jacobian.hpp`) and
@@ -56,6 +68,13 @@ regressions also respect `RFC_BUILD_LEARNING`.
 
 ## Installation
 
+Clone the repository into `rexgraphcpp` to use the directory names in the
+standalone example guides:
+
+```sh
+git clone https://github.com/sirtrott1/rexgraph-cpp.git rexgraphcpp
+cd rexgraphcpp
+```
 
 The SDK requires CMake 3.24 or later, a C++20 compiler, pkg-config and the GMP and
 GMPXX development libraries. The commands below also use Ninja. Run them from

@@ -1,9 +1,14 @@
 # Sparse temporal stalk actions and retained Tucker fields
 
-The temporal experiment adds two exact native building blocks and corrects one
-sparse context-gluing allocation. The complete executable experiment and its
-observations live in the RexLogic Electrodynamics companion under
-`tests/test_temporal_relational_field.cpp` and
+A temporal field can change in several ways: its coefficients can evolve on
+one source, its local coordinates can change, or the source itself can gain
+cells and stalk directions. Those changes require different maps. Sparse stalk
+actions keep the field's actual owner, while supplied tensor factors let an
+application change coordinates and check reconstruction exactly.
+
+This guide explains the two interfaces and how to compare fields across a
+source change. The RexLogic Electrodynamics companion combines them in
+`tests/test_temporal_relational_field.cpp`; its observations are recorded under
 `results/temporal-relational/`.
 
 ## Owned sparse stalk fields
@@ -37,19 +42,19 @@ constructing their logical diagonal. Explicit overrides are already signed
 realized maps. Inactive occurrences remain retained and cannot activate an
 override. Missing numerical values are zero on the retained carrier.
 
-The supported grade metric is the orthogonal direct sum of the per-cell
+The supported grade metric is the orthogonal direct sum of the per cell
 metrics. General coupling inside a cell is available through native sparse
-`ExactMetric` apply/solve ports. Cross-cell metric blocks require a separately
-declared grade-metric action. No whole-grade boundary, Hodge, projector, or
+`ExactMetric` apply/solve ports. Cross cell metric blocks require a separately
+declared grade metric action. No whole grade boundary, Hodge, projector, or
 amplitude array is assembled by this action layer.
 
 On a strict chain, the native action verifies the usual exact Dirac/Hodge
 identities. A curved realization remains available for diagnosis: the square
-of Dirac retains its additional lowering-square and raising-square terms.
+of Dirac retains its additional lowering square and raising square terms.
 The action does not silently declare a curved fiber system to be a chain.
 
 Work receipts count actual stalk/incidence/coefficient visits and the maximum
-observed numerical support. They do not claim allocator-wide memory accounting
+observed numerical support. They do not claim allocator wide memory accounting
 or inspect scratch internal to an external metric callback.
 
 ## Exact supplied tensor factors
@@ -74,7 +79,7 @@ distinct from its numerical entries and from the declared core coordinate
 space. `with_core` rejects a nonzero outside the source's retained support.
 Reduced factors are admitted only when reconstruction is exact for the
 supplied source. A rejected reduced encoding returns its exact sparse
-reconstruction-minus-source witness through
+reconstruction minus source witness through
 `RetainedTuckerReconstructionError::residual()`.
 
 This API certifies supplied algebraic factors, their left inverses, and the
@@ -83,31 +88,30 @@ interpretation, and the proof that a particular factor is a Hodge frame
 belong to the caller. It does not fit factors spectrally or claim minimum rank.
 
 In the companion fixture, complete native gradient/curl/harmonic frames form
-the relation-mode reconstruction factor. The second mode is the explicitly
-retained two-direction observation stalk. Selecting sector slots in the core
+the relation mode reconstruction factor. The second mode is the explicitly
+retained two direction observation stalk. Selecting sector slots in the core
 reconstructs the same field as the native Hodge projections. This separability
 uses coherent vertex chart changes with matching metrics; arbitrary
-incidence-specific internal couplings need their own field factors.
+incidence specific internal couplings need their own field factors.
 
-## Context-gluing allocation correction
+## Sparse support and resource limits
 
-`learning::context_view_detail::product` now indexes only represented right
-rows instead of allocating a bucket for every declared row. It preserves
-coordinate identities and charges the actual retained support/index work to
-the exact action guard. This fixes the large-common-carrier path exercised by
-`tests/temporal/test_evolving_stalk_gluing.cpp`.
+A large declared carrier need not have a large numerical field. The
+context view product indexes represented rows and charges their support and
+index work to the exact action guard. Extending an unused part of the carrier
+therefore does not require allocating a bucket for each new coordinate.
 
-The compact and 1,000,003-coordinate versions of that problem both retain
-1,934 entries, execute 4,770 preparation steps, and preserve 11 occurrence
-witnesses. Both use only two represented directions. The dedicated stalk
-test uses the same large stalk dimension with two numerical entries. The
-Tucker test exercises a 10^18-coordinate logical domain with three support
-entries, two numerical entries, and four factor coefficients.
+The evolving stalk regression compares a compact carrier with a
+carrier with 1,000,003 coordinates that uses the same two directions. Both preserve
+the same 11 occurrence witnesses and execute the same preparation work. The
+Tucker regression similarly uses a logical domain of 10^18 coordinates with
+only three support entries. These cases distinguish the size of the declared space
+from the entries an action actually visits.
 
-These checks establish the behavior of the exercised support paths. Sparse
-exact elimination can still introduce mathematically necessary fill, and
-exact integer/rational coefficients can grow. The native budgets bound these
-resources rather than replacing them with approximate arithmetic.
+Sparse elimination can still create fill, and exact coefficients can grow in
+bit size. Choose budgets for that work as well as for the initial support.
+Exceeding a budget refuses the exact request; it does not authorize rounding
+or dropping directions.
 
 ## Temporal comparisons and interpretation
 
@@ -117,28 +121,27 @@ independent adjoint comparison with each endpoint's declared metric.
 
 An exact chain isometry under relation subdivision need not intertwine the
 adjoints. The experiment records that nonzero residual explicitly. A
-coordinate change and an identity-lineage update likewise answer different
+coordinate change and an identity lineage update likewise answer different
 questions, so neither correspondence is inferred from equal dimensions.
 
-The native local-learning test glues complete parameter families over declared
+The native local learning test glues complete parameter families over declared
 interfaces, reports exact directional contradictions, and extends a learned
 map to a new stalk direction. The main trajectory separately glues boundary
 observations/cochains by equality on overlaps. An observation merge alone
-does not assert that those values form a transport-compatible sheaf section.
+does not assert that those values form a transport compatible sheaf section.
 
 ## Focused tests
 
-- `tests/field/test_sparse_stalk_actions.cpp`: 374 checks, including 206
-  complete adjoint basis pairings, 14 tower Dirac basis columns, chart pullback,
-  directional defect/repair, rectangular inclusion, inactive occurrences, and
-  sparse large-stalk actions.
-- `tests/field/test_retained_tucker.cpp`: 78 checks covering Boolean data,
-  exact mode factors, source support, temporal updates, reconstruction
-  witnesses, and large declared domains.
-- `tests/temporal/test_evolving_stalk_gluing.cpp`: 545 checks covering local
-  learning, complete family gluing, directional conflict, explicit observation
-  repair, stalk extension, and the sparse context product regression.
+- `tests/field/test_sparse_stalk_actions.cpp` checks adjoints on complete basis
+  pairings, Dirac basis columns, chart pullback, directional defect and repair,
+  rectangular inclusion, inactive occurrences and large sparse stalks.
+- `tests/field/test_retained_tucker.cpp` checks exact mode factors, source
+  support, temporal updates and reconstruction residuals on both small tensors
+  and large logical domains.
+- `tests/temporal/test_evolving_stalk_gluing.cpp` checks complete learned family
+  gluing, directional conflict, observation repair, stalk extension and the
+  sparse context product.
 
-The companion verification additionally reruns the relevant context,
-transport-family, graded-fit, harmonic-attachment, and metric-refinement
-regressions. Its complete recorded gate passes 7,002 checks across nine suites.
+Together these tests cover the separate obligations used above: a map acts on
+the right source, a reconstruction recovers the supplied field, and a temporal
+comparison respects the interface being claimed.

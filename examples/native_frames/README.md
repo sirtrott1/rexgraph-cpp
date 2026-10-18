@@ -1,5 +1,12 @@
 # Native exact Hodge frames
 
+A circulation around an unfilled square has a harmonic direction. Attaching a
+face makes that direction a face boundary, so the same relation values can
+become curl. This example compares the complete fields before and after that
+attachment while retaining repeated, cancelling and inactive occurrences.
+It also prepares grade two frames in a grade three complex with a nonidentity
+metric.
+
 Build from the library repository root:
 
 ```sh
@@ -9,11 +16,6 @@ cmake --build ../build/native-frames-example -j1
 ```
 
 For an installed library, omit `RFC_SOURCE_DIR` and set `CMAKE_PREFIX_PATH`.
-
-The example decomposes a square edge field before and after face attachment,
-retaining the original repeated, cancelling and inactive occurrences. The
-harmonic direction becomes a curl direction after attachment. It also prepares
-grade two frames in a grade three complex with a declared nonidentity metric.
 
 `PreparedNativeHodgeFrames::prepare(publication, request, availability, lease)`
 retains an actual native endpoint and execution authority. The request selects

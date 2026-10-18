@@ -23,11 +23,11 @@ write_basic_package_version_file(${CMAKE_CURRENT_BINARY_DIR}/RFCConfigVersion.cm
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/RFCConfig.cmake
   ${CMAKE_CURRENT_BINARY_DIR}/RFCConfigVersion.cmake
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/RFC)
-install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/rfc)
+install(FILES LICENSE NOTICE DESTINATION ${CMAKE_INSTALL_DATADIR}/rfc)
 
 # Keep the installed user guides together so their relative links work offline.
 set(rfc_documentation_dir "${CMAKE_INSTALL_DATADIR}/doc/rfc")
-install(FILES README.md LICENSE DESTINATION "${rfc_documentation_dir}")
+install(FILES README.md LICENSE NOTICE DESTINATION "${rfc_documentation_dir}")
 file(GLOB_RECURSE rfc_user_guides CONFIGURE_DEPENDS
   RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "docs/README.md" "examples/README.md")
 foreach(guide IN LISTS rfc_user_guides)

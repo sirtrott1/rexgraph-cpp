@@ -1,8 +1,11 @@
 # Prepared exact field actions
 
-This example retains a square with four edges and two complete fields at grade
-one in a native publication. It prepares each exact operation once and applies it to both
-fields. Green uses the boundary and metric auxiliary equations. Harmonic projection
+Two fields on the same source need different responses but can share the
+factors used to compute them. This example puts a square with four edges and
+two complete grade one fields in one native publication, prepares each exact
+operation once, and applies it to both fields.
+
+Green uses the boundary and metric auxiliary equations. Harmonic projection
 uses the retained frame's Gram system. `HarmonicInverse` applies the metric inverse
 on the harmonic complement, with zero harmonic part. `GradientPotential` returns
 `B_k L_k^# x` on the declared grade below. Its metric adjoint reconstructs the

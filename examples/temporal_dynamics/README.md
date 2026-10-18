@@ -225,5 +225,6 @@ included too. Build products, local Git history, private notes, notebook caches
 and the live durable store are excluded. Native field history remains in its
 portable file. The presentation manifest covers portable report files; the
 package source manifest covers each included repository file. The package
-retains current proprietary terms. Distribution requires the author's
-authorization.
+contains RexGraphCPP source licensed under the Apache License, Version 2.0,
+with copyright held by Andrew Trotter. See [LICENSE](../../LICENSE) and
+[NOTICE](../../NOTICE). Other included software retains its own license.
