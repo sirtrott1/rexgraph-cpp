@@ -81,7 +81,9 @@ void sparse_basis_rank(){
     for(std::size_t i=0;i<30000;++i)large.set(i,i%10000,Q{1,3});
     check(learning::transport_parameter_basis_rank(large,bounded).rank==10000,"bounded sparse rank failed");
     check(bounded.steps()<500000,"sparse rank exceeded its admitted work");
-    G full_frame(limits);rejects([&]{(void)numeric::PreparedExactFrames(large,full_frame);});
+    G full_frame(limits);const numeric::PreparedExactFrames complete(large,full_frame);
+    check(complete.original()==large && complete.rank()==10000 && complete.kernel().cols()==0,
+        "complete sparse basis frame differs");
     std::cout<<"sparse_basis_rank_steps="<<bounded.steps()<<'\n';
 }
 void sparse_observable_image(){
@@ -106,7 +108,9 @@ void sparse_observable_image(){
     const auto image=learning::transport_observable_image(large,bounded);
     check(image.rows()==60 && image.cols()==2,"bounded sparse observable image failed");
     check(bounded.steps()<500000,"observable image exceeded its admitted work");
-    G full_frame(limits);rejects([&]{(void)numeric::PreparedExactFrames(large,full_frame);});
+    G full_frame(limits);const numeric::PreparedExactFrames complete(large,full_frame);
+    check(complete.original()==large && complete.image()==image && complete.kernel().cols()==29998,
+        "complete sparse observable frame differs");
     limits.dimension=1024;G narrow(limits);
     rejects([&]{(void)learning::transport_observable_image(M(1,1025),narrow);});
     limits.dimension=131072;limits.steps=2;G stopped(limits);
@@ -144,7 +148,9 @@ void exclusive_row_certificates(){
     G rank(limits),image(limits),full(limits);
     check(learning::transport_parameter_basis_rank(large,rank).rank==10000,"bounded exclusive rank failed");
     check(learning::transport_observable_image(large,image)==expected,"bounded exclusive image failed");
-    rejects([&]{(void)numeric::PreparedExactFrames(large,full);});
+    const numeric::PreparedExactFrames complete(large,full);
+    check(complete.original()==large && complete.image()==expected && complete.rank()==10000 &&
+        complete.kernel().rows()==30000 && complete.kernel().cols()==20000,"complete exclusive frame differs");
     limits.entries=large.nonzeros();G small(limits);
     rejects([&]{(void)learning::transport_parameter_basis_rank(large,small);});
     limits.entries=16000000;limits.integer_bits=1;G bits(limits);

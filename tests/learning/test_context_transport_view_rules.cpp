@@ -189,10 +189,16 @@ void equal_carrier_certificates(){
         if(n){s.set(0,0,0);rejects([&]{(void)learning::context_view_detail::intersection({17,a,r},{17,a,s},guard,0);});}
     }
     numeric::ExactActionLimits limits;limits.dimension=1024;limits.steps=20000;
-    const M a=M::identity(256);G fast(limits),foreign(limits),absent(limits);
+    const M a=M::identity(256);G fast(limits);
     check(learning::context_view_detail::intersection({17,a,a},{17,a,a},fast,0).common_input==a,"bounded equal carrier failed");
-    rejects([&]{(void)learning::context_view_detail::intersection({17,a,a},{19,a,a},foreign,0);});
-    rejects([&]{(void)learning::context_view_detail::intersection({0,a,a},{0,a,a},absent,0);});
+    auto work_limits=limits;work_limits.steps=fast.steps()-1;G work(work_limits);
+    rejects([&]{(void)learning::context_view_detail::intersection({17,a,a},{17,a,a},work,0);});
+    M scaled=a,reconstruction=a;scaled.set(0,0,2);reconstruction.set(0,0,Q{1,2});
+    G complete;check(learning::context_view_detail::intersection({17,scaled,reconstruction},
+        {17,scaled,reconstruction},complete,0).common_input==scaled,"scaled equal carrier failed");
+    auto bit_limits=limits;bit_limits.integer_bits=1;G bits(bit_limits);
+    rejects([&]{(void)learning::context_view_detail::intersection({17,scaled,reconstruction},
+        {17,scaled,reconstruction},bits,0);});
     limits.dimension=256;G dimension(limits);
     rejects([&]{(void)learning::context_view_detail::intersection({17,a,a},{17,a,a},dimension,0);});
     limits.dimension=1024;limits.entries=256;G entries(limits);
