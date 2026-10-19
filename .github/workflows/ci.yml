@@ -76,9 +76,25 @@ jobs:
             -DRFC_BUILD_APPS=OFF -DRFC_BUILD_LOCAL_TOOLS=OFF -DRFC_BUILD_BENCHMARKS=OFF
           cmake --build build/tsan --target rfc_native_query_execution_tests rfc_native_locality_tests rfc_native_work_tests rfc_work_graph_tests rfc_concurrent_history_tests rfc_native_field_cache_tests rfc_parallel_native_field_tests rfc_hardware_resource_tests rfc_resource_native_field_tests --parallel 1
           ctest --test-dir build/tsan -R 'rfc_native_query_execution|rfc_native_locality|rfc_native_work|rfc_work_graph|rfc_concurrent_native_history|rfc_native_field_cache|rfc_parallel_native_field|rfc_hardware_resources|rfc_resource_native_field' --output-on-failure -j1
+  isolated-headers:
+    name: isolated headers (${{ matrix.compiler }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install header test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgmp-dev libsqlite3-dev libssl-dev python3
+      - name: Check isolated headers and include order
+        run: python3 tools/check_headers.py --compiler '${{ matrix.compiler }}'
   linux:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -89,10 +105,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang cmake ninja-build pkg-config libgmp-dev libsqlite3-dev libssl-dev python3
-      - name: Check isolated headers and include order
-        run: |
-          python3 tools/check_headers.py --compiler g++
-          python3 tools/check_headers.py --compiler clang++
       - name: Build library applications and tests
         run: |
           cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DRFC_ENABLE_SQLITE_INTERPRETATION=ON
