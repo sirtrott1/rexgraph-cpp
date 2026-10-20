@@ -114,8 +114,8 @@ jobs:
         run: |
           cmake --install build/release --prefix "$PWD/build/install"
           ./build/install/bin/rfc_local doctor
-          test -f build/install/share/doc/rfc-local/README.md
-          test -f build/install/share/doc/rfc-local/cli/README.md
+          test -f build/install/share/doc/rfc/README.md
+          test -f build/install/share/doc/rfc/docs/local/README.md
       - name: Build standalone engine consumer
         run: |
           cmake -S examples/engine_consumer -B build/engine -G Ninja -DCMAKE_BUILD_TYPE=Release -DRFC_SOURCE_DIR="$PWD"
