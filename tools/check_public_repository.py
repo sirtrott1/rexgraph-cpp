@@ -25,7 +25,7 @@ def reason(rel):
     path = PurePosixPath(rel)
     if path.suffix.lower() == ".md" and path.name != "README.md":
         return "Markdown must be a canonical README.md"
-    if path.parts[0] in PRIVATE:
+    if any(part in PRIVATE for part in path.parts[:-1]):
         return "private workspace material"
     if any(p.startswith("build") or p in {"CMakeFiles", "__pycache__", ".venv", "Testing", "dist"} for p in path.parts[:-1]):
         return "generated build or tool directory"

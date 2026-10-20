@@ -1,23 +1,34 @@
 # RexGraphCPP
 
-RexGraphCPP is a C++20 library for constructing relational complexes and
-computing with fields on them. A relation keeps its own identity and the ordered
-occurrences of its participants. If a participant appears twice, or an occurrence
-is inactive, those records remain part of the source even when their numerical
-boundary contributions cancel or vanish. Later queries and updates can therefore
-refer to the original relation without trying to recover it from a matrix.
+RexGraphCPP implements relational mathematics in C++20, providing the structures
+and operations for working with relations, the objects at their boundaries,
+and the tensor fields defined over them. It brings these operations together
+for constructing relational complexes, analyzing data, storing evolving systems
+and learning over their fields.
 
-Each cell can carry its own local value space, called a stalk. Tensor fields
-assemble values on these spaces, and occurrence maps specify how values pass
-between adjacent grades. Metrics then determine pairings and adjoints. This
-separates the source, the field and the operations on it: changing a metric
-changes the response calculation without silently replacing the relations.
+Relations are the primary structures in a relational complex. A relation has
+its own identity, participants and order of attachment. Its boundary describes
+how those participants take part, including their orientation and coefficients.
+This allows a measurement, an interaction or a relation among other relations
+to be addressed and changed as one structure. Repeated participants and inactive
+participation remain part of that structure, so later calculations and queries
+can still refer to what was originally supplied.
 
-The library uses integers and rationals for its ordinary exact operations.
-Prepared solves reuse factors across fields on the same declared source;
-local sections glue when their shared interfaces agree; versioned storage keeps
-the owners and cutoffs needed to interpret a result. Algebraic coefficient
-domains and approximation profiles have separately selected APIs.
+Data lives in the cells' local value spaces, called stalks. The stalk of a cell
+can contain several interacting quantities; the maps between stalks describe
+how these quantities participate in a relation. Tensor fields assemble this
+data across the complex. Boundaries, metrics and field operators then give a
+way to study how information varies through the relations, including its
+gradient, curl and harmonic components.
+
+The C++ implementation uses integer and rational arithmetic for these exact
+calculations. A prepared operator can be reused across inputs from the same
+source, which is useful when a simulation or model repeatedly acts on the same
+structure. Local calculations can be assembled through their shared interfaces,
+and versioned storage makes earlier complexes and fields available for further
+queries. Learning attaches parameters to the relations, fields and maps being
+used, with intermediate fields available for inspection before an application
+reads an answer from them.
 
 Copyright (c) 2026.
 
@@ -25,46 +36,22 @@ This software is licensed under the Apache License, Version 2.0. See
 [LICENSE](LICENSE) and [NOTICE](NOTICE). Third party dependencies retain their own
 terms.
 
-## Exact native consumers
+## Working with fields
 
-Start with the [field example](#run-an-exact-field-example) to reuse an exact
-calculation on two inputs. The
-[native exact system guide](docs/native-exact-system/README.md) explains how
-source ownership, metrics, prepared factors and learned families fit together.
-The execution adapters and the logic/electrodynamics companion use these same
-library components.
+A field calculation begins with a complex, the values attached to its cells,
+and the maps through which those values interact. The
+[field example](#run-an-exact-field-example) builds these objects and applies
+one prepared calculation to two different inputs. The
+[native system guide](docs/native-exact-system/README.md) follows the same
+structures through field operations, learning and storage.
 
-The [exact metric choice and refinement certificates](docs/relational-metric-refinement/README.md)
-verify admissible metric choices on retained complexes, a universal rational
-subdivision identity, sparse chain map transport, and compatible local field
-and metric gluing.
-
-- [Transport family gluing](examples/transport_family_gluing/README.md) combines
-  affine boundary completion with complete parameter families on retained
-  interfaces. Assertion diagnosis (`include/rfc/learning/assertion_diagnosis.hpp`)
-  supplies consistency, corruption ambiguity and repair with the full potential
-  gauge; multiplicative relations (`include/rfc/learning/multiplicative_relations.hpp`)
-  retain exact equation witnesses.
-- [Batch harmonic attachment](examples/batch_harmonic_attachment/README.md)
-  stages actual source cells, reuses prepared Hodge frames and retains new
-  upper cycle witnesses. Native factored actions (`include/rfc/inference/native_factored_action.hpp`),
-  tower operators (`include/rfc/inference/native_tower_operators.hpp`) and
-  selected moments (`include/rfc/inference/native_moments.hpp`), including
-  multitime moment changes (`include/rfc/inference/native_multitime_moments.hpp`),
-  compose sparse exact actions with their original owners and execution limits.
-- [Finite algebra](examples/finite_algebra/README.md),
-  [radix carries](examples/radix_carry/README.md) and
-  [algebraic phase fields](examples/algebraic_phase_fields/README.md) provide
-  retained law certificates, invariant preserving carries and checked algebraic
-  field/phase declarations, including bounded cyclotomic construction.
-- Integral periods (`include/rfc/field/period_lattice.hpp`),
-  finite Jacobians (`include/rfc/field/finite_jacobian.hpp`) and
-  equivariant torsion (`include/rfc/topology/equivariant_torsion.hpp`) consume
-  declared integral cycles, cup data, coordinate bases and attaching evidence.
-
-The examples include standalone CMake projects. The main build registers their
-demo targets under `RFC_BUILD_APPS`; the transport gluing example and learning
-regressions also respect `RFC_BUILD_LEARNING`.
+The [metric and refinement guide](docs/relational-metric-refinement/README.md)
+describes how to choose metrics and carry fields between compatible refinements
+of a complex. [Batch harmonic attachment](examples/batch_harmonic_attachment/README.md)
+shows how adding cells changes the Hodge calculation, while
+[transport family gluing](examples/transport_family_gluing/README.md) works with
+local fields whose shared boundary values must agree. The examples below cover
+these operations individually and include their own build instructions.
 
 ## Installation
 
@@ -225,6 +212,10 @@ check declared source maps and retain each publication's independent cutoff.
 
 ### Algebraic values and attaching maps
 
+[Finite algebra](examples/finite_algebra/README.md) and
+[radix carries](examples/radix_carry/README.md) demonstrate algebraic operations
+and integer carries on relational data.
+
 [Algebraic modules](examples/algebraic_modules/README.md),
 [complex root certificates](examples/complex_root_certificates/README.md) and
 [algebraic metrics](examples/algebraic_metrics/README.md) use exact declared
@@ -284,8 +275,26 @@ Their guides give the build, local server and verification commands.
 
 ## Development and validation
 
-Python 3 is required for the independent checks. To build the default tools,
-examples and regression tests from the source directory:
+The regular CI workflow checks repository contents, SDK installation and
+documentation links first. Changes to C++ source run the regression suite in
+six jobs; each job builds only the executables its tests use. Header changes
+also run GCC and Clang checks in four groups per compiler. Compiled test and
+consumer builds reuse a compiler cache. Documentation and workflow edits do
+not rebuild the entire library.
+
+To run the same regression groups locally, choose a group from 0 through 5:
+
+```sh
+python3 tools/ci.py test --build /tmp/rexgraphcpp-tests --shards 6 --shard 0
+```
+
+The `plan` command lists every group without compiling the tests:
+
+```sh
+python3 tools/ci.py plan --build /tmp/rexgraphcpp-tests --shards 6
+```
+
+For a complete local build, including the applications and benchmarks:
 
 ```sh
 cmake -S . -B /tmp/rexgraphcpp-tests -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -293,24 +302,10 @@ cmake --build /tmp/rexgraphcpp-tests --parallel 1
 ctest --test-dir /tmp/rexgraphcpp-tests --output-on-failure -j1
 ```
 
-Start with one compiler process; exact arithmetic translation units can use
-substantial memory. SQLite tests require the optional adapter above. The
-`dev` and `release` presets are also available for local development.
-
-`python3 tools/check_headers.py --compiler clang++` checks public headers
-independently and together with strict warnings. The full header check also
-requires SQLite headers because it includes that adapter.
-`python3 tests/audit/check_build_contracts.py` checks embedded defaults,
-installed dependencies, relocated consumers and offline documentation links.
-`python3 tools/check_public_repository.py --working-tree --history` checks
-repository content before distribution.
-
-Version 0.2.1 is a developer preview with a changing C++ API. Exact sparse
-elimination can fill in and increase integer sizes; work and dimension limits
-remain explicit. Rational finite evolution and general continuous evolution
-have different arithmetic requirements. Broader service, platform and model
-capabilities require their own implemented and validated profiles.
-
-Source, tests, compatibility fixtures, build configuration and canonical
-READMEs belong in this repository. Private research, reports and local run
-artifacts are maintained separately.
+Start with one compiler process and increase concurrency to suit the available
+memory. `python3 tools/check_headers.py --compiler clang++` checks every public
+header and links two translation units with opposite include orders.
+`python3 tests/audit/check_build_contracts.py` checks the installed CMake package,
+embedded builds, relocated consumers and documentation links. The full CI
+checks, including the applications and benchmarks, can also be run from GitHub
+Actions with **Run workflow**; they run weekly as well.

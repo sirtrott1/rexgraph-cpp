@@ -43,10 +43,8 @@ displays completed native observations.
 
 The other chapters inspect typed group queries, boundary occurrences, exact
 Hodge sectors, finite update attribution, complete channel pairings, native
-stalk actions, tensor products and three map receipt continuation. The catalog
-indexes all distributed standalone examples and the nineteen reviewed research
-families. Catalogued examples retain their separate instructions and scope;
-cataloguing is not a new execution result.
+stalk actions, tensor products and three map receipt continuation. The catalog links to the standalone examples distributed with the library,
+including their source and build instructions.
 
 ## Native files and queries
 
