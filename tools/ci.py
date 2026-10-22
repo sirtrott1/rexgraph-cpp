@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Select CI work and build only the executables needed by each test shard."""
+"""Select CI work and build the target artifacts needed by each test shard."""
 import argparse
 import json
 import os
@@ -68,16 +68,15 @@ def test_commands(build):
     return commands
 
 
-def executable_targets(build):
+def artifact_targets(build):
     reply = build / '.cmake/api/v1/reply'
     index = json.loads(sorted(reply.glob('index-*.json'))[-1].read_text())
     model = json.loads((reply / index['reply']['codemodel-v2']['jsonFile']).read_text())
     targets = {}
     for entry in model['configurations'][0]['targets']:
         target = json.loads((reply / entry['jsonFile']).read_text())
-        if target['type'] == 'EXECUTABLE':
-            for artifact in target.get('artifacts', []):
-                targets[str((build / artifact['path']).resolve())] = target['name']
+        for artifact in target.get('artifacts', []):
+            targets[str((build / artifact['path']).resolve())] = target['name']
     return targets
 
 
@@ -123,7 +122,7 @@ def configure(source, build, launcher=None):
 
 def make_plan(source, build, count, launcher=None):
     configure(source, build, launcher)
-    return partition(test_commands(build), executable_targets(build), count)
+    return partition(test_commands(build), artifact_targets(build), count)
 
 
 def execute(build, plan):

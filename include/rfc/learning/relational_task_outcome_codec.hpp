@@ -23,7 +23,7 @@ inline RelationalWorkerBindingDeclaration binding(Reader& r) {
     for (std::size_t i = 0; i < n; ++i) {
         const auto node = r.u64(); d.interface.cells.push_back({node, local_cell(r)});
     }
-    d.view = view(r); return d;
+    d.view = inference::field_interface_codec_detail::view(r); return d;
 }
 inline Bytes proof(const RelationalTaskPostconditionCertificate& p) {
     auto w = envelope(magic); w.u8(static_cast<std::uint8_t>(p.status)); w.u64(p.rank);
@@ -95,12 +95,12 @@ inline OwnedRelationalTaskOutcome decode_relational_task_outcome(std::span<const
     const auto parsed = kind == 0
         ? Passive(inference::value_admission_codec_detail::preflight_result(child, authority, read_policy, callback))
         : Passive(available_evidence_codec_detail::preflight_family(child, authority, read_policy, limits, callback));
-    const auto& input = std::visit([](const auto& p) -> const inference::value_admission_codec_detail::PassiveAvailableResult& {
-        if constexpr (std::is_same_v<std::decay_t<decltype(p)>, available_evidence_codec_detail::PassiveFamily>) return p.input;
-        else return p;
+    const auto* input = std::visit([](const auto& p) -> const inference::value_admission_codec_detail::PassiveAvailableResult* {
+        if constexpr (std::is_same_v<std::decay_t<decltype(p)>, available_evidence_codec_detail::PassiveFamily>) return &p.input;
+        else return &p;
     }, parsed);
-    const auto goal = authority.require(t.origin, Role::Prospective, goal_payload(t, asset, task_outcome_codec_detail::input_payloads(input)));
-    const auto provider = authority.require(b.origin, Role::Maps, binding_payload(b, input.program));
+    const auto goal = authority.require(t.origin, Role::Prospective, goal_payload(t, asset, task_outcome_codec_detail::input_payloads(*input)));
+    const auto provider = authority.require(b.origin, Role::Maps, binding_payload(b, input->program));
     canonical(goal_receipt, goal.receipt()); canonical(binding_receipt, provider.receipt());
     // All original origins, task instructions and provider bindings are checked
     // before source restoration, fitting or residual arithmetic.

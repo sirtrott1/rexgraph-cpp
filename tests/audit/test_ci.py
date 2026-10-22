@@ -81,14 +81,16 @@ enable_testing()
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_executable(alpha main.cpp)
 add_executable(beta main.cpp)
+add_library(faults SHARED main.cpp)
 add_test(NAME alpha COMMAND alpha)
 add_test(NAME wrapped COMMAND ${Python3_EXECUTABLE} -c "import subprocess,sys;sys.exit(subprocess.call(sys.argv[1:]))" $<TARGET_FILE:alpha>)
 add_test(NAME beta COMMAND beta)
+add_test(NAME runtime COMMAND ${Python3_EXECUTABLE} -c "from pathlib import Path;import sys;assert Path(sys.argv[1]).is_file()" $<TARGET_FILE:faults>)
 ''')
             build = root / 'build'
             plans = ci.make_plan(source, build, 2)
-            self.assertEqual(sorted(t for p in plans for t in p['tests']), ['alpha', 'beta', 'wrapped'])
-            self.assertEqual(sorted(t for p in plans for t in p['targets']), ['alpha', 'beta'])
+            self.assertEqual(sorted(t for p in plans for t in p['tests']), ['alpha', 'beta', 'runtime', 'wrapped'])
+            self.assertEqual(sorted(t for p in plans for t in p['targets']), ['alpha', 'beta', 'faults'])
             for plan in plans:
                 ci.execute(build, plan)
 
