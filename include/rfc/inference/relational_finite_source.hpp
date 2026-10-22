@@ -30,6 +30,8 @@ struct RelationalFiniteSourceDeclaration {
     std::vector<RelationalFiniteBinding> bindings;
 };
 class RelationalFiniteSections;
+class PreparedRelationalFiniteSearch;
+struct RelationalFiniteSearchPreparation;
 class OwnedRelationalFiniteSource {
     using System = local::FiniteConstraintSystem<std::uint64_t>;
     struct State {
@@ -42,6 +44,8 @@ class OwnedRelationalFiniteSource {
               system(publication.endpoint().source) {}
     };
 public:
+    using Assignment = System::Assignment;
+    using BoundedSearchResult = System::BoundedSearchResult;
     OwnedRelationalFiniteSource(OwnedRelationalInputUseAsset asset, RelationalFiniteSourceDeclaration declaration,
         numeric::ExactActionLimits limits = {}, std::function<void()> check = {}) {
         using namespace field_program_detail;
@@ -111,6 +115,23 @@ public:
     }
     const RelationalFiniteBinding& binding(std::uint64_t) const && = delete;
     std::size_t variable_position(core::CellId cell) const { return variable_position(state_->declaration, cell); }
+    // Pin the original asset/publication while the native engine executes. The
+    // returned assignment owns its symbols; neither path enumerates sections().
+    [[nodiscard]] BoundedSearchResult bounded_global_section(const Assignment& fixed = {},
+        local::FiniteSearchLimits limits = {}, std::stop_token stop = {}) const {
+        const auto pin = state_; return pin->system.bounded_global_section(fixed, limits, stop);
+    }
+    [[nodiscard]] BoundedSearchResult propagated_global_section(const Assignment& fixed = {},
+        local::FiniteSearchLimits limits = {}, std::stop_token stop = {}) const {
+        const auto pin = state_; return pin->system.propagated_global_section(fixed, limits, stop);
+    }
+    [[nodiscard]] BoundedSearchResult distinct_global_section(const std::vector<core::RelationId>& relations,
+        const Assignment& fixed = {}, local::FiniteSearchLimits limits = {}, std::stop_token stop = {}) const {
+        const auto pin = state_; return pin->system.distinct_global_section(relations, fixed, limits, stop);
+    }
+    RelationalFiniteSearchPreparation prepare_global_section(
+        const std::vector<core::RelationId>& relations = {}, local::FiniteSearchLimits limits = {},
+        std::stop_token stop = {}) const;
     RelationalFiniteSections sections(numeric::ExactActionLimits limits = {}, std::function<void()> check = {}) const;
 private:
     static std::size_t variable_position(const RelationalFiniteSourceDeclaration& d, core::CellId cell) {
@@ -118,8 +139,53 @@ private:
         field_program_detail::require(it != d.variables.end(), "finite binding refers to a nonvariable cell");
         return static_cast<std::size_t>(it - d.variables.begin());
     }
+    friend class PreparedRelationalFiniteSearch;
     std::shared_ptr<const State> state_;
 };
+
+// One explicit prepared index pins the entire immutable source owner. Copies
+// share only that source and compiled positions; every solve owns fresh bounded
+// flags, queue, matching and rollback state. Nothing is cached by equal bytes.
+class PreparedRelationalFiniteSearch {
+    using System = local::FiniteConstraintSystem<std::uint64_t>;
+public:
+    const OwnedRelationalFiniteSource& source() const & noexcept { return source_; }
+    const OwnedRelationalFiniteSource& source() const && = delete;
+    const std::vector<core::RelationId>& relations() const & noexcept { return index_.relations(); }
+    const std::vector<core::RelationId>& relations() const && = delete;
+    const local::FiniteSearchReceipt& preparation_work() const & noexcept { return index_.preparation_work(); }
+    const local::FiniteSearchReceipt& preparation_work() const && = delete;
+    std::size_t retained_entries() const noexcept { return index_.retained_entries(); }
+    bool same_owner(const PreparedRelationalFiniteSearch& other) const noexcept {
+        return source_.same_owner(other.source_) && index_.same_index(other.index_);
+    }
+    [[nodiscard]] OwnedRelationalFiniteSource::BoundedSearchResult global_section(
+        const OwnedRelationalFiniteSource::Assignment& fixed = {}, local::FiniteSearchLimits limits = {},
+        std::stop_token stop = {}) const {
+        const auto pin = source_.state_;
+        return pin->system.prepared_global_section(index_, fixed, limits, stop);
+    }
+private:
+    friend class OwnedRelationalFiniteSource;
+    PreparedRelationalFiniteSearch(OwnedRelationalFiniteSource source, System::PreparedIndex index)
+        : source_(std::move(source)), index_(std::move(index)) {}
+    OwnedRelationalFiniteSource source_;
+    System::PreparedIndex index_;
+};
+struct RelationalFiniteSearchPreparation {
+    local::FinitePreparationStatus status;
+    std::optional<PreparedRelationalFiniteSearch> prepared;
+    local::FiniteSearchReceipt work;
+};
+inline RelationalFiniteSearchPreparation OwnedRelationalFiniteSource::prepare_global_section(
+    const std::vector<core::RelationId>& relations, local::FiniteSearchLimits limits, std::stop_token stop) const {
+    const auto pin = state_;
+    auto result = pin->system.prepare_global_section(relations, limits, stop);
+    if (result.prepared)
+        return {result.status, PreparedRelationalFiniteSearch(*this, std::move(*result.prepared)), result.work};
+    return {result.status, std::nullopt, result.work};
+}
+
 class RelationalFiniteSections {
     struct State {
         OwnedRelationalFiniteSource source;
