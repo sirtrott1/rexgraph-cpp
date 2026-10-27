@@ -1,94 +1,68 @@
 # RexGraphCPP
 
-RexGraphCPP implements relational mathematics in C++20, providing the structures
-and operations for working with relations, the objects at their boundaries,
-and the tensor fields defined over them. It brings these operations together
-for constructing relational complexes, analyzing data, storing evolving systems
-and learning over their fields.
+RexGraphCPP is a C++20 mathematical engine for relational complexes, exact tensor
+fields, and their evolution. It implements relational field calculus and tensor
+algebra over retained sources, with explicit coefficient domains, declared maps,
+and reusable sparse operators.
 
-Relations are the primary structures in a relational complex. A relation has
-its own identity, participants and order of attachment. Its boundary describes
-how those participants take part, including their orientation and coefficients.
-This allows a measurement, an interaction or a relation among other relations
-to be addressed and changed as one structure. Repeated participants and inactive
-participation remain part of that structure, so later calculations and queries
-can still refer to what was originally supplied.
+## Relational complexes
 
-Data lives in the cells' local value spaces, called stalks. The stalk of a cell
-can contain several interacting quantities; the maps between stalks describe
-how these quantities participate in a relation. Tensor fields assemble this
-data across the complex. Boundaries, metrics and field operators then give a
-way to study how information varies through the relations, including its
-gradient, curl and harmonic components.
+Relations are primary. Each relation retains its identity, type, ordered boundary
+occurrences, orientations, and exact coefficients. Objects occur at the boundaries
+of relations; higher grades describe relations among those relations. Repeated
+participants, inactive occurrences, supported zeros, and cancellation remain
+distinct in the source.
 
-The C++ implementation uses integer and rational arithmetic for these exact
-calculations. A prepared operator can be reused across inputs from the same
-source, which is useful when a simulation or model repeatedly acts on the same
-structure. Local calculations can be assembled through their shared interfaces,
-and versioned storage makes earlier complexes and fields available for further
-queries. Learning attaches parameters to the relations, fields and maps being
-used, with intermediate fields available for inspection before an application
-reads an answer from them.
+Cells carry local vector spaces, called stalks, and occurrences carry maps between
+those spaces. These maps assemble into graded boundary actions. On a strict
+complex, adjacent boundaries satisfy $B_{k-1}B_k=0$. For rational fields with
+positive definite grade metrics $G_k$, the metric adjoint and Hodge operator are
 
-Copyright (c) 2026.
+$$
+B_k^\dagger=G_k^{-1}B_k^T G_{k-1},\qquad
+L_k=B_k^\dagger B_k+B_{k+1}B_{k+1}^\dagger.
+$$
 
-This software is licensed under the Apache License, Version 2.0. See
-[LICENSE](LICENSE) and [NOTICE](NOTICE). Third party dependencies retain their own
-terms.
+The orthogonal gradient, curl, and harmonic components reconstruct the complete
+field. Exact image and kernel frames, metric solves, and Green actions compute
+these components without requiring an eigendecomposition. Curved realizations
+retain their chain defects and use their separately declared operations.
 
-## Solving retained finite sources
+Integers and rationals are the primary arithmetic. Algebraic extensions require
+explicit fields, embeddings, and root certificates. Approximation is selected
+through its own APIs; exceeding an exact work budget returns an explicit refusal.
 
-Build `rfc_finite_solve` with `RFC_BUILD_APPS=ON`. The command reads a canonical
-finite-source archive and supports bounded enumeration, propagation, and
-all-different matching on explicitly named grade-one relations:
+## The library
 
-```sh
-rfc_finite_solve problem.rfcfs 4194304 propagated
-rfc_finite_solve problem.rfcfs 4194304 distinct 0,1,2
-```
+The SDK is organized into CMake targets. Each target includes its mathematical
+dependencies; applications link the layers they use.
 
-Every returned witness is checked against the original domains and charts.
-Work exhaustion returns `budget_exceeded` with no witness. Selecting a search
-profile changes execution, while the retained source remains unchanged. The
-`finite-tools` install component installs this command separately.
+| Target | Operations |
+| --- | --- |
+| `rfc::core` | Typed relational sources, occurrence identities, exact boundaries |
+| `rfc::algebra`, `rfc::geometry` | Declared maps, products, realizations, parameter domains |
+| `rfc::local` | Stalks, fiber maps, sections, compatible gluing |
+| `rfc::topology` | Integral homology, coverings, homotopies, equivariant chains |
+| `rfc::field` | Metrics, Hodge sectors, Dirac and Green actions, periods |
+| `rfc::temporal` | Ordered operation words, transport, finite evolution, jets |
+| `rfc::fundamentals` | The mathematical layers through temporal calculus |
+| `rfc::storage`, `rfc::database` | Canonical archives, publications, historical queries |
+| `rfc::inference`, `rfc::learning` | Prepared field programs, parameter families, evidence |
+| `rfc::rfc` | The complete library surface |
 
-## Working with fields
-
-A field calculation begins with a complex, the values attached to its cells,
-and the maps through which those values interact. The
-[field example](#run-an-exact-field-example) builds these objects and applies
-one prepared calculation to two different inputs. The
-[native system guide](docs/native-exact-system/README.md) follows the same
-structures through field operations, learning and storage.
-
-The [metric and refinement guide](docs/relational-metric-refinement/README.md)
-describes how to choose metrics and carry fields between compatible refinements
-of a complex. [Batch harmonic attachment](examples/batch_harmonic_attachment/README.md)
-shows how adding cells changes the Hodge calculation, while
-[transport family gluing](examples/transport_family_gluing/README.md) works with
-local fields whose shared boundary values must agree. The examples below cover
-these operations individually and include their own build instructions.
+The [Python library](https://github.com/sirtrott1/rexgraph-python) provides an
+approachable interface to construction, analysis, storage, and RCQL queries.
+Its optional `rexgraph_cpp` bridge uses this SDK. The C++ engine builds
+independently of Python and separately distributed application companions.
 
 ## Installation
 
-Separately distributed model and temporal application companions build against
-this SDK. Explicit source builds use `RFC_REXLOGIC_SOURCE_DIR` and
-`RFC_REXTEMPORAL_SOURCE_DIR` with their corresponding CMake build options.
-Their distributions carry their own terms.
-
-Clone the repository into `rexgraphcpp` to use the directory names in the
-standalone example guides:
+Version **0.3.0** requires a C++20 compiler, CMake 3.24 or later, pkg-config, and
+the GMP/GMPXX development libraries. The commands below also use Ninja.
 
 ```sh
 git clone https://github.com/sirtrott1/rexgraph-cpp.git rexgraphcpp
 cd rexgraphcpp
-```
-
-The SDK requires CMake 3.24 or later, a C++20 compiler, pkg-config and the GMP and
-GMPXX development libraries. The commands below also use Ninja. Run them from
-the library source directory:
-
-```sh
 cmake -S . -B /tmp/rexgraphcpp-sdk-build -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DRFC_BUILD_APPS=OFF -DRFC_BUILD_LOCAL_TOOLS=OFF \
@@ -98,379 +72,128 @@ cmake --build /tmp/rexgraphcpp-sdk-build --parallel 1
 cmake --install /tmp/rexgraphcpp-sdk-build --prefix /tmp/rexgraphcpp-sdk
 ```
 
-This installs the public headers, relocatable CMake targets, license and user
-guides. The mathematical targets are supplied as headers. Compiled tools and optional
-adapters are enabled separately. The installed guides are under
-`share/doc/rfc`; their example commands refer to a supplied source checkout.
+This installs public headers, relocatable CMake targets, and user guides under
+`share/doc/rfc`. Mathematical targets are supplied as headers; tools and optional
+adapters are enabled separately. `RFC_BUILD_LEARNING=OFF` disables compiled
+learning applications and tests while retaining the header APIs.
 
 ### Use from CMake
 
-An application can use the installed SDK:
+Save the example below as `main.cpp` beside this `CMakeLists.txt`:
 
 ```cmake
-find_package(RFC 0.2 CONFIG REQUIRED)
-add_executable(your_app main.cpp)
-target_link_libraries(your_app PRIVATE rfc::field)
+cmake_minimum_required(VERSION 3.24)
+project(relational_example LANGUAGES CXX)
+find_package(RFC 0.3.0 EXACT CONFIG REQUIRED)
+add_executable(relational_example main.cpp)
+target_link_libraries(relational_example PRIVATE rfc::core)
 ```
 
-Pass `-DCMAKE_PREFIX_PATH=/tmp/rexgraphcpp-sdk` when configuring the application.
-Link the target for the operations it uses:
-
-| Target | Operations |
-| --- | --- |
-| `rfc::core` | Retained relational complexes and exact coefficients |
-| `rfc::local` | Stalks, declared fiber maps and owning sections |
-| `rfc::topology` | Integral homology, equivariant chains and complete cyclic-character decompositions |
-| `rfc::field` | Boundary, metric, Hodge, Dirac and Green actions |
-| `rfc::fundamentals` | The mathematical layers through temporal operations |
-| `rfc::storage` | Canonical source, field and history codecs |
-| `rfc::database` | Native publications, accessions and queries |
-| `rfc::inference` | Owning field programs and prepared native actions |
-| `rfc::learning` | Declared parameter families and evidence updates |
-| `rfc::rfc` | The complete library surface |
-
-A pinned source checkout can also be embedded directly:
-
-```cmake
-add_subdirectory(path/to/rexgraphcpp rfc EXCLUDE_FROM_ALL)
-target_link_libraries(your_app PRIVATE rfc::field)
-```
-
-Embedded builds disable applications, tools, tests, learning executables and
-benchmarks by default. They preserve the consumer's language settings and do
-not impose warning flags. `RFC_BUILD_LEARNING=OFF` leaves the header API
-available while excluding its compiled applications, tests and benchmarks.
-
-For a declared free cyclic group-ring chain, include
-`rfc/topology/cyclic_characters.hpp` and call
-`rfc::topology::PreparedCyclicCharacterDecomposition::prepare(chain, field_limits, guard)`.
-The completed object retains the original chain and one primitive cyclotomic
-sector for every divisor of its deck order. Its `homology_dimensions()` sums
-each sector's all-grade dimensions with its certified field-degree weight.
-Receiving limits and cancellation apply to the complete census. This is an
-exact chain calculation; a geometric covering interpretation needs its own
-declared projection and hypotheses.
-
-`rfc/field/elliptic_factor_construction.hpp` provides
-`PreparedFiniteEllipticFactors::prepare(normalization, guard)`. On an accepted
-finite-frequency normalization with rational squared frequencies and two-dimensional sectors,
-it constructs each complete integral kernel of S^2+mu*I with native Smith actions.
-The equation's denominator and basis changes are retained. The existing native
-supplied-plane validator certifies saturated lattices, positive intersections,
-exact factor moduli and the complete isogeny index. `normalization()`, `kernels()`
-and `certificate()` retain the actual source/field/embedding owners and full
-proof data. Nonrational frequencies or larger repeated sectors refuse this
-automatic profile while their accepted normalizations and existing explicitly
-supplied-plane workflows remain available. No general Jacobian decomposition,
-modulus reduction or smooth/CM identification is inferred.
-
-`inference::CDeclarationArchive` reconstructs the admitted algebraic and temporal workflows from a
-bounded, versioned graph of original declarations. It reuses native source,
-algebraic and temporal codecs, rebuilds fresh shared dependencies and reruns the
-native certificates. Ordered programs, parameter holes, roots, cup/voltage data,
-refinement histories and original producer/evidence metadata remain retained.
-Checksums preserve bytes; they do not restore mathematical or runtime authority.
-
-`temporal::OwnedRefinementLevel` retains an actual source, positive grade metrics
-and declared coordinate frames. `PreparedRefinementMap` keeps complete native map
-terms and separate chain, metric, adjoint, Hodge, sector and Green comparisons.
-Declared retractions preserve every private fine direction and all pairing cross
-terms. `PreparedRefinementDiagram` checks every path in a bounded forward DAG,
-retaining ordered routes, reverse/coarsening legs and complete joint innovation
-channels. Limiting-contract metadata keeps supplied infinite hypotheses and
-numerical observations separate from the checked finite evidence.
-
-`temporal::OwnedConsistentLinearSystem` certifies a complete, consistent,
-full-column-rank real system on its actual retained source. A typed occurrence
-selector feeds `PreparedRotatingCoefficient`, which reuses original-map
-response factors and complete adjoint-kernel gauge. It returns exact phase-
-dependent obstruction, full least-squares solution and residual under identity
-metrics with no grade-two cells and positive harmonic row share. Zero obstruction,
-negative formula coefficients and removable proof substitutions remain valid;
-original finite-chart holes and the separate h=-1 endpoint retain their domains.
-
-`temporal::PreparedSurfaceHolonomy` binds a certified square-tiled surface to a
-primitive integral cohomology class, retaining every occurrence transport and a
-whole Laurent-family closure proof. Its finite rational phase chart preserves
-original domain holes; `half_turn()` declares the separate h=-1 endpoint.
-`PreparedSurfaceInheritance` certifies full cup/psi duality and the complete
-inherited gradient, curl and harmonic sectors under the identity-metric,
-rank-one unitary surface theorem. Finite phase samples remain separate from the
-limit proof. The optional coordinate jet bridge composes with covariant-jet and response-derivative actions;
-it retains the formal h derivative and chart derivative as distinct quantities.
-
-`inference::PreparedNativeKrylov` certifies a field-specific monic minimal
-polynomial using native actions, a complete recurrence and independent rank
-witnesses. `PreparedNativeCayleyOrbit` reuses the native Dirac–Cayley action for
-a real rational field on one declared source grade. It proves complete rational
-mode coverage, combines full-vector minimal periods and preserves unresolved
-modes. Factor discovery is exhaustive within its explicit work budget; exhaustion
-refuses completeness. Samples retain each ordered step through an owned history.
-Positive metrics, the full strict chain and actual publication availability are
-required. The initial history profile admits at most 256 sampled steps.
-
-`temporal::PreparedResponseJet` reuses an original guarded factor for the exact
-solve and its derivative, retaining complete moving kernel/metric gauges and
-checking every original row. `DerivativeAction` and `PreparedDerivativeWord`
-retain ordered factors and every derivative-position channel without forming a
-word matrix or inverse. `CrossPairingJet` includes both fields and the changing
-bilinear form. `SourceCellJetSelectors` transports each actual source selector
-through the declared frame. Use the family factories to retain original rational
-operator/scalar guards; direct declarations describe first-order point data.
-Rectangular and singular gauged responses are partial solves, not total inverses.
-
-`temporal::PreparedCovariantFamily` binds complete occurrence-level rational
-families to retained source owners and certified regular cells. It constructs
-source-owned first-order boundary, metric, connection, field, adjoint and Hodge
-jets, exact moment derivatives with every ordered operator term, and complete
-changing-map affine layer families. `PreparedCovariantJet` keeps tangent closure
-separate from exact family closure; rectangular maps retain both endpoint
-connections. General positive metrics use guarded native solves; symbolic moment
-construction currently admits diagonal rational metrics. Explicit constant graded
-basis changes transform both adjacent maps and all pairings.
-
-`geometry::PreparedUnivariateFamily` certifies complete rank strata on an owned,
-bounded rational-parameter domain. Declare `UnivariateCoordinate`,
-`UnivariateDomain`, source/target `UnivariateCarrier` owners and row-major
-`OwnedRationalExpression` entries. Original denominator guards survive formal
-cancellation: `t/t` is formally one and still excludes zero. All maximal minors
-and exact Sturm isolation distinguish true rank exceptions from temporary pivot
-failures; receipts retain endpoints, holes and regular cells. Algebraic point
-specializations retain their family owner. This bounded finite profile provides
-no implicit carrier transport across rank jumps or multivariate calculus.
-
-`rfc/field/finite_jacobian_normalization.hpp` provides
-`PreparedFiniteJacobianNormalization::prepare(symplectic, frequencies, embedding,
-guard)`. Each `DeclaredPeriodFrequency` supplies an exact squared frequency and
-its positive root in the actual selected real field. The constructor builds
-polynomial projectors of the accepted harmonic star, proves their full coverage
-and exact identities, and delegates positivity/Riemann checks to the existing
-finite Jacobian validator. Distinct frequency values can have higher-dimensional
-eigenspaces; those spaces remain whole. Rational and algebraic frequencies are
-supported without spectral or root discovery. The result retains the original
-period/symplectic owners, declarations, projectors, normalizer and native Jacobian;
-`point()` maps an actual owned integral-period point. Period matrices depend on
-the chosen integral symplectic frame, so comparisons require the full declared
-frame transformation. Smooth limits and universal injectivity are separate.
-
-`rfc/field/square_tiled_surface.hpp` provides
-`PreparedSquareTiledSurface::prepare(right, up, subdivision, orientation, key,
-revision, guard)`. Declared bijections glue the actual square sides; connectedness,
-edge pairings and vertex links certify the admitted closed orientable surface.
-The result retains every corner identification, ordered face flag and derived
-fundamental/cup declaration. `integral_periods(guard)` uses the geometric identity
-metric; an explicit native SPD metric overload is available. Its result owns the
-surface, integral-period construction, complete gluing-cycle generator certificate and
-integral symplectic frame. Cylinder cores remain a separate, possibly incomplete
-family.
-
-`rfc/field/integral_symplectic_basis.hpp` also constructs a symplectic frame for
-any accepted `PreparedIntegralPeriodLattice`. Smith row actions produce primitive
-partners without a bounded search for unit entries. `basis()` is the full integral
-cohomology transformation T, with T^T Omega T equal to the standard form;
-`cochains()` is C*T and `cycles()` is Z*T^{-transpose}. The inverse, intermediate
-actions and unimodular certificate are retained. Feed the basis to the existing
-finite Jacobian validator with a separately declared normalization and embedding.
-Surface normalization, smooth limits and universal vertex injectivity remain
-separate mathematical questions.
-
-`rfc/field/period_construction.hpp` provides
-`rfc::field::PreparedIntegralPeriodConstruction`. It constructs a complete
-primitive torsion-free integral H1 basis by Smith actions, metric harmonic dual
-cochains, and source-owned connecting chains and period points. Supply the
-fundamental cycle, occurrence-based cup terms, coordinated integral lattice
-basis, source key/revision, native identity/diagonal/sparse SPD metric and an
-`ExactActionGuard`. Preparation delegates to `PreparedIntegralPeriodLattice` for
-full integral, harmonic, cup and higher-chain validation. `lattice()` feeds the
-existing finite Jacobian APIs; no surface orientation or normalization is inferred.
-`point()` uses retained present unit pairwise edges; decorated, branch, nonunit
-or disconnected path requests refuse explicitly. `homology_coordinates()` and
-`compare_paths()` retain and certify closed-chain changes modulo the full lattice.
-Smith changes and a scoped container/scalar work receipt remain available.
-
-`rfc/local/branch_chain.hpp` provides `rfc::local::PreparedBranchChain` for
-positive-share branch chains with explicitly ordered vertex and relation keys.
-Its complete rational basis spans the grade-zero boundary-transpose kernel;
-initial values extend to the full finite field. `declared_modes` checks supplied
-exact algebraic ratios and original-source residuals. A partial root family
-remains partial; completeness requires an independent mode for every kernel
-direction. Generalized repeated-root modes are a separate profile.
+Configure with `-DCMAKE_PREFIX_PATH=/tmp/rexgraphcpp-sdk`. An application can also
+embed a selected source checkout using
+`add_subdirectory(path/to/rexgraphcpp rfc EXCLUDE_FROM_ALL)` and the same targets.
+Embedded builds leave applications, tools, tests, and benchmarks disabled by default.
 
 ### Optional adapters
 
-SQLite import requires SQLite development libraries and
-`-DRFC_ENABLE_SQLITE_INTERPRETATION=ON`. An installed consumer requests it with
-`find_package(RFC CONFIG REQUIRED COMPONENTS SQLite)` and links
-`rfc::sqlite_interpretation`.
+| Adapter | Build option | Installed component and target | Requirements |
+| --- | --- | --- | --- |
+| SQLite import | `RFC_ENABLE_SQLITE_INTERPRETATION=ON` | `SQLite`, `rfc::sqlite_interpretation` | SQLite development libraries |
+| Exact packed binary GPU operations | `RFC_ENABLE_VULKAN=ON` | `Vulkan`, `rfc::vulkan_binary` | Vulkan 1.1 headers/loader, `glslangValidator`, compatible device |
 
-Exact packed binary GPU operations require Vulkan 1.1 headers and loader,
-`glslangValidator` and `-DRFC_ENABLE_VULKAN=ON`. An installed consumer requests
-`COMPONENTS Vulkan` and links `rfc::vulkan_binary`. Physical devices are required
-by default; `RFC_VULKAN_TEST_SOFTWARE=ON` explicitly admits software devices for
-tests. This adapter does not provide general rational GPU kernels.
+Request components with `find_package(RFC 0.3.0 CONFIG REQUIRED COMPONENTS SQLite)`
+or `Vulkan`. Base imports do not load either dependency. Vulkan supplies packed
+binary kernels; software devices require explicit `RFC_VULKAN_TEST_SOFTWARE=ON`
+for qualification. General rational GPU execution is not provided by this adapter.
 
-The base CMake package does not load either optional dependency. Switches for
-adapters without implemented kernels reject at configuration.
+## Getting started with the library
 
-## Run an exact field example
+This example declares three oriented relations forming a cycle. The boundary of
+the exact unit circulation is zero at every vertex:
 
-The prepared field example constructs a square with four edges and two complete
-fields in one native publication. It prepares Green, harmonic and gradient
-potential actions, then reuses their exact factors for both inputs:
+```cpp
+#include <rfc/core/builder.hpp>
+#include <iostream>
 
-```sh
-cmake -S examples/prepared_global_actions \
-  -B /tmp/rexgraphcpp-field-example -G Ninja \
-  -DCMAKE_PREFIX_PATH=/tmp/rexgraphcpp-sdk
-cmake --build /tmp/rexgraphcpp-field-example --parallel 1
-/tmp/rexgraphcpp-field-example/prepared_global_actions
+int main() {
+    using namespace rfc;
+    core::RelationSignature signature;
+    const auto edge = signature.add_type(
+        "edge", core::BoundaryPolicy::DeclaredExact, 2, 2);
+    core::RelationalComplexBuilder builder(signature);
+    for (std::uint64_t i = 0; i < 3; ++i) {
+        builder.add_grade_one(core::RelationKey{10 + i}, edge, {
+            {i, true, true, numeric::Rational{1}},
+            {(i + 1) % 3, true, false, numeric::Rational{1}},
+        });
+    }
+    const auto source = builder.freeze();
+    const auto boundary = source.boundary_apply(
+        core::Grade{1}, numeric::RationalVector{1, 1, 1});
+    for (const auto& value : boundary) std::cout << value << ' ';
+    std::cout << '\n';
+}
 ```
 
-The [example guide](examples/prepared_global_actions/README.md) explains its
-metrics, potential gauge and admission limits. Prepared actions retain the
-actual source publication, carrier and metric. Further inputs must belong to
-that publication; matching dimensions or numerical values do not establish a
-transport. Full requested fields remain available independently of a terminal
-readout.
+Build and run from the directory containing those two files:
 
-`LocalRelationTensor`, `GradeTensorField` and `OwnedLinearFiberSystem` retain
-local tensors, whole grade fields and complete occurrence maps. Owning sections
-distinguish contribution summation from compatible gluing. Relational field
-programs declare their input nodes, bases, metrics and maps explicitly. Learned
-parameters belong to those declared objects; evidence updates do not introduce
-new relations, coordinates or interfaces implicitly.
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_PREFIX_PATH=/tmp/rexgraphcpp-sdk
+cmake --build build --parallel 1
+./build/relational_example
+# 0 0 0
+```
 
-## Examples and supported operations
+For complete field calculations, the
+[prepared actions example](examples/prepared_global_actions/README.md) constructs
+two fields on one source and reuses Green, harmonic, and gradient potential factors.
+Its guide includes source and installed SDK build commands.
 
-Each guide describes the input declarations, executed operations, retained
-outputs and scope, with build commands and the supported source or SDK inputs
-for that example.
+## Mathematical operations
 
-### Fields, metrics and local solves
+| Operation | Technical scope | Guide |
+| --- | --- | --- |
+| Fields and exact solves | Sparse actions, complete kernel gauges, reusable metric and response factors | [Exact native system](docs/native-exact-system/README.md) |
+| Local tensors | Owning stalk fields, declared tensor factors, exact reconstruction | [Stalk and tensor fields](docs/temporal-stalk-tensor-fields/README.md) |
+| Metrics and refinement | Positive metrics, chain maps, adjoints, retained fine directions | [Metric and refinement certificates](docs/relational-metric-refinement/README.md) |
+| Temporal calculus | Rational parameter domains, covariant and response jets, ordered derivatives, finite Cayley evolution | [Temporal calculus](docs/mathematical-operations/README.md#temporal-calculus) |
+| Algebraic constructions | Certified roots, integral periods, finite Jacobians, cyclic characters, surface holonomy | [Integral and algebraic constructions](docs/mathematical-operations/README.md#integral-and-algebraic-constructions) |
+| Learning and gluing | Affine transport families, unresolved directions, exact contradiction witnesses | [Transport family gluing](examples/transport_family_gluing/README.md) |
+| Products and topology | Tensor products, coherence maps, coverings, declared homotopies | [Example catalog](docs/examples/README.md#products-coverings-and-homotopies) |
+| Finite search | Retained domains, checked witnesses, explicit enumeration and propagation budgets | [Finite source search](docs/mathematical-operations/README.md#finite-source-search) |
 
-[Prepared global actions](examples/prepared_global_actions/README.md),
-[selected exact solves](examples/selected_exact_solve/README.md) and
-[ordered exact solves](examples/ordered_exact_solve/README.md) cover reusable
-factors and requested outputs. [Prepared updates](examples/prepared_updates/README.md)
-and [native updates](examples/native_updates/README.md) retain their original
-source and update declarations.
+Prepared operations retain their actual source, carrier, metric, and declared
+maps. Reusing a factor requires compatible source ownership; equal dimensions or
+values alone do not establish a transport. Each construction states its admitted
+hypotheses and bounds. Finite certificates and rational time steps do not by
+themselves establish a smooth limit or a continuous time exponential.
 
-[Native Green actions](examples/native_green/README.md),
-[Hodge frames](examples/native_frames/README.md),
-[observations](examples/native_observations/README.md),
-[linear observations](examples/native_linear_observations/README.md) and
-[metric novelty](examples/native_metric_novelty/README.md) explain the distinct
-metric, gauge and observation contracts. [Local gluing](examples/native_gluing/README.md)
-and [relative fields](examples/native_relative/README.md) retain the requested
-interfaces and reconstruction.
+## Storage, queries, and execution
 
-### Products, coverings and homotopies
+- Native archives retain complete sources, fields, declarations, and selected
+  endpoints. Codecs check version, checksum, byte, record, and arithmetic bounds.
+- Historical queries use explicit source identities and cutoffs. Cross-source
+  joins require declared participant correspondences between the selected endpoints.
+- Linux durable and concurrent history adapters supply their own publication,
+  retry, and recovery contracts.
+- CPU execution supports owning jobs, prepared workspaces, field caches, and
+  declared resource admission. Sparse elimination can increase support and
+  integer sizes; work receipts do not measure total process memory.
 
-[Tensor products](examples/native_tensor_product/README.md),
-[associators](examples/native_product_associator/README.md),
-[pentagons](examples/native_product_pentagon/README.md),
-[interchange](examples/native_product_interchange/README.md),
-[hexagons](examples/native_product_hexagon/README.md) and
-[braids](examples/native_product_braid/README.md) preserve nested carriers,
-ordered occurrences and exact coherence witnesses. The
-[chain map](examples/native_product_chain_map/README.md),
-[map composition](examples/native_product_map_composition/README.md) and
-[map associativity](examples/native_product_map_associativity/README.md)
-examples retain complete factor maps and intermediate histories.
+The [example catalog](docs/examples/README.md) links the storage, query, history,
+CPU, and Vulkan guides. Enable `RFC_BUILD_LOCAL_TOOLS=ON` to build `rfc_local`;
+the [CLI guide](docs/local/README.md) covers snapshots, queries, and SQLite import.
 
-[Cylinders](examples/native_cylinder/README.md),
-[coverings](examples/native_covering/README.md),
-[relational homotopies](examples/native_relational_homotopy/README.md),
-[homotopy composition](examples/native_homotopy_composition/README.md),
-[repeated composition](examples/native_homotopy_sequence/README.md),
-[covering lifts](examples/native_covering_homotopy/README.md) and
-[covering base changes](examples/native_covering_homotopy_base_change/README.md)
-check declared source maps and retain each publication's independent cutoff.
+## Development and testing
 
-### Algebraic values and attaching maps
-
-[Finite algebra](examples/finite_algebra/README.md) and
-[radix carries](examples/radix_carry/README.md) demonstrate algebraic operations
-and integer carries on relational data.
-
-[Algebraic modules](examples/algebraic_modules/README.md),
-[complex root certificates](examples/complex_root_certificates/README.md) and
-[algebraic metrics](examples/algebraic_metrics/README.md) use exact declared
-coefficient domains, embeddings and positive pairings.
-[Cellular attachments](examples/cellular_attachments/README.md) and
-[attaching transport](examples/attaching_transport/README.md) preserve original
-charts and incidence maps. [Native phase shapes](examples/native_phase_shapes/README.md)
-and [algebraic phase fields](examples/algebraic_phase_fields/README.md)
-describe the available phase declarations.
-
-### Storage, queries and history
-
-The [database example](examples/database_preview/README.md) introduces native
-publications. [Query tensor windows](examples/query_tensor/README.md) retain
-source coordinates and endpoint pins. [Durable history](examples/durable_history/README.md)
-and [concurrent history](examples/concurrent_history/README.md) document the
-Linux filesystem, publication, retry and recovery contracts.
-
-[Algebraic storage](examples/algebraic_storage/README.md),
-[algebraic graphs](examples/algebraic_graph/README.md),
-[algebraic database queries](examples/algebraic_database/README.md),
-[phase fold storage](examples/phase_fold_storage/README.md),
-[phase fold history](examples/phase_fold_histories/README.md),
-[graph history](examples/graph_history/README.md) and
-[graph database queries](examples/graph_database/README.md) retain owner
-references, complete declarations and selected revisions.
-
-Canonical codecs check their declared record, byte and arithmetic bounds.
-Shared packets retain the complete ordered logical byte image while reusing
-identical stored chunks. Segmented readers avoid expanding the entire packet;
-requested contiguous leaves have explicit materialization limits. Byte sharing
-does not establish source identity or transport, and these bounds are not a
-total process memory guarantee.
-
-### Execution and resource use
-
-[Field caches](examples/field_cache/README.md),
-[parallel fields](examples/parallel_field/README.md),
-[work dispatch](examples/work_dispatch/README.md) and
-[hardware inventory](examples/hardware_field/README.md) cover owning jobs,
-explicit dependencies, reusable workspaces and shared resource admission.
-The [Vulkan example](examples/vulkan_binary/README.md) covers exact packed
-operations and declared CPU/GPU partitions. The
-[engine consumer](examples/engine_consumer/README.md) embeds a pinned library
-source checkout in a standalone application.
-
-### Local queries and temporal walkthroughs
-
-Enable `RFC_BUILD_LOCAL_TOOLS=ON` to build and install `rfc_local`.
-The [CLI guide](docs/local/README.md) covers native snapshots, exact queries,
-ordered histories and bounded SQLite import.
-
-The [temporal dynamics walkthrough](examples/temporal_dynamics/README.md) and
-[temporal relations walkthrough](examples/temporal_relations/README.md) combine
-retained source changes, historical queries and exact field observations.
-Their guides give the build, local server and verification commands.
-
-## Development and validation
-
-The regular CI workflow checks repository contents, SDK installation and
-documentation links first. Changes to C++ source run the regression suite in
-six jobs; each job builds only the executables its tests use.
-Header changes also run GCC and Clang checks in four groups per compiler.
-Compiled test and consumer builds reuse a compiler cache.
-
-To run the same regression groups locally, choose a group from 0 through 5:
+Python 3 is required for the verification scripts. Run one of six regression
+shards by choosing a number from 0 through 5:
 
 ```sh
 python3 tools/ci.py test --build /tmp/rexgraphcpp-tests --shards 6 --shard 0
 ```
 
-The `plan` command lists every group without compiling the tests:
-
-```sh
-python3 tools/ci.py plan --build /tmp/rexgraphcpp-tests --shards 6
-```
-
-For a complete local build, including the applications and benchmarks:
+For the complete build and test suite:
 
 ```sh
 cmake -S . -B /tmp/rexgraphcpp-tests -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -478,10 +201,21 @@ cmake --build /tmp/rexgraphcpp-tests --parallel 1
 ctest --test-dir /tmp/rexgraphcpp-tests --output-on-failure -j1
 ```
 
-Start with one compiler process and increase concurrency to suit the available
-memory. `python3 tools/check_headers.py --compiler clang++` checks every public
-header and links two translation units with opposite include orders.
-`python3 tests/audit/check_build_contracts.py` checks the installed CMake package,
-embedded builds, relocated consumers and documentation links. The full CI
-checks, including the applications and benchmarks, can also be run from GitHub
-Actions with **Run workflow**; they run weekly as well.
+Start with one compiler process and increase concurrency to suit available memory.
+CI also checks isolated GCC/Clang headers, include order, installed consumers,
+sanitizers, codec fuzzing, and the explicitly admitted software Vulkan profile.
+`python3 tests/audit/check_build_contracts.py` validates SDK installation,
+relocation, dependency boundaries, and offline documentation links.
+
+## Documentation and support
+
+Use the [example catalog](docs/examples/README.md) for complete programs and the
+[mathematical operation reference](docs/mathematical-operations/README.md) for API
+contracts. Report reproducible failures through
+[GitHub Issues](https://github.com/sirtrott1/rexgraph-cpp/issues), including the
+compiler, SDK version, declarations, and relevant error output.
+
+## License
+
+RexGraphCPP is distributed under the [Apache License 2.0](LICENSE). See
+[NOTICE](NOTICE) for attribution. Third party dependencies retain their own terms.
