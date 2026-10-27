@@ -35,6 +35,8 @@ def select(event, head='HEAD'):
     kind = os.environ.get('GITHUB_EVENT_NAME', '')
     if kind in {'schedule', 'workflow_dispatch'}:
         return changes([], full=True)
+    if kind == 'push' and event.get('ref', '').startswith('refs/tags/'):
+        return changes([], full=True)
     base = event.get('pull_request', {}).get('base', {}).get('sha') or event.get('before', '')
     if not re.fullmatch(r'[0-9a-f]{40}', base) or base == '0' * 40:
         return changes([], full=True)
@@ -46,6 +48,20 @@ def select(event, head='HEAD'):
         base = subprocess.check_output(['git', 'merge-base', base, head], cwd=ROOT, text=True).strip()
     paths = subprocess.check_output(['git', 'diff', '--name-only', '-z', base, head], cwd=ROOT)
     return changes([os.fsdecode(name) for name in paths.split(b'\0') if name])
+
+
+def restore_event_base(event):
+    """Fetch a missing previous push object, including an overwritten tag."""
+    if os.environ.get('GITHUB_EVENT_NAME', '') != 'push':
+        return
+    base = event.get('before', '')
+    if not re.fullmatch(r'[0-9a-f]{40}', base) or base == '0' * 40:
+        return
+    present = subprocess.run(['git', 'cat-file', '-e', base + '^{commit}'], cwd=ROOT,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if present.returncode:
+        subprocess.run(['git', 'fetch', '--no-tags', 'origin', base], cwd=ROOT,
+                       check=True, timeout=180)
 
 
 def test_commands(build):
@@ -156,6 +172,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
     sub.add_parser('select')
+    sub.add_parser('restore-event-base')
     for name in ['plan', 'test']:
         item = sub.add_parser(name)
         item.add_argument('--source', type=Path, default=ROOT)
@@ -167,8 +184,11 @@ def main():
         if name == 'test':
             item.add_argument('--shard', type=int, required=True)
     args = parser.parse_args()
-    if args.command == 'select':
+    if args.command in {'select', 'restore-event-base'}:
         event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())
+        if args.command == 'restore-event-base':
+            restore_event_base(event)
+            return
         selected = select(event)
         if 'GITHUB_OUTPUT' in os.environ:
             with open(os.environ['GITHUB_OUTPUT'], 'a') as output:

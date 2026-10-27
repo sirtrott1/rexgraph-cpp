@@ -27,6 +27,8 @@ jobs:
     - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       with:
         fetch-depth: 0
+    - name: Restore the previous publication object
+      run: python3 tools/ci.py restore-event-base
     - name: Select changed components
       id: changes
       run: python3 tools/ci.py select

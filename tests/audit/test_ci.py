@@ -1,8 +1,11 @@
 """Exercise CI selection and complete test ownership, including a real CMake build."""
 import importlib.util
+import os
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -16,6 +19,7 @@ def load(name, path):
 
 ci = load('native_ci', ROOT / 'tools/ci.py')
 headers = load('native_headers', ROOT / 'tools/check_headers.py')
+repository = load('native_repository', ROOT / 'tools/check_public_repository.py')
 
 
 class Selection(unittest.TestCase):
@@ -47,6 +51,58 @@ class Selection(unittest.TestCase):
         self.assertTrue(ci.changes([], full=True)['code'])
         self.assertTrue(ci.changes([], full=True)['headers'])
         self.assertFalse(ci.changes([], full=True)['companions'])
+
+    def test_tag_push_runs_all_profiles_even_for_documentation_updates(self):
+        with patch.dict(os.environ, {'GITHUB_EVENT_NAME': 'push'}):
+            for before in ['0' * 40, 'a' * 40]:
+                with self.subTest(before=before):
+                    selected = ci.select({'ref': 'refs/tags/v0.3.0', 'before': before})
+                    self.assertEqual(selected, dict(code=True, headers=True, companions=False, full=True))
+
+    def test_missing_event_base_is_ignored_outside_valid_existing_pushes(self):
+        for kind, before in [('pull_request', 'a' * 40), ('push', '0' * 40),
+                             ('push', ''), ('push', 'invalid revision')]:
+            with self.subTest(kind=kind, before=before), \
+                    patch.dict(os.environ, {'GITHUB_EVENT_NAME': kind}), \
+                    patch.object(ci.subprocess, 'run') as run:
+                ci.restore_event_base({'before': before})
+                run.assert_not_called()
+
+    def test_replaced_annotated_tag_is_restored_in_a_cold_checkout(self):
+        with tempfile.TemporaryDirectory(prefix='rfc-ci-retag-') as directory:
+            root = Path(directory)
+            source = root / 'producer'
+            source.mkdir()
+
+            def git(path, *args):
+                return subprocess.check_output(['git', '-c', 'user.name=Repository Test',
+                    '-c', 'user.email=test@example.com', *args], cwd=path,
+                    stderr=subprocess.DEVNULL).decode().strip()
+
+            git(source, 'init', '-b', 'main')
+            (source / 'README.md').write_text('# Exact fields\n')
+            git(source, 'add', '--', 'README.md')
+            git(source, 'commit', '-m', 'docs: describe fields')
+            git(source, 'tag', '-a', 'v0.3.0', '-m', 'Exact fields')
+            old_tag = git(source, 'rev-parse', 'v0.3.0')
+            (source / 'README.md').write_text('# Exact fields\n\nRetain source identities.\n')
+            git(source, 'add', '--', 'README.md')
+            git(source, 'commit', '-m', 'docs: retain source identities')
+            current = git(source, 'rev-parse', 'HEAD')
+            git(source, 'tag', '-f', '-a', 'v0.3.0', '-m', 'Exact field sources')
+            clone = root / 'consumer'
+            git(root, 'clone', '--no-local', '--no-tags', str(source), str(clone))
+            event = {'before': old_tag, 'ref': 'refs/tags/v0.3.0', 'forced': True}
+            with patch.object(ci, 'ROOT', clone), patch.object(repository, 'ROOT', clone), \
+                    patch.dict(os.environ, {'GITHUB_EVENT_NAME': 'push'}):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    repository.history_commits(event=event, event_name='push')
+                ci.restore_event_base(event)
+                self.assertEqual(repository.history_commits(event=event, event_name='push'), [current])
+                self.assertEqual(list(repository.history_errors([current])), [])
+                with patch.object(ci.subprocess, 'run', wraps=subprocess.run) as run:
+                    ci.restore_event_base(event)
+                    self.assertEqual(run.call_count, 1)
 
     def test_optional_components_include_non_cpp_inputs(self):
         for path in ['extensions/rexlogic/cmake/RexLogicRFCHeaders.sha256',
