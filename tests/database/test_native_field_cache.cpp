@@ -252,5 +252,5 @@ void threads() {
 } // namespace
 int main(int argc,char** argv) {
     try {const bool oracle=argc==2 && std::string(argv[1])=="--oracle";positive(oracle);dependencies();policies_and_failure();random(oracle);if(!oracle)threads();std::cout<<"checks "<<checks<<'\n';return 0;}
-    catch(const std::exception& e){std::cerr<<"P3 cache: "<<e.what()<<'\n';return 1;}
+    catch(const std::exception& e){std::cerr<<"Native field cache: "<<e.what()<<'\n';return 1;}
 }

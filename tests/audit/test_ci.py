@@ -22,9 +22,9 @@ class Selection(unittest.TestCase):
     def test_documentation_avoids_compilation(self):
         self.assertFalse(ci.changes(['README.md', 'examples/native_gluing/README.md'])['code'])
 
-    def test_workflow_and_ci_tests_do_not_rebuild_math(self):
+    def test_workflow_and_ci_tests_keep_companions_separate(self):
         self.assertEqual(ci.changes(['.github/workflows/ci.yml', 'tools/ci.py', 'tests/audit/test_ci.py']),
-                         dict(code=False, headers=False, full=False))
+                         dict(code=False, headers=False, companions=False, full=False))
 
     def test_source_header_selects_complete_regressions_and_header_checks(self):
         selected = ci.changes(['include/rfc/field/metric.hpp'])
@@ -40,13 +40,56 @@ class Selection(unittest.TestCase):
         self.assertTrue(ci.changes(['tools/verify_lossless_reference.py'])['code'])
 
     def test_cmake_changes_select_both(self):
-        self.assertEqual(ci.changes(['cmake/RFCInstall.cmake']), dict(code=True, headers=True, full=False))
+        self.assertEqual(ci.changes(['cmake/RFCInstall.cmake']),
+                         dict(code=True, headers=True, companions=False, full=False))
 
     def test_manual_full_run_selects_every_profile(self):
-        self.assertTrue(all(ci.changes([], full=True).values()))
+        self.assertTrue(ci.changes([], full=True)['code'])
+        self.assertTrue(ci.changes([], full=True)['headers'])
+        self.assertFalse(ci.changes([], full=True)['companions'])
+
+    def test_optional_components_include_non_cpp_inputs(self):
+        for path in ['extensions/rexlogic/cmake/RexLogicRFCHeaders.sha256',
+                     'extensions/relational_temporal/test_reproduction.py',
+                     'extensions/relational_temporal/application/example.rex']:
+            with self.subTest(path=path):
+                self.assertFalse(ci.changes([path]).get('companions', False))
+
+    def test_core_changes_keep_private_companion_jobs_separate(self):
+        self.assertFalse(ci.changes(['include/rfc/storage/file_io.hpp']).get('companions', False))
+
+    def test_companion_documentation_avoids_compilation(self):
+        self.assertFalse(ci.changes(['extensions/rexlogic/README.md']).get('companions', False))
 
 
 class Partition(unittest.TestCase):
+    def test_companion_plan_discovers_and_executes_both_optional_components(self):
+        with tempfile.TemporaryDirectory(prefix='rfc-ci-companions-') as directory:
+            root = Path(directory)
+            source = root / 'source'
+            source.mkdir()
+            (source / 'main.cpp').write_text('int main() { return 0; }\n')
+            (source / 'CMakeLists.txt').write_text('''cmake_minimum_required(VERSION 3.24)
+project(companion_fixture LANGUAGES CXX)
+enable_testing()
+if(RFC_BUILD_TESTS)
+  add_executable(core main.cpp)
+  add_test(NAME core COMMAND core)
+endif()
+if(RFC_BUILD_RELATIONAL_TEMPORAL AND REXLOGIC_BUILD_TESTS AND REX_TEMPORAL_BUILD_TESTS)
+  foreach(component IN ITEMS rexlogic temporal)
+    add_executable(${component} main.cpp)
+    add_test(NAME ${component} COMMAND ${component})
+  endforeach()
+endif()
+''')
+            build = root / 'build'
+            plans = ci.make_plan(source, build, 2, companions=True)
+            self.assertEqual(sorted(t for plan in plans for t in plan['tests']), ['rexlogic', 'temporal'])
+            self.assertEqual(sorted(t for plan in plans for t in plan['targets']), ['rexlogic', 'temporal'])
+            for plan in plans:
+                ci.execute(build, plan)
+
     def test_shared_executables_have_one_owner(self):
         commands = {'a': ['/b/a'], 'b': ['python', '/b/a', '/b/b'], 'c': ['/b/b'], 'd': ['/b/c']}
         plans = ci.partition(commands, {'/b/a': 'a', '/b/b': 'b', '/b/c': 'c'}, 2)
@@ -85,12 +128,15 @@ add_library(faults SHARED main.cpp)
 add_test(NAME alpha COMMAND alpha)
 add_test(NAME wrapped COMMAND ${Python3_EXECUTABLE} -c "import subprocess,sys;sys.exit(subprocess.call(sys.argv[1:]))" $<TARGET_FILE:alpha>)
 add_test(NAME beta COMMAND beta)
+add_test(NAME z_path COMMAND ${CMAKE_COMMAND} -E env "PATH=$<TARGET_FILE_DIR:beta>:$ENV{PATH}" beta)
+set_tests_properties(z_path PROPERTIES REQUIRED_FILES "$<TARGET_FILE:beta>")
 add_test(NAME runtime COMMAND ${Python3_EXECUTABLE} -c "from pathlib import Path;import sys;assert Path(sys.argv[1]).is_file()" $<TARGET_FILE:faults>)
 ''')
             build = root / 'build'
             plans = ci.make_plan(source, build, 2)
-            self.assertEqual(sorted(t for p in plans for t in p['tests']), ['alpha', 'beta', 'runtime', 'wrapped'])
+            self.assertEqual(sorted(t for p in plans for t in p['tests']), ['alpha', 'beta', 'runtime', 'wrapped', 'z_path'])
             self.assertEqual(sorted(t for p in plans for t in p['targets']), ['alpha', 'beta', 'faults'])
+            self.assertIn('z_path', next(p for p in plans if 'beta' in p['tests'])['tests'])
             for plan in plans:
                 ci.execute(build, plan)
 

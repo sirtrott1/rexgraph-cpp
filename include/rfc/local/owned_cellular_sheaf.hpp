@@ -1,6 +1,7 @@
 #pragma once
 
 #include "rfc/local/cellular_sheaf.hpp"
+#include "rfc/core/owned_source.hpp"
 #include <memory>
 
 namespace rfc::local {
@@ -12,7 +13,7 @@ namespace rfc::local {
 // implicit identities remain implicit and unused stalk coordinates are metadata.
 class OwnedLinearCellularSheaf {
     struct State {
-        core::RelationalComplex source;
+        core::OwnedRelationalSource source_owner;
         LinearStalkBundle bundle;
         LinearCellularSheaf sheaf;
 
@@ -31,8 +32,11 @@ class OwnedLinearCellularSheaf {
         }
 
         explicit State(const LinearCellularSheaf& original)
-            : source(original.complex()), bundle(copy_bundle(source, original.stalks())),
-              sheaf(bundle) {
+            : State(core::OwnedRelationalSource(original.complex()), original) {}
+        State(core::OwnedRelationalSource owner, const LinearCellularSheaf& original)
+            : source_owner(std::move(owner)),
+              bundle(copy_bundle(source_owner.source(), original.stalks())), sheaf(bundle) {
+            const auto& source = source_owner.source();
             for (std::size_t k = 1; k < source.grade_count(); ++k) {
                 const core::Grade grade{static_cast<std::uint16_t>(k)};
                 for (std::size_t slot = 0; slot < source.grade(grade).incidence_count(); ++slot)
@@ -42,10 +46,24 @@ class OwnedLinearCellularSheaf {
         }
     };
     std::shared_ptr<const State> state_;
+    static std::shared_ptr<const State> share_checked(
+        core::OwnedRelationalSource owner, const LinearCellularSheaf& original) {
+        if (&owner.source() != &original.complex())
+            throw std::invalid_argument("sheaf declaration must use the shared source owner");
+        return std::make_shared<const State>(std::move(owner), original);
+    }
 
 public:
     explicit OwnedLinearCellularSheaf(const LinearCellularSheaf& original)
         : state_(std::make_shared<const State>(original)) {}
+    // Share only an actual source anchor, never an equal independently built source.
+    OwnedLinearCellularSheaf(core::OwnedRelationalSource owner,
+                             const LinearCellularSheaf& original)
+        : state_(share_checked(std::move(owner), original)) {}
+    [[nodiscard]] const core::OwnedRelationalSource& source_owner() const & noexcept {
+        return state_->source_owner;
+    }
+    const core::OwnedRelationalSource& source_owner() const && = delete;
     OwnedLinearCellularSheaf(const OwnedLinearCellularSheaf&) = default;
     OwnedLinearCellularSheaf& operator=(const OwnedLinearCellularSheaf&) = default;
     [[nodiscard]] const LinearCellularSheaf& sheaf() const & noexcept { return state_->sheaf; }

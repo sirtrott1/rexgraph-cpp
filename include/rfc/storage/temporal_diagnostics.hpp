@@ -8,7 +8,7 @@
 
 namespace rfc::storage {
 
-// A supplemental magnitude retains a declared q even while e=0. The Phase-02
+// A supplemental magnitude retains a declared q even while e=0. The temporal
 // source snapshot itself stores realized coefficients, so it cannot recover a
 // latent magnitude already discarded before this endpoint was declared.
 inline composite::CompositeCoefficient temporal_occurrence_coefficient_state(

@@ -32,6 +32,8 @@ struct RelationalFiniteSourceDeclaration {
 class RelationalFiniteSections;
 class PreparedRelationalFiniteSearch;
 struct RelationalFiniteSearchPreparation;
+class OwnedRelationalFinitePropagation;
+struct RelationalFinitePropagationResult;
 class OwnedRelationalFiniteSource {
     using System = local::FiniteConstraintSystem<std::uint64_t>;
     struct State {
@@ -140,6 +142,7 @@ private:
         return static_cast<std::size_t>(it - d.variables.begin());
     }
     friend class PreparedRelationalFiniteSearch;
+    friend class OwnedRelationalFinitePropagation;
     std::shared_ptr<const State> state_;
 };
 
@@ -165,13 +168,65 @@ public:
         const auto pin = source_.state_;
         return pin->system.prepared_global_section(index_, fixed, limits, stop);
     }
+    RelationalFinitePropagationResult propagate(
+        const OwnedRelationalFiniteSource::Assignment& fixed = {}, local::FiniteSearchLimits limits = {},
+        std::stop_token stop = {}) const;
 private:
     friend class OwnedRelationalFiniteSource;
+    friend class OwnedRelationalFinitePropagation;
     PreparedRelationalFiniteSearch(OwnedRelationalFiniteSource source, System::PreparedIndex index)
         : source_(std::move(source)), index_(std::move(index)) {}
     OwnedRelationalFiniteSource source_;
     System::PreparedIndex index_;
 };
+// Owns the original asset, compiled request and complete predecision domain
+// field. Local supports remain subject to every original correlated predicate.
+class OwnedRelationalFinitePropagation {
+    using System = local::FiniteConstraintSystem<std::uint64_t>;
+public:
+    const PreparedRelationalFiniteSearch& prepared() const & noexcept { return prepared_; }
+    const PreparedRelationalFiniteSearch& prepared() const && = delete;
+    const OwnedRelationalFiniteSource& source() const & noexcept { return prepared_.source(); }
+    const OwnedRelationalFiniteSource& source() const && = delete;
+    const local::BasicSection<std::vector<std::uint64_t>>& domains() const & noexcept {
+        return snapshot_.domains();
+    }
+    const local::BasicSection<std::vector<std::uint64_t>>& domains() const && = delete;
+    const OwnedRelationalFiniteSource::Assignment& fixed() const & noexcept { return snapshot_.fixed(); }
+    const OwnedRelationalFiniteSource::Assignment& fixed() const && = delete;
+    const local::FiniteSearchReceipt& propagation_work() const & noexcept { return snapshot_.propagation_work(); }
+    const local::FiniteSearchReceipt& propagation_work() const && = delete;
+    std::size_t retained_entries() const noexcept { return snapshot_.retained_entries(); }
+    bool same_owner(const OwnedRelationalFinitePropagation& other) const noexcept {
+        return prepared_.same_owner(other.prepared_) && snapshot_.same_snapshot(other.snapshot_);
+    }
+    [[nodiscard]] OwnedRelationalFiniteSource::BoundedSearchResult continue_global_section(
+        const OwnedRelationalFiniteSource::Assignment& fixed = {}, local::FiniteSearchLimits limits = {},
+        std::stop_token stop = {}) const {
+        const auto pin = prepared_.source_.state_;
+        return pin->system.continue_global_section(snapshot_, fixed, limits, stop);
+    }
+private:
+    friend class PreparedRelationalFiniteSearch;
+    OwnedRelationalFinitePropagation(PreparedRelationalFiniteSearch prepared, System::PropagationSnapshot snapshot)
+        : prepared_(std::move(prepared)), snapshot_(std::move(snapshot)) {}
+    PreparedRelationalFiniteSearch prepared_;
+    System::PropagationSnapshot snapshot_;
+};
+struct RelationalFinitePropagationResult {
+    local::FinitePropagationStatus status;
+    std::optional<OwnedRelationalFinitePropagation> snapshot;
+    local::FiniteSearchReceipt work;
+};
+inline RelationalFinitePropagationResult PreparedRelationalFiniteSearch::propagate(
+    const OwnedRelationalFiniteSource::Assignment& fixed, local::FiniteSearchLimits limits,
+    std::stop_token stop) const {
+    const auto pin = source_.state_;
+    auto result = pin->system.prepared_propagation(index_, fixed, limits, stop);
+    if (result.snapshot)
+        return {result.status, OwnedRelationalFinitePropagation(*this, std::move(*result.snapshot)), result.work};
+    return {result.status, std::nullopt, result.work};
+}
 struct RelationalFiniteSearchPreparation {
     local::FinitePreparationStatus status;
     std::optional<PreparedRelationalFiniteSearch> prepared;

@@ -14,8 +14,11 @@ ROOT = Path(__file__).resolve().parents[1]
 def changes(paths, full=False):
     native = full
     headers = full
+    companions = False
     for name in paths:
         path = Path(name)
+        if name.startswith(('extensions/rexlogic/', 'extensions/relational_temporal/')) and path.name != 'README.md':
+            continue
         if name.startswith(('include/', 'src/', 'cmake/')) or path.name == 'CMakeLists.txt':
             native = True
             headers = True
@@ -25,7 +28,7 @@ def changes(paths, full=False):
             native = True
         elif name.startswith('tools/verify_') and '_reference' in name:
             native = True
-    return dict(code=native, headers=headers, full=full)
+    return dict(code=native, headers=headers, companions=companions, full=full)
 
 
 def select(event, head='HEAD'):
@@ -46,6 +49,7 @@ def select(event, head='HEAD'):
 
 
 def test_commands(build):
+    """Collect command arguments and declared file dependencies for shard planning."""
     commands = {}
     for path in sorted(build.rglob('CTestTestfile.cmake')):
         for line in path.read_text().splitlines():
@@ -65,6 +69,13 @@ def test_commands(build):
         ['ctest', '--test-dir', str(build), '--show-only=json-v1'], text=True))
     if set(commands) != {test['name'] for test in listed['tests']}:
         raise ValueError('Generated commands do not cover the complete CTest inventory')
+    # A wrapper may invoke an artifact by basename through PATH rather than pass
+    # its absolute path. CTest's REQUIRED_FILES declares that dependency without
+    # changing how the actual command is invoked.
+    for test in listed['tests']:
+        for prop in test.get('properties', []):
+            if prop['name'] == 'REQUIRED_FILES':
+                commands[test['name']].extend(prop['value'])
     return commands
 
 
@@ -107,21 +118,29 @@ def partition(commands, artifacts, count):
     return shards
 
 
-def configure(source, build, launcher=None):
+def configure(source, build, launcher=None, companions=False):
     query = build / '.cmake/api/v1/query/codemodel-v2'
     query.parent.mkdir(parents=True, exist_ok=True)
     query.touch()
     args = ['cmake', '-S', str(source), '-B', str(build), '-G', 'Ninja',
-            '-DCMAKE_BUILD_TYPE=Release', '-DRFC_ENABLE_SQLITE_INTERPRETATION=ON',
-            '-DBUILD_TESTING=ON', '-DRFC_BUILD_TESTS=ON', '-DRFC_BUILD_APPS=ON',
-            '-DRFC_BUILD_LOCAL_TOOLS=ON', '-DRFC_BUILD_BENCHMARKS=ON', '-DRFC_BUILD_LEARNING=ON']
+            '-DCMAKE_BUILD_TYPE=Release', '-DBUILD_TESTING=ON']
+    if companions:
+        args += ['-DRFC_BUILD_TESTS=OFF', '-DRFC_BUILD_APPS=OFF', '-DRFC_BUILD_LOCAL_TOOLS=OFF',
+                 '-DRFC_BUILD_BENCHMARKS=OFF', '-DRFC_BUILD_LEARNING=OFF',
+                 '-DRFC_BUILD_REXLOGIC=ON', '-DRFC_BUILD_RELATIONAL_TEMPORAL=ON', '-DREXLOGIC_BUILD_TESTS=ON',
+                 '-DREXLOGIC_BUILD_CLI=ON', '-DREXLOGIC_BUILD_EXAMPLES=OFF',
+                 '-DREX_TEMPORAL_BUILD_TESTS=ON', '-DREX_TEMPORAL_BUILD_TOOLS=ON']
+    else:
+        args += ['-DRFC_ENABLE_SQLITE_INTERPRETATION=ON', '-DRFC_BUILD_TESTS=ON', '-DRFC_BUILD_APPS=ON',
+                 '-DRFC_BUILD_LOCAL_TOOLS=ON', '-DRFC_BUILD_BENCHMARKS=ON', '-DRFC_BUILD_LEARNING=ON',
+                 '-DRFC_BUILD_REXLOGIC=OFF', '-DRFC_BUILD_RELATIONAL_TEMPORAL=OFF']
     if launcher:
         args.append('-DCMAKE_CXX_COMPILER_LAUNCHER=' + launcher)
     subprocess.run(args, check=True)
 
 
-def make_plan(source, build, count, launcher=None):
-    configure(source, build, launcher)
+def make_plan(source, build, count, launcher=None, companions=False):
+    configure(source, build, launcher, companions)
     return partition(test_commands(build), artifact_targets(build), count)
 
 
@@ -144,6 +163,7 @@ def main():
         item.add_argument('--shards', type=int, default=6)
         item.add_argument('--output', type=Path)
         item.add_argument('--launcher')
+        item.add_argument('--companions', action='store_true', help='test RexLogic and temporal applications separately from the core')
         if name == 'test':
             item.add_argument('--shard', type=int, required=True)
     args = parser.parse_args()
@@ -156,7 +176,7 @@ def main():
         print(json.dumps(selected))
         return
     build = args.build.resolve()
-    plans = make_plan(args.source.resolve(), build, args.shards, args.launcher)
+    plans = make_plan(args.source.resolve(), build, args.shards, args.launcher, args.companions)
     if args.output:
         args.output.write_text(json.dumps(plans, indent=2) + '\n')
     print(json.dumps([dict(shard=i, tests=len(p['tests']), executables=len(p['targets'])) for i, p in enumerate(plans)]), flush=True)

@@ -60,6 +60,7 @@ class NativeFactoredAction;
 // An ephemeral derived field never becomes a stored source assertion. Every
 // result retains its actual stored inputs and immutable action owners.
 class NativeFieldValue {
+    friend class PreparedNativeFiniteSheafSections;
     struct State {
         NativeCarrier carrier;
         numeric::SparseRationalVector values;
@@ -72,6 +73,13 @@ class NativeFieldValue {
     explicit NativeFieldValue(State state):state_(std::make_shared<const State>(std::move(state))){}
     friend class NativeFactoredAction;
     friend class PreparedNativeTowerOperator;
+    friend class PreparedNativeKrylov;
+    friend class PreparedNativeCayleyOrbit;
+    friend class PreparedNativeLocalGluing;
+    friend class PreparedNativeInjectiveGluing;
+    friend class PreparedNativeFiniteCoverGluing;
+    friend class PreparedNativeColimitGluing;
+    friend class PreparedNativeSheafGluing;
 public:
     static NativeFieldValue stored(storage::PinnedNativeAccession pin) {
         if(pin.kind()!=storage::NativeAccessionKind::Field)throw std::invalid_argument("native field value requires stored Field pin");
@@ -141,7 +149,15 @@ class NativeFactoredAction {
     friend class PreparedNativeOperatorFamily;
     friend class PreparedNativeSourceGreenResponse;
     friend class PreparedNativeTowerOperator;
+    friend class PreparedNativeKrylov;
+    friend class PreparedNativeCayleyOrbit;
+    friend class PreparedNativeLocalGluing;
+    friend class PreparedNativeInjectiveGluing;
+    friend class PreparedNativeFiniteCoverGluing;
+    friend class PreparedNativeColimitGluing;
+    friend class PreparedNativeSheafGluing;
     friend class PreparedNativeMoments;
+    friend class PreparedNativeActionMoments;
     friend class PreparedNativeWordDefect;
     friend class PreparedNativeMultitimeObservations;
     friend class PreparedNativeMomentChange;
@@ -270,6 +286,13 @@ class PreparedNativeOperatorFamily {
     explicit PreparedNativeOperatorFamily(State state):state_(std::make_shared<const State>(std::move(state))){}
     friend class PreparedNativeSourceGreenResponse;
     friend class PreparedNativeTowerOperator;
+    friend class PreparedNativeKrylov;
+    friend class PreparedNativeCayleyOrbit;
+    friend class PreparedNativeLocalGluing;
+    friend class PreparedNativeInjectiveGluing;
+    friend class PreparedNativeFiniteCoverGluing;
+    friend class PreparedNativeColimitGluing;
+    friend class PreparedNativeSheafGluing;
     NativeFactoredAction action_with_guard(field::OperatorRequest op,const NativeActionAvailability& availability,
         const runtime::ExecutionLease& lease,numeric::ExactActionGuard& guard) const {
         const auto pin=state_;lease.check_cancelled();

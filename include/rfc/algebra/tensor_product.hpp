@@ -97,7 +97,7 @@ public:
         return boundary_apply_lazy_impl<true>(field, &counters);
     }
 
-    // ----- Explicit materialized coordinate realization -------------------
+    // Explicit materialized coordinate realization.
 
     [[nodiscard]] std::vector<Block> blocks(core::Grade total_grade) const {
         std::vector<Block> result;

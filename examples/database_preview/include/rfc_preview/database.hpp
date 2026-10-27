@@ -1,5 +1,5 @@
 #pragma once
-// Optional downstream database envelope over Phase 06. No RFC semantics change.
+// Optional downstream database envelope over native temporal storage. No RFC semantics change.
 #include "rfc/storage/native_series_codec.hpp"
 #include "rfc/storage/native_accession.hpp"
 #include <openssl/evp.h>

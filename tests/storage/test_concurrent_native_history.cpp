@@ -269,6 +269,6 @@ int main() {
     try {
         Temporary directory; index(); series(); paused(directory.path); errors(directory.path);
         reentry(directory.path / "reentry"); coupled(directory.path); stress(directory.path / "stress");
-        std::cout << checks << " P2 checks passed\n"; return 0;
-    } catch (const std::exception& e) { std::cerr << "P2 test: " << e.what() << '\n'; return 1; }
+        std::cout << checks << " concurrent history checks passed\n"; return 0;
+    } catch (const std::exception& e) { std::cerr << "Concurrent history test: " << e.what() << '\n'; return 1; }
 }

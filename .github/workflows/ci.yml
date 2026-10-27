@@ -37,10 +37,10 @@ jobs:
     - name: Check CI planning and public example catalog
       run: |
         python3 -m unittest discover -s tests/audit -p 'test_ci.py'
-        python3 -m unittest discover -s tests/audit -p 'test_public_catalog.py'
+        python3 -m unittest discover -s tests/audit -p 'test_public*.py'
         python3 tests/audit/test_dependency_guards.py
     - name: Check public source and history
-      run: python3 tools/check_public_repository.py --working-tree --history
+      run: python3 tools/check_public_repository.py --working-tree --history --event "$GITHUB_EVENT_PATH"
     - name: Verify complete test partition without compiling it
       run: python3 tools/ci.py plan --build "$RUNNER_TEMP/test-plan" --shards 6 --output "$RUNNER_TEMP/test-plan.json"
     - name: Check SDK installation and documentation

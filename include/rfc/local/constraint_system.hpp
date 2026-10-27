@@ -22,6 +22,7 @@ namespace rfc::local {
 // their original meaning. No partially explored branch is an unsat certificate.
 enum class FiniteSearchStatus { Satisfiable, Unsatisfiable, BudgetExceeded, Cancelled };
 enum class FinitePreparationStatus { Ready, BudgetExceeded, Cancelled };
+enum class FinitePropagationStatus { FixedPoint, Unsatisfiable, BudgetExceeded, Cancelled };
 struct FiniteSearchLimits {
     std::size_t max_variables{65536};
     std::size_t max_steps{1u << 22};
@@ -349,6 +350,44 @@ public:
         explicit PreparedIndex(std::shared_ptr<const PropagationIndexData> data) : data_(std::move(data)) {}
         std::shared_ptr<const PropagationIndexData> data_;
     };
+private:
+    struct PropagationSnapshotData {
+        PreparedIndex index;
+        std::vector<unsigned char> active;
+        std::vector<std::size_t> counts;
+        BasicSection<std::vector<Value>> domains;
+        Assignment fixed;
+        FiniteSearchReceipt propagation;
+        std::size_t retained_entries{};
+        explicit PropagationSnapshotData(PreparedIndex i) : index(std::move(i)) {}
+    };
+public:
+    // This field retains all original predicates through its prepared index;
+    // the remaining domains alone are not a Cartesian solution family.
+    // As for PreparedIndex, the local system borrows its source complex.
+    class PropagationSnapshot {
+    public:
+        const PreparedIndex& prepared_index() const & noexcept { return data_->index; }
+        const PreparedIndex& prepared_index() const && = delete;
+        const BasicSection<std::vector<Value>>& domains() const & noexcept { return data_->domains; }
+        const BasicSection<std::vector<Value>>& domains() const && = delete;
+        const Assignment& fixed() const & noexcept { return data_->fixed; }
+        const Assignment& fixed() const && = delete;
+        const FiniteSearchReceipt& propagation_work() const & noexcept { return data_->propagation; }
+        const FiniteSearchReceipt& propagation_work() const && = delete;
+        std::size_t retained_entries() const noexcept { return data_->retained_entries; }
+        bool same_snapshot(const PropagationSnapshot& other) const noexcept { return data_ == other.data_; }
+    private:
+        friend class FiniteConstraintSystem;
+        explicit PropagationSnapshot(std::shared_ptr<const PropagationSnapshotData> data)
+            : data_(std::move(data)) {}
+        std::shared_ptr<const PropagationSnapshotData> data_;
+    };
+    struct PropagationResult {
+        FinitePropagationStatus status;
+        std::optional<PropagationSnapshot> snapshot;
+        FiniteSearchReceipt work;
+    };
     struct PreparationResult {
         FinitePreparationStatus status;
         std::optional<PreparedIndex> prepared;
@@ -375,6 +414,29 @@ public:
     [[nodiscard]] BoundedSearchResult prepared_global_section(const PreparedIndex& index,
         const Assignment& fixed = {}, FiniteSearchLimits limits = {}, std::stop_token stop = {}) const {
         return propagated_section(fixed, limits, stop, index.data_->relations, index.data_.get());
+    }
+    [[nodiscard]] PropagationResult prepared_propagation(const PreparedIndex& index,
+        const Assignment& fixed = {}, FiniteSearchLimits limits = {}, std::stop_token stop = {}) const {
+        PropagationSnapshotData pending(index);
+        auto result = propagated_section(fixed, limits, stop, index.data_->relations,
+            index.data_.get(), nullptr, &pending);
+        if (result.status == FiniteSearchStatus::Satisfiable)
+            return {FinitePropagationStatus::FixedPoint,
+                PropagationSnapshot(std::make_shared<const PropagationSnapshotData>(std::move(pending))),
+                result.work};
+        if (result.status == FiniteSearchStatus::Unsatisfiable)
+            return {FinitePropagationStatus::Unsatisfiable, std::nullopt, result.work};
+        return {result.status == FiniteSearchStatus::Cancelled ? FinitePropagationStatus::Cancelled
+                : FinitePropagationStatus::BudgetExceeded, std::nullopt, result.work};
+    }
+    // Each continuation copies the retained fixed point into private scratch.
+    // Additional observations condition that field; they never change it.
+    // Receipts count new work only; prior propagation is retained separately.
+    [[nodiscard]] BoundedSearchResult continue_global_section(const PropagationSnapshot& snapshot,
+        const Assignment& fixed = {}, FiniteSearchLimits limits = {}, std::stop_token stop = {}) const {
+        const auto pin = snapshot.data_;
+        return propagated_section(fixed, limits, stop, pin->index.data_->relations,
+            pin->index.data_.get(), nullptr, nullptr, pin.get());
     }
 
     // Iterative depth-first search through the SAME retained domains and exact
@@ -483,7 +545,9 @@ private:
     [[nodiscard]] BoundedSearchResult propagated_section(const Assignment& fixed, FiniteSearchLimits limits,
         std::stop_token stop, const std::vector<core::RelationId>& distinct_relations,
         const PropagationIndexData* cached = nullptr,
-        std::shared_ptr<const PropagationIndexData>* capture = nullptr) const {
+        std::shared_ptr<const PropagationIndexData>* capture = nullptr,
+        PropagationSnapshotData* snapshot_capture = nullptr,
+        const PropagationSnapshotData* resume = nullptr) const {
         struct Interrupted { FiniteSearchStatus status; };
         struct Decision { std::size_t variable, next, mark; };
         FiniteSearchReceipt work;
@@ -585,6 +649,10 @@ private:
                     active[di] = 0; --counts[vi]; trail.emplace_back(vi, di); ++work.domain_reductions;
                 }
             };
+            if (resume) {
+                for (std::size_t vi = 0; vi < n; ++vi) { tick(); counts[vi] = resume->counts[vi]; }
+                for (std::size_t di = 0; di < total; ++di) { tick(); active[di] = resume->active[di]; }
+            }
             for (const auto& [cell, value] : fixed) {
                 tick(); const auto vi = position(cell); const auto& d = *values[vi];
                 std::optional<std::size_t> selected;
@@ -592,9 +660,13 @@ private:
                     tick(); if (d[k] == value) { selected = k; break; }
                 }
                 if (!selected) throw std::invalid_argument("propagated search fixed value is outside its native domain");
+                if (resume && !active[offsets[vi] + *selected]) {
+                    tick(); return {FiniteSearchStatus::Unsatisfiable, std::nullopt, work};
+                }
                 for (std::size_t k = 0; k < d.size(); ++k) {
                     tick(); if (k != *selected) remove(vi, offsets[vi] + k);
                 }
+                if (resume) adjacent(vi, queue_size);
             }
             if (!cached) {
                 building.compiled.reserve(m);
@@ -814,8 +886,31 @@ private:
                 }
                 return true;
             };
-            for (std::size_t ci = 0; ci < queue_size; ++ci) enqueue(ci);
+            if (!resume) for (std::size_t ci = 0; ci < queue_size; ++ci) enqueue(ci);
             if (!propagate()) return {FiniteSearchStatus::Unsatisfiable, std::nullopt, work};
+            if (snapshot_capture) {
+                const auto before = work.peak_entries;
+                admit(8); admit(total); admit(n); admit(n); admit(n);
+                admit(fixed.size()); admit(fixed.size());
+                for (const auto count : counts) admit(count);
+                snapshot_capture->active = active;
+                snapshot_capture->counts = counts;
+                snapshot_capture->fixed = fixed;
+                snapshot_capture->domains.reserve(n);
+                std::size_t assigned = 0;
+                for (std::size_t vi = 0; vi < n; ++vi) {
+                    tick(); std::vector<Value> remaining; remaining.reserve(counts[vi]);
+                    for (auto di = offsets[vi]; di < offsets[vi + 1]; ++di) {
+                        tick(); if (active[di]) remaining.push_back((*values[vi])[di - offsets[vi]]);
+                    }
+                    if (counts[vi] == 1) ++assigned;
+                    snapshot_capture->domains.emplace(variables[vi], std::move(remaining));
+                }
+                work.peak_assigned = assigned;
+                snapshot_capture->retained_entries = work.peak_entries - before;
+                tick(); snapshot_capture->propagation = work;
+                return {FiniteSearchStatus::Satisfiable, std::nullopt, work};
+            }
             bool descend = true;
             while (true) {
                 tick();

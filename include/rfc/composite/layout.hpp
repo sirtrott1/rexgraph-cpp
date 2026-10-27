@@ -10,11 +10,13 @@
 
 namespace rfc::composite {
 
-// A single explicit wire profile initially. Other profiles must be implemented,
-// not accepted as labels. Canonical bytes never contain host pointers or padding.
-enum class BooleanLayoutProfile : std::uint8_t { Lsb0OctetsV1 = 1 };
+// V1 remains the default. V2 changes only RationalTensor support encoding;
+// declarations and endpoint archives retain this explicit discriminator.
+// Canonical bytes never contain host pointers or padding.
+enum class BooleanLayoutProfile : std::uint8_t { Lsb0OctetsV1 = 1, Lsb0OctetsV2 = 2 };
 inline void validate_layout_profile(BooleanLayoutProfile profile) {
-    declaration_detail::require(profile == BooleanLayoutProfile::Lsb0OctetsV1 && CHAR_BIT == 8,
+    declaration_detail::require((profile == BooleanLayoutProfile::Lsb0OctetsV1 ||
+                                 profile == BooleanLayoutProfile::Lsb0OctetsV2) && CHAR_BIT == 8,
                                 "unsupported Boolean layout profile/host octet");
 }
 
@@ -64,7 +66,11 @@ inline bool declared_value_equal(const DeclaredValue& a, const DeclaredValue& b)
             if (x.domain() != y.domain() || x.support().count() != y.support().count() ||
                 x.values().nonzeros() != y.values().nonzeros()) return false;
             bool same = true;
-            x.support().for_each_active([&](auto i) { if (!y.support().contains(i)) same = false; });
+            // Equal full membership needs no logical-coordinate traversal. This
+            // includes full sparse/packed variants and the empty domain. Temporal
+            // recoding checks use this equality before classifying replacements.
+            if (x.support().count() != x.domain().logical_size())
+                x.support().for_each_active([&](auto i) { if (!y.support().contains(i)) same = false; });
             const auto& xs = x.values().entries(); const auto& ys = y.values().entries();
             for (std::size_t i = 0; i < xs.size(); ++i)
                 if (xs[i].index != ys[i].index || xs[i].value != ys[i].value) return false;
@@ -280,25 +286,31 @@ private:
             case DeclarationKind::RationalTensor: {
                 const auto* p = std::get_if<numeric::SparseRationalTensor>(&value.data);
                 require(p && p->domain() == DeclarationRegistry::tensor_domain(d), "tensor value domain/type");
-                nodes = machine::checked_size_add(nodes, machine::checked_size_add(p->support().count(), p->stored_nonzeros()));
+                const auto count = p->support().count();
+                const bool compact = profile_ == BooleanLayoutProfile::Lsb0OctetsV2;
+                // Canonicalize full support by membership, not its storage variant.
+                const bool symbolic_full = compact && count == p->domain().logical_size();
+                const auto records = symbolic_full ? 0 : count;
+                nodes = machine::checked_size_add(nodes, machine::checked_size_add(records, p->stored_nonzeros()));
                 budget(nodes, limits_.max_value_nodes, "tensor support/value work budget");
-                allocate(p->support().count(), sizeof(std::size_t));
+                allocate(records, sizeof(std::size_t));
                 allocate(p->stored_nonzeros(), sizeof(numeric::SparseRationalEntry));
-                bits = machine::checked_size_mul(varuint_bytes(p->support().count()), 8);
-                if (p->support().storage() == numeric::StructuralSupport::Storage::Full) {
-                    // Sum the legacy per-index varuint widths without enumerating
-                    // an implicit full domain. This preserves the existing codec
-                    // allocation/admission policy exactly; it does not encode it.
-                    const auto count = p->support().size();
-                    std::size_t index_bytes = count;
-                    for (std::size_t threshold = 128; threshold < count;) {
-                        index_bytes = machine::checked_size_add(index_bytes, count - threshold);
-                        if (threshold > std::numeric_limits<std::size_t>::max() / 128) break;
-                        threshold *= 128;
+                bits = compact ? 8 : 0; // V2 support tag, even for the empty domain.
+                if (!symbolic_full) {
+                    accumulate(machine::checked_size_mul(varuint_bytes(count), 8));
+                    if (p->support().storage() == numeric::StructuralSupport::Storage::Full) {
+                        // V1 still writes every index. Count its widths symbolically
+                        // without changing its historical allocation/admission policy.
+                        std::size_t index_bytes = count;
+                        for (std::size_t threshold = 128; threshold < count;) {
+                            index_bytes = machine::checked_size_add(index_bytes, count - threshold);
+                            if (threshold > std::numeric_limits<std::size_t>::max() / 128) break;
+                            threshold *= 128;
+                        }
+                        accumulate(machine::checked_size_mul(index_bytes, 8));
+                    } else {
+                        p->support().for_each_active([&](auto i) { accumulate(machine::checked_size_mul(varuint_bytes(i), 8)); });
                     }
-                    accumulate(machine::checked_size_mul(index_bytes, 8));
-                } else {
-                    p->support().for_each_active([&](auto i) { accumulate(machine::checked_size_mul(varuint_bytes(i), 8)); });
                 }
                 accumulate(machine::checked_size_mul(varuint_bytes(p->stored_nonzeros()), 8));
                 for (const auto& e : p->values().entries()) {

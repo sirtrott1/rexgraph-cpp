@@ -69,7 +69,7 @@ inline NativeAtlasManifest manifest(Reader& r){
 } // namespace rfc::storage::native_atlas_codec_detail
 
 namespace rfc::storage {
-// Standalone complete atlas snapshot, NOT a Phase-05 checkpoint/transaction
+// Standalone complete atlas snapshot, NOT a durable checkpoint or transaction
 // service. Each source occurs once as canonical RFCX + its existing RFCXE.
 // Only reference/manifold data follows: no product Cartesian array, copied
 // local bitplanes or equal-value identity joins.

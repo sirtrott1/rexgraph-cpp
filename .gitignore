@@ -59,7 +59,7 @@ __pycache__/
 !/tests/storage/fixtures/**/*.rfcx*
 /.DS_Store
 
-# Internal material belongs in the sibling internal repository
+# Excluded workspace and generated files
 /internal/
 /private/
 /handoff/
@@ -90,3 +90,7 @@ __pycache__/
 *.synctex.gz
 *.md
 !README.md
+
+# Local companion source links are outside the public repository.
+/extensions/rexlogic
+/extensions/relational_temporal

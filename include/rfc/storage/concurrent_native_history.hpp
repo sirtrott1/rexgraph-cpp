@@ -116,8 +116,8 @@ public:
         const auto observer = [&](DurableEvent event) {
             if (!replacing && stop.stop_requested()) throw NativeHistoryCancelled();
             if (event.stage == DurableStage::LivePublished) {
-                // P1 has validated and synced this complete state. No public
-                // callback receives mutable P1 access; this capture cannot allocate.
+                // The durable store has validated and synced this complete state. No public
+                // callback receives mutable store access; this capture cannot allocate.
                 const auto& durable = *state_->store->state_;
                 publication->series = durable.series;
                 publication->root = native_durable_detail::root(durable.current, durable.commit);
@@ -130,7 +130,7 @@ public:
         return state_->store->append(transaction, expected.root(), frames, observer);
     }
     // Retained readers stay available even if reopening fails. All writer/status
-    // calls require successful full P1 recovery before resuming.
+    // calls require successful full durable-store recovery before resuming.
     void recover() {
         state_->check_process(); concurrent_history_detail::WriterScope scope(state_.get());
         std::lock_guard lock(state_->writer);

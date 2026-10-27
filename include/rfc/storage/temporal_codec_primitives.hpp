@@ -316,7 +316,7 @@ inline TemporalTensor tensor_record(Reader& r) {
 inline void local(Writer& w, const LocalBlockDefinition& b) {
     w.u64(b.block_key); w.u8(static_cast<std::uint8_t>(b.kind));
     w.u64(b.cells.size()); for (const auto c : b.cells) cell(w, c);
-    // ADR 0035: only partial charts persist occurrence selections.
+    // Only partial charts persist occurrence selections.
     w.u64(b.kind == LocalBlockKind::PartialChart ? b.occurrences.size() : 0);
     if (b.kind == LocalBlockKind::PartialChart) for (const auto o : b.occurrences) occurrence(w, o);
     w.u64(b.payloads.size());

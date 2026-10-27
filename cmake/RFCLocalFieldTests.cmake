@@ -1,0 +1,133 @@
+# Additional native local-field, compact-codec and sparse-observation consumers.
+# Loaded only when the canonical native test suite is enabled.
+if(RFC_BUILD_LEARNING)
+  add_executable(rfc_transport_observation_profile_tests tests/learning/test_transport_observation_profiles.cpp)
+  target_link_libraries(rfc_transport_observation_profile_tests PRIVATE rfc::learning)
+  add_test(NAME rfc_transport_observation_profiles COMMAND rfc_transport_observation_profile_tests)
+endif()
+add_executable(rfc_prepared_relational_binary_tests tests/storage/test_prepared_relational_binary.cpp)
+target_link_libraries(rfc_prepared_relational_binary_tests PRIVATE rfc::storage Threads::Threads)
+add_test(NAME rfc_prepared_relational_binary COMMAND rfc_prepared_relational_binary_tests)
+add_executable(rfc_prepared_binary_lifecycle_tests tests/storage/test_prepared_binary_lifecycle.cpp)
+target_link_libraries(rfc_prepared_binary_lifecycle_tests PRIVATE rfc::storage)
+add_test(NAME rfc_prepared_binary_lifecycle COMMAND rfc_prepared_binary_lifecycle_tests)
+add_executable(rfc_exec1_golden_tests tests/storage/test_exec1_golden.cpp)
+target_link_libraries(rfc_exec1_golden_tests PRIVATE rfc::storage)
+target_compile_definitions(rfc_exec1_golden_tests PRIVATE RFC_EXEC1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/tests/storage/fixtures/exec1")
+add_test(NAME rfc_exec1_golden COMMAND rfc_exec1_golden_tests)
+add_executable(rfc_injective_local_gluing_tests tests/inference/test_injective_local_gluing.cpp)
+target_link_libraries(rfc_injective_local_gluing_tests PRIVATE rfc::inference)
+add_test(NAME rfc_injective_local_gluing COMMAND rfc_injective_local_gluing_tests)
+add_executable(rfc_finite_sheaf_sections_tests tests/inference/test_finite_sheaf_sections.cpp)
+target_link_libraries(rfc_finite_sheaf_sections_tests PRIVATE rfc::inference Threads::Threads)
+add_test(NAME rfc_finite_sheaf_sections COMMAND rfc_finite_sheaf_sections_tests)
+add_executable(rfc_finite_sheaf_lifecycle_tests tests/inference/test_finite_sheaf_lifecycle.cpp)
+target_link_libraries(rfc_finite_sheaf_lifecycle_tests PRIVATE rfc::inference Threads::Threads)
+add_test(NAME rfc_finite_sheaf_lifecycle COMMAND rfc_finite_sheaf_lifecycle_tests)
+add_executable(rfc_sheaf_cover_gluing_tests tests/inference/test_sheaf_cover_gluing.cpp)
+target_link_libraries(rfc_sheaf_cover_gluing_tests PRIVATE rfc::inference Threads::Threads)
+add_test(NAME rfc_sheaf_cover_gluing COMMAND rfc_sheaf_cover_gluing_tests)
+add_executable(rfc_sheaf_cover_lifecycle_tests tests/inference/test_sheaf_cover_lifecycle.cpp)
+target_link_libraries(rfc_sheaf_cover_lifecycle_tests PRIVATE rfc::inference Threads::Threads)
+add_test(NAME rfc_sheaf_cover_lifecycle COMMAND rfc_sheaf_cover_lifecycle_tests)
+add_executable(rfc_certified_colimit_tests tests/inference/test_certified_colimit.cpp)
+target_link_libraries(rfc_certified_colimit_tests PRIVATE rfc::inference Threads::Threads)
+add_test(NAME rfc_certified_colimit COMMAND rfc_certified_colimit_tests)
+add_executable(rfc_colimit_lifecycle_tests tests/inference/test_colimit_lifecycle.cpp)
+target_link_libraries(rfc_colimit_lifecycle_tests PRIVATE rfc::inference Threads::Threads)
+add_test(NAME rfc_colimit_lifecycle COMMAND rfc_colimit_lifecycle_tests)
+add_executable(rfc_finite_cover_gluing_tests tests/inference/test_finite_cover_gluing.cpp)
+target_link_libraries(rfc_finite_cover_gluing_tests PRIVATE rfc::inference)
+add_test(NAME rfc_finite_cover_gluing COMMAND rfc_finite_cover_gluing_tests)
+add_executable(rfc_finite_cover_lifecycle_tests tests/inference/test_finite_cover_lifecycle.cpp)
+target_link_libraries(rfc_finite_cover_lifecycle_tests PRIVATE rfc::inference)
+add_test(NAME rfc_finite_cover_lifecycle COMMAND rfc_finite_cover_lifecycle_tests)
+add_executable(rfc_injective_gluing_lifecycle_tests tests/inference/test_injective_gluing_lifecycle.cpp)
+target_link_libraries(rfc_injective_gluing_lifecycle_tests PRIVATE rfc::inference)
+add_test(NAME rfc_injective_gluing_lifecycle COMMAND rfc_injective_gluing_lifecycle_tests)
+add_executable(rfc_chart_local_gluing_tests tests/inference/test_chart_local_gluing.cpp)
+target_link_libraries(rfc_chart_local_gluing_tests PRIVATE rfc::inference Threads::Threads)
+add_test(NAME rfc_chart_local_gluing COMMAND rfc_chart_local_gluing_tests)
+add_executable(rfc_chart_gluing_lifecycle_tests tests/inference/test_chart_gluing_lifecycle.cpp)
+target_link_libraries(rfc_chart_gluing_lifecycle_tests PRIVATE rfc::inference)
+add_test(NAME rfc_chart_gluing_lifecycle COMMAND rfc_chart_gluing_lifecycle_tests)
+add_executable(rfc_local_field_gluing_tests tests/inference/test_local_field_gluing.cpp)
+target_link_libraries(rfc_local_field_gluing_tests PRIVATE rfc::inference Threads::Threads)
+add_test(NAME rfc_local_field_gluing COMMAND rfc_local_field_gluing_tests)
+add_executable(rfc_local_gluing_lifecycle_tests tests/inference/test_local_gluing_lifecycle.cpp)
+target_link_libraries(rfc_local_gluing_lifecycle_tests PRIVATE rfc::inference)
+add_test(NAME rfc_local_gluing_lifecycle COMMAND rfc_local_gluing_lifecycle_tests)
+add_executable(rfc_native_action_moment_tests tests/inference/test_native_action_moments.cpp)
+target_link_libraries(rfc_native_action_moment_tests PRIVATE rfc::inference Threads::Threads)
+add_test(NAME rfc_native_action_moments COMMAND rfc_native_action_moment_tests)
+add_executable(rfc_action_moment_lifecycle_tests tests/inference/test_action_moment_lifecycle.cpp)
+target_link_libraries(rfc_action_moment_lifecycle_tests PRIVATE rfc::inference Threads::Threads)
+add_test(NAME rfc_action_moment_lifecycle COMMAND rfc_action_moment_lifecycle_tests)
+add_executable(rfc_symbolic_recoding_tests tests/storage/test_symbolic_recoding.cpp)
+target_link_libraries(rfc_symbolic_recoding_tests PRIVATE rfc::storage)
+add_test(NAME rfc_symbolic_recoding COMMAND rfc_symbolic_recoding_tests)
+add_executable(rfc_symbolic_recode_field_tests tests/storage/test_symbolic_recode_field.cpp)
+target_link_libraries(rfc_symbolic_recode_field_tests PRIVATE rfc::storage)
+add_test(NAME rfc_symbolic_recode_field COMMAND rfc_symbolic_recode_field_tests)
+add_executable(rfc_recode_golden_tests tests/storage/test_recode_golden.cpp)
+target_link_libraries(rfc_recode_golden_tests PRIVATE rfc::storage)
+target_compile_definitions(rfc_recode_golden_tests PRIVATE RFC_RECODE1_PROFILE_AWARE
+    RFC_RECODE1_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/tests/storage/fixtures/recode1")
+add_test(NAME rfc_recode_golden COMMAND rfc_recode_golden_tests)
+add_executable(rfc_compact_declared_tensor_tests tests/storage/test_compact_declared_tensor.cpp)
+target_link_libraries(rfc_compact_declared_tensor_tests PRIVATE rfc::storage)
+target_compile_definitions(rfc_compact_declared_tensor_tests PRIVATE
+    RFC_FORMAT1_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/storage/fixtures/format1-v1")
+add_test(NAME rfc_compact_declared_tensor COMMAND rfc_compact_declared_tensor_tests)
+add_executable(rfc_compact_field_profile_tests tests/storage/test_compact_field_profile.cpp)
+target_link_libraries(rfc_compact_field_profile_tests PRIVATE rfc::storage)
+add_test(NAME rfc_compact_field_profile COMMAND rfc_compact_field_profile_tests)
+if(RFC_BUILD_LEARNING)
+  add_executable(rfc_sparse_transport_learning_tests tests/learning/test_sparse_transport_learning.cpp)
+  target_link_libraries(rfc_sparse_transport_learning_tests PRIVATE rfc::learning Threads::Threads)
+  add_test(NAME rfc_sparse_transport_learning COMMAND rfc_sparse_transport_learning_tests)
+endif()
+if(RFC_BUILD_LEARNING)
+  add_executable(rfc_sparse_transport_storage_tests tests/learning/test_sparse_transport_storage.cpp)
+  target_link_libraries(rfc_sparse_transport_storage_tests PRIVATE rfc::learning Threads::Threads)
+  add_test(NAME rfc_sparse_transport_storage COMMAND rfc_sparse_transport_storage_tests)
+endif()
+add_executable(rfc_declared_local_field_tests tests/storage/test_declared_local_field.cpp)
+target_link_libraries(rfc_declared_local_field_tests PRIVATE rfc::storage)
+add_test(NAME rfc_declared_local_field COMMAND rfc_declared_local_field_tests)
+add_executable(rfc_shared_source_tests tests/local/test_shared_source_ownership.cpp)
+target_link_libraries(rfc_shared_source_tests PRIVATE rfc::rfc)
+add_test(NAME rfc_shared_source_ownership COMMAND rfc_shared_source_tests)
+foreach(_rfc_local_test IN ITEMS
+  rfc_prepared_relational_binary
+  rfc_prepared_binary_lifecycle
+  rfc_exec1_golden
+  rfc_injective_local_gluing
+  rfc_finite_sheaf_sections
+  rfc_finite_sheaf_lifecycle
+  rfc_sheaf_cover_gluing
+  rfc_sheaf_cover_lifecycle
+  rfc_certified_colimit
+  rfc_colimit_lifecycle
+  rfc_finite_cover_gluing
+  rfc_finite_cover_lifecycle
+  rfc_injective_gluing_lifecycle
+  rfc_chart_local_gluing
+  rfc_chart_gluing_lifecycle
+  rfc_local_field_gluing
+  rfc_local_gluing_lifecycle
+  rfc_native_action_moments
+  rfc_action_moment_lifecycle
+  rfc_symbolic_recoding
+  rfc_symbolic_recode_field
+  rfc_recode_golden
+  rfc_compact_declared_tensor
+  rfc_compact_field_profile
+  rfc_sparse_transport_learning
+  rfc_sparse_transport_storage
+  rfc_declared_local_field
+  rfc_shared_source_ownership)
+  if(TEST ${_rfc_local_test})
+    set_tests_properties(${_rfc_local_test} PROPERTIES TIMEOUT 180)
+  endif()
+endforeach()

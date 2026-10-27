@@ -409,7 +409,7 @@ inline LocalExactTensorPayload read_payload(std::span<const std::byte> bytes, st
 
 } // namespace local_rfcx_detail
 
-// Phase-2 writer intentionally stores local selection/index metadata separately
+// The local-block writer intentionally stores local selection/index metadata separately
 // from the RFCX source arrays. Local blocks therefore refer to one physical copy
 // of the stable source data instead of duplicating bitplanes, lattice lanes, and
 // occurrence fibers.

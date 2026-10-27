@@ -30,7 +30,7 @@ one immutable exact copy of its fixed field input, shared read only by execution
 support, declared coordinates/maps, repeated and inactive occurrences remain owned.
 The operation admits the existing one positive grade rational final field action;
 packed providers, metrics, solvers and models retain their existing execution paths.
-P3 cache evaluation remains serial.
+Prepared cache evaluation remains serial.
 
 Copies of a prepared operation share workspace identity. A workspace is movable,
 operation bound, retains its complete analysis/source, and is atomically exclusive; concurrent or recursive reuse rejects.

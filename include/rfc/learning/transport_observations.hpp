@@ -5,6 +5,7 @@
 #include <optional>
 #include <set>
 #include <tuple>
+#include "rfc/numeric/sparse_vector.hpp"
 #include <variant>
 
 namespace rfc::learning {
@@ -12,6 +13,14 @@ struct TransportCoordinate { std::size_t occurrence{}, row{}, column{}; };
 struct TransportObservation {
     numeric::RationalVector input, target;
     std::vector<std::size_t> observed;
+};
+// A supplied TOTAL sparse input; omitted numerical entries mean exact zero.
+// Only listed target coordinates are observed. An explicit zero is a constraint;
+// an absent target is not. Coordinates belong to the model's original stalks.
+struct SparseTransportTarget { std::size_t cell{}, axis{}; numeric::Rational value{0}; };
+struct SparseTransportObservation {
+    numeric::SparseRationalVector input;
+    std::vector<SparseTransportTarget> targets;
 };
 enum class TransportObservationDomain : std::uint8_t { LowerStalk, OriginalOccurrenceImage };
 struct TransportMappedObservation {
@@ -241,6 +250,91 @@ public:
         }
         return out;
     }
+    // Selected-coordinate assembly shares the parameterization and fixed realized
+    // maps of the dense API, but allocates no whole-stalk input/target/mask array.
+    TransportObservationSystem assemble_sparse(
+        std::span<const SparseTransportObservation> samples, Guard& guard) const {
+        const auto add=machine::checked_size_add;
+        const auto mul=machine::checked_size_mul;
+        guard.dimension(samples.size());
+        std::size_t rows{}, input_entries{};
+        for (const auto& sample:samples) {
+            guard.step();
+            if (sample.input.size()!=upper_.back())
+                throw std::invalid_argument("complete original sparse input carrier required");
+            rows=add(rows,sample.targets.size());
+            input_entries=add(input_entries,add(mul(sample.input.nonzeros(),2),mul(sample.targets.size(),3)));
+            workspace(input_entries,guard);
+            guard.sparse_vector(sample.input);
+        }
+        guard.dimension(rows);
+        const auto n=parameter_count();
+        TransportObservationSystem out{M(rows,n),M(rows,add(n,1)),{}, {}};
+        workspace(add(input_entries,mul(rows,8)),guard);
+        out.target.reserve(rows); out.constraints.reserve(rows);
+        const auto& arena=owner_.fibers().complex().grade(grade_);
+        std::size_t offset{};
+        for (std::size_t sample_index=0;sample_index<samples.size();++sample_index) {
+            const auto& sample=samples[sample_index];
+            std::map<std::size_t,std::size_t> selected;
+            V fixed(sample.targets.size(),Q{0});
+            const auto admit=[&] {
+                workspace(add(input_entries,add(mul(rows,8),add(out.design.nonzeros(),out.augmented.nonzeros()))),guard);
+            };
+            std::optional<std::pair<std::size_t,std::size_t>> previous;
+            for (std::size_t i=0;i<sample.targets.size();++i) {
+                guard.step(); const auto& t=sample.targets[i];
+                if (t.cell>=lower_.size()-1 || t.axis>=lower_[t.cell+1]-lower_[t.cell])
+                    throw std::invalid_argument("observed coordinate outside original lower stalk");
+                const auto key=std::pair{t.cell,t.axis};
+                if (previous && key<=*previous)
+                    throw std::invalid_argument("sparse target coordinates must be ordered and distinct");
+                previous=key;
+                guard.value(t.value);
+                selected.emplace(add(lower_[t.cell],t.axis),i);
+                out.constraints.push_back({sample_index,t.cell,t.axis});
+            }
+            const auto value=[&](std::size_t index)->Q {
+                // Charge the actual binary-search comparisons, independent of extent.
+                const auto& entries=sample.input.entries(); std::size_t lo=0,hi=entries.size();
+                while (lo<hi) {guard.step();const auto mid=lo+(hi-lo)/2;
+                    if(entries[mid].index<index)lo=mid+1;else hi=mid;}
+                return lo<entries.size() && entries[lo].index==index ? entries[lo].value : Q{0};
+            };
+            for (std::size_t p=0;p<arena.incidence_count();++p) {
+                guard.step(); const auto& map=*owner_.fibers().transport_override(grade_,p);
+                for (const auto& [key,q]:map.entries()) {
+                    guard.step(); const auto at=selected.find(add(lower_[arena.lower_index[p]],key.first));
+                    if (at==selected.end())continue;
+                    const Q x=value(add(upper_[arena.upper_index[p]],key.second));
+                    if (x!=0)fixed[at->second]=guard.add(fixed[at->second],guard.mul(q,x));
+                }
+            }
+            const auto direction=[&](std::size_t slot,std::size_t parameter,const Q& weight) {
+                guard.step(); const auto& c=variables_[slot];
+                const auto at=selected.find(add(lower_[arena.lower_index[c.occurrence]],c.row));
+                if(at==selected.end() || coefficients_[c.occurrence]==0)return;
+                const Q x=value(add(upper_[arena.upper_index[c.occurrence]],c.column));
+                if(x==0)return;
+                Q q=guard.mul(coefficients_[c.occurrence],x);
+                if(basis_)q=guard.mul(weight,q);
+                const auto row=add(offset,at->second);
+                // Admit potential new entries before inserting either copy.
+                workspace(add(input_entries,add(mul(rows,8),add(2,add(out.design.nonzeros(),out.augmented.nonzeros())))),guard);
+                q=guard.add(out.design.get(row,parameter),q);
+                out.design.set(row,parameter,q);out.augmented.set(row,parameter,q);admit();
+            };
+            if(basis_)for(const auto& [key,q]:basis_->entries())direction(key.first,key.second,q);
+            else for(std::size_t i=0;i<variables_.size();++i)direction(i,i,Q{1});
+            for(std::size_t i=0;i<sample.targets.size();++i) {
+                guard.step();const Q q=guard.sub(numeric::canonical_rational(sample.targets[i].value),fixed[i]);
+                out.target.push_back(q);out.augmented.set(add(offset,i),n,q);admit();
+            }
+            offset=add(offset,sample.targets.size());
+        }
+        return out;
+    }
+
     TransportObservationSystem assemble_mapped(const std::vector<TransportMappedObservation>& observations, Guard& guard) const {
         guard.dimension(observations.size()); std::size_t count{}, retained{};
         for (const auto& o : observations) {

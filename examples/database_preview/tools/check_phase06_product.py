@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Run the original integrated product and round-trip both complete histories.
-No new mathematical fixture replaces the original Phase 06 application.
+The retained mathematical fixture is used without replacement.
 """
 from __future__ import annotations
 import argparse

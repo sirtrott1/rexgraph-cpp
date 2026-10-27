@@ -215,7 +215,7 @@ inline TemporalSourceLayoutProgram recode_declared_program(const TemporalDeclara
     const auto a=temporal_declaration_detail::keyed(base.source_layouts);
     const auto b=temporal_declaration_detail::keyed(target.source_layouts);
     require(a.contains(old.layout) && b.contains(target_layout), "program recoding layout absent");
-    const composite::DeclarationRecoding recoding(base.registry,target.registry,maps,target.resource_limits);
+    const composite::DeclarationRecoding recoding(base.registry,target.registry,maps,target.resource_limits,{base.profile,target.profile});
     require(recoding.target_id(a.at(old.layout)->type)==b.at(target_layout)->type,"program type correspondence mismatch");
     const auto& from=base.registry.at(a.at(old.layout)->type);
     const auto& to=target.registry.at(b.at(target_layout)->type);
@@ -261,7 +261,7 @@ inline void validate_temporal_declaration_transition(const std::optional<Tempora
         if (old.declaration.id == b.declaration.id)
             require(old.declaration == b.declaration, "immutable branch declaration redefined");
     require(base->namespace_key == next.namespace_key, "declaration namespace change requires detach/attach");
-    composite::DeclarationRecoding recoding(base->registry,next.registry,update.maps,next.resource_limits);
+    composite::DeclarationRecoding recoding(base->registry,next.registry,update.maps,next.resource_limits,{base->profile,next.profile});
     const auto old_values = keyed(base->values), next_values = keyed(next.values);
     std::set<std::uint64_t> replaced;
     for (auto key : update.replaced_values)
@@ -284,7 +284,7 @@ inline TemporalDeclarationUpdate make_temporal_declaration_update(const std::opt
                     "changed declaration DAG requires explicit correspondence");
             out.maps = composite::identity_declaration_maps(base->registry);
         }
-        const composite::DeclarationRecoding recoding(base->registry,out.target->registry,out.maps,out.target->resource_limits);
+        const composite::DeclarationRecoding recoding(base->registry,out.target->registry,out.maps,out.target->resource_limits,{base->profile,out.target->profile});
         const auto old_values = keyed(base->values);
         for (const auto& v : out.target->values) {
             if (!old_values.contains(v.key)) continue;

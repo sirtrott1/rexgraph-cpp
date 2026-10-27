@@ -3,6 +3,7 @@
 #include <mutex>
 #include <variant>
 #include <atomic>
+#include <type_traits>
 
 namespace rfc::learning {
 struct TransportEvidenceUpdate {
@@ -24,6 +25,8 @@ class PreparedTransportEvidence {
         std::shared_ptr<const V> fixed_target;
         using Observation=std::variant<TransportObservation,TransportColumnObservation,TransportMappedObservation>;
         std::vector<Observation> history;
+        std::vector<SparseTransportObservation> sparse_history;
+        std::size_t sample_count() const { return add(history.size(),sparse_history.size()); }
         std::shared_ptr<const PreparedColumnTransportObservations> columns;
         mutable std::once_flag materialization;
         mutable std::vector<TransportObservation> whole_fields;
@@ -59,7 +62,7 @@ class PreparedTransportEvidence {
             if(requested.dimension!=limits.dimension || requested.entries!=limits.entries ||
                     requested.steps!=limits.steps || requested.integer_bits!=limits.integer_bits)
                 throw std::invalid_argument("transport evidence append requires its original action limits");
-            guard.dimension(add(model->parameter_count(),1));guard.dimension(history.size());
+            guard.dimension(add(model->parameter_count(),1));guard.dimension(sample_count());
             guard.matrix(system.design);guard.matrix(system.augmented);guard.vector(system.target);
             workspace(guard);
         }
@@ -97,9 +100,14 @@ class PreparedTransportEvidence {
 
             const auto start=guard.steps();guard.step();parent.admit(guard);
             if(suffix.empty()) throw std::invalid_argument("nonempty original observation suffix required");
-            guard.dimension(add(parent.history.size(),suffix.size()));
+            if constexpr(std::is_same_v<ObservationType,SparseTransportObservation>) {
+                if(!parent.history.empty()) throw std::invalid_argument("non-sparse evidence requires explicit conversion before sparse append");
+            } else if(!parent.sparse_history.empty()) {
+                throw std::invalid_argument("sparse evidence requires explicit conversion before field append");
+            }
+            guard.dimension(add(parent.sample_count(),suffix.size()));
             guard.entries(add(machine::checked_size_mul(parent.retained(),2),parent.materialized_entries.load()));
-            history=parent.history;columns=parent.columns;system=parent.system;rows=parent.rows;observation_rows=parent.observation_rows;
+            sparse_history=parent.sparse_history;history=parent.history;columns=parent.columns;system=parent.system;rows=parent.rows;observation_rows=parent.observation_rows;
             observation_row_entries=parent.observation_row_entries;fixed_rank=parent.fixed_rank;
             input_entries=parent.input_entries;row_entries=parent.row_entries;history_steps=parent.history_steps;
             initial_steps=parent.initial_steps;
@@ -114,7 +122,7 @@ class PreparedTransportEvidence {
             for(const auto& observation:suffix) append(observation,guard);
             finish(guard);copied_entries=0;
             if(replay_steps()>limits.steps)throw std::length_error("complete transport evidence replay exceeds step admission");
-            update={parent.history.size(),suffix.size(),guard.steps()-start};
+            update={parent.sample_count(),suffix.size(),guard.steps()-start};
         }
         void change(Row& row,std::size_t column,Q value,Guard& guard,std::size_t scratch,std::size_t& retained_rows) {
             const auto found=row.find(column);
@@ -168,7 +176,11 @@ class PreparedTransportEvidence {
             const auto start=guard.steps();
             TransportObservationSystem block;
             std::size_t entries{};
-            if constexpr(std::is_same_v<ObservationType,TransportColumnObservation>) {
+            if constexpr(std::is_same_v<ObservationType,SparseTransportObservation>) {
+                block=model->assemble_sparse(std::span<const SparseTransportObservation>(&observation,1),guard);
+                entries=add(machine::checked_size_mul(observation.input.nonzeros(),2),
+                    machine::checked_size_mul(observation.targets.size(),3));
+            } else if constexpr(std::is_same_v<ObservationType,TransportColumnObservation>) {
                 block=columns->assemble({observation},guard);entries=columns->observation_entries(observation);
             } else if constexpr(std::is_same_v<ObservationType,TransportMappedObservation>) {
                 block=model->assemble_mapped(std::vector<TransportMappedObservation>{observation},guard);
@@ -178,7 +190,7 @@ class PreparedTransportEvidence {
                 entries=add(observation.input.size(),add(observation.target.size(),observation.observed.size()));
             }
             const auto offset=system.design.rows(),count=add(offset,block.design.rows()),n=model->parameter_count();
-            guard.dimension(count);guard.dimension(add(history.size(),1));
+            guard.dimension(count);guard.dimension(add(sample_count(),1));
             input_entries=add(input_entries,entries);
             workspace(guard,add(block.design.nonzeros(),block.augmented.nonzeros()));
             M design(count,n),augmented(count,add(n,1));
@@ -198,7 +210,7 @@ class PreparedTransportEvidence {
             }
             for(const auto& value:block.target){guard.step();system.target.push_back(value);workspace(guard);}
             for(const auto& constraint:block.constraints) {
-                guard.step();system.constraints.push_back({history.size(),constraint.cell,constraint.axis,constraint.domain});workspace(guard);
+                guard.step();system.constraints.push_back({sample_count(),constraint.cell,constraint.axis,constraint.domain});workspace(guard);
             }
             auto next=block.augmented.entries().begin();
             for(std::size_t i=0;i<block.augmented.rows();++i) {
@@ -209,7 +221,9 @@ class PreparedTransportEvidence {
                 if(fixed_equations)insert(row,guard,true,row.size());
                 insert(std::move(row),guard);
             }
-            history.emplace_back(observation);workspace(guard);
+            if constexpr(std::is_same_v<ObservationType,SparseTransportObservation>) sparse_history.push_back(observation);
+            else history.emplace_back(observation);
+            workspace(guard);
             history_steps=add(history_steps,guard.steps()-start);
         }
         void finish(Guard& guard) {
@@ -242,6 +256,7 @@ class PreparedTransportEvidence {
         }
         const std::vector<TransportObservation>& materialize(Guard& guard) const {
             guard.step();
+            if(!sparse_history.empty()) throw std::invalid_argument("sparse coordinate history cannot be exposed as dense field history");
             for(const auto& record:history) if(std::holds_alternative<TransportMappedObservation>(record))
                 throw std::invalid_argument("mapped occurrence history cannot be materialized as lower-stalk observations");
             std::size_t complete{};
@@ -268,7 +283,7 @@ class PreparedTransportEvidence {
             return whole_fields;
         }
         std::size_t replay_steps() const {
-            return history.empty()?initial_steps:add(initial_steps,add(1,add(history_steps,family_steps)));
+            return sample_count()==0?initial_steps:add(initial_steps,add(1,add(history_steps,family_steps)));
         }
     };
     explicit PreparedTransportEvidence(std::shared_ptr<const State> state):state_(std::move(state)){}
@@ -293,7 +308,15 @@ public:
     PreparedTransportEvidence append_fields(const std::vector<TransportFieldObservation>& suffix,Guard& guard) const {
         return PreparedTransportEvidence(std::make_shared<const State>(*state_,suffix,guard));
     }
-    const auto& original_observations() const & {return state_->history;}
+    const auto& original_observations() const & {
+        if(!state_->sparse_history.empty()) throw std::invalid_argument("sparse coordinate history requires sparse_observations");
+        return state_->history;
+    }
+    PreparedTransportEvidence append_sparse(const std::vector<SparseTransportObservation>& suffix,Guard& guard) const {
+        return PreparedTransportEvidence(std::make_shared<const State>(*state_,suffix,guard));
+    }
+    const std::vector<SparseTransportObservation>& sparse_observations() const & {return state_->sparse_history;}
+    const std::vector<SparseTransportObservation>& sparse_observations() const &&=delete;
     const auto& original_observations() const &&=delete;
     const PreparedTransportObservations& model() const & {return *state_->model;}
     const std::vector<TransportObservation>& observations() const & {
@@ -301,9 +324,10 @@ public:
     }
     const std::vector<TransportObservation>& observations(Guard& guard) const & {return state_->materialize(guard);}
     std::size_t materialized_field_entries() const noexcept {return state_->materialized_entries.load();}
-    std::size_t observation_count() const noexcept {return state_->history.size();}
+    std::size_t observation_count() const noexcept {return state_->sample_count();}
     // Read an original stalk without constructing the surrounding field.
     V input_stalk(std::size_t sample,std::size_t cell,Guard& guard) const {
+        if(!state_->sparse_history.empty()) throw std::invalid_argument("sparse coordinate observations require their explicit sparse interface");
         guard.step();const auto& model=*state_->model;
         const auto& fibers=model.owner().fibers();
         if(sample>=state_->history.size() || cell>=fibers.complex().grade(model.grade()).cell_count())
@@ -328,6 +352,7 @@ public:
         return out;
     }
     std::vector<std::size_t> active_input_stalks(std::size_t sample,Guard& guard) const {
+        if(!state_->sparse_history.empty()) throw std::invalid_argument("sparse coordinate observations require their explicit sparse interface");
         guard.step();if(sample>=state_->history.size())throw std::invalid_argument("original observation required");
         std::vector<std::size_t> out;const auto& record=state_->history[sample];
         if(const auto* dense=std::get_if<TransportObservation>(&record)) {
@@ -348,6 +373,7 @@ public:
         return out;
     }
     bool observed_stalk(std::size_t sample,std::size_t cell,Guard& guard) const {
+        if(!state_->sparse_history.empty()) throw std::invalid_argument("sparse coordinate observations require their explicit sparse interface");
         guard.step();const auto lower=core::Grade{static_cast<std::uint16_t>(state_->model->grade().value-1)};
         if(sample>=state_->history.size() || cell>=state_->model->owner().fibers().complex().grade(lower).cell_count())
             throw std::invalid_argument("original observation and boundary stalk required");

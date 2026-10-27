@@ -1023,6 +1023,17 @@ public:
         return core::RelationalComplexBuilder(signature_, semantic_scale_).freeze_retained(std::move(arenas));
     }
 
+    // Bounded preparation can require the retained canonical lanes directly.
+    // It must not enter the legacy assertion-reconstruction fallback, whose
+    // normalization may have a different allocation/bit-growth contract.
+    [[nodiscard]] core::RelationalComplex materialize_canonical() const {
+        validate_occurrence_identities();
+        auto arenas = decode_retained_arenas();
+        if (!canonical_retained_lanes(arenas))
+            throw std::invalid_argument("canonical RFCX retained lanes required");
+        return core::RelationalComplexBuilder(signature_, semantic_scale_).freeze_retained(std::move(arenas));
+    }
+
 private:
     [[nodiscard]] std::vector<core::GradeArena> decode_retained_arenas() const {
         std::vector<core::GradeArena> arenas;

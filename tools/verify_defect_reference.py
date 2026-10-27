@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Independent exact Fraction checks of Phase 04 exported matrices and work counts.
+"""Independent exact Fraction checks of exported defect matrices and work counts.
 
 This checker does not import RFC code, use GMP, or rely on floating point. Native
 wire reconstruction is tested by the C++ suites; this script checks the exported

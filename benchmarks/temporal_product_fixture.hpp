@@ -1,6 +1,6 @@
 #pragma once
 
-// Phase 06 deterministic retained-source workload. This is a benchmark fixture,
+// Deterministic retained-source workload. This is a benchmark fixture,
 // not a new mathematical representation or a production persistence format.
 #include "rfc/storage/native_series_codec.hpp"
 #include "rfc/storage/native_defects.hpp"

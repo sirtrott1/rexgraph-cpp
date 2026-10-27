@@ -204,6 +204,10 @@ class PreparedGradedTransportFit {
         :started_(guard.steps()),fixed_(parent.fixed_),evidence_(parent.evidence_.append_fields(suffix,guard)) {
         update_.chain_reused=true;retain(guard);
     }
+    PreparedGradedTransportFit(const PreparedGradedTransportFit& parent,const std::vector<SparseTransportObservation>& suffix,Guard& guard)
+        :started_(guard.steps()),fixed_(parent.fixed_),evidence_(parent.evidence_.append_sparse(suffix,guard)) {
+        update_.chain_reused=true;retain(guard);
+    }
 public:
     PreparedGradedTransportFit(PreparedTransportObservations observations,std::vector<TransportObservation> samples,Guard& guard)
         :started_(guard.steps()),fixed_(std::make_shared<const Fixed>(std::move(observations),guard)),evidence_(prepare(*fixed_,samples,guard)) {
@@ -216,6 +220,11 @@ public:
     PreparedGradedTransportFit append_fields(const std::vector<TransportFieldObservation>& suffix,Guard& guard) const {
         guard.entries(mul(retained_,2));return PreparedGradedTransportFit(*this,suffix,guard);
     }
+    PreparedGradedTransportFit append_sparse(const std::vector<SparseTransportObservation>& suffix,Guard& guard) const {
+        guard.entries(mul(retained_,2));return PreparedGradedTransportFit(*this,suffix,guard);
+    }
+    const std::vector<SparseTransportObservation>& sparse_observations() const & {return evidence_.sparse_observations();}
+    const std::vector<SparseTransportObservation>& sparse_observations() const &&=delete;
     const PreparedTransportObservations& model() const & {return fixed_->observations_;}
     const std::vector<TransportObservation>& observations() const & {return evidence_.observations();}
     const TransportObservationSystem& evidence() const & {return evidence_.system();}

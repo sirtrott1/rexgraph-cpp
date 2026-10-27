@@ -225,5 +225,5 @@ void threads() {
 } // namespace
 int main(int argc,char** argv) {
     try {const bool oracle=argc==2 && std::string(argv[1])=="--oracle";positive(oracle);random(oracle);if(!oracle){failures();threads();}std::cout<<"checks "<<checks<<'\n';return 0;}
-    catch(const std::exception& e){std::cerr<<"P4 parallel field: "<<e.what()<<'\n';return 1;}
+    catch(const std::exception& e){std::cerr<<"Parallel field: "<<e.what()<<'\n';return 1;}
 }

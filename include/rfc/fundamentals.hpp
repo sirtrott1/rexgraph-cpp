@@ -42,6 +42,7 @@
 #include "rfc/core/occurrence.hpp"
 #include "rfc/core/grade_arena.hpp"
 #include "rfc/core/relational_complex.hpp"
+#include "rfc/core/owned_source.hpp"
 #include "rfc/core/builder.hpp"
 #include "rfc/core/axioms.hpp"
 #include "rfc/core/attachment_update.hpp"

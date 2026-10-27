@@ -1,6 +1,7 @@
 #pragma once
 
 #include "rfc/local/sheaf.hpp"
+#include "rfc/core/owned_source.hpp"
 #include <memory>
 
 namespace rfc::local {
@@ -8,10 +9,13 @@ namespace rfc::local {
 // keeps that owner; equal dimensions or values never identify different owners.
 class OwnedLinearFiberSystem {
     struct State {
-        core::RelationalComplex complex;
+        core::OwnedRelationalSource source_owner;
         LinearRelationalFiberSystem fibers;
         explicit State(const LinearRelationalFiberSystem& source)
-            :complex(source.complex()),fibers(make_bundle(complex,source)) {
+            : State(core::OwnedRelationalSource(source.complex()), source) {}
+        State(core::OwnedRelationalSource owner, const LinearRelationalFiberSystem& source)
+            : source_owner(std::move(owner)), fibers(make_bundle(source_owner.source(),source)) {
+            const auto& complex = source_owner.source();
             for(std::size_t k=1;k<complex.grade_count();++k) {
                 const auto grade=core::Grade{static_cast<std::uint16_t>(k)};
                 for(std::size_t slot=0;slot<complex.grade(grade).incidence_count();++slot)
@@ -33,10 +37,25 @@ public:
     OwnedLinearFiberSystem(const OwnedLinearFiberSystem&)=default;
     OwnedLinearFiberSystem& operator=(const OwnedLinearFiberSystem&)=default;
     explicit OwnedLinearFiberSystem(const LinearRelationalFiberSystem& source):state_(std::make_shared<const State>(source)){}
+    // The borrowed declaration must already refer to this exact frozen source.
+    // Only the maps/dimensions are snapshotted here; the source is shared.
+    OwnedLinearFiberSystem(core::OwnedRelationalSource owner,
+                           const LinearRelationalFiberSystem& source)
+        : state_(share_checked(std::move(owner), source)) {}
+    [[nodiscard]] const core::OwnedRelationalSource& source_owner() const & noexcept {
+        return state_->source_owner;
+    }
+    const core::OwnedRelationalSource& source_owner() const && = delete;
     const LinearRelationalFiberSystem& fibers() const & { return state_->fibers; }
     const LinearRelationalFiberSystem& fibers() const &&=delete;
     bool same_owner(const OwnedLinearFiberSystem& other) const noexcept { return state_==other.state_; }
 private:
+    static std::shared_ptr<const State> share_checked(
+        core::OwnedRelationalSource owner, const LinearRelationalFiberSystem& source) {
+        if (&owner.source() != &source.complex())
+            throw std::invalid_argument("fiber declaration must use the shared source owner");
+        return std::make_shared<const State>(std::move(owner), source);
+    }
     std::shared_ptr<const State> state_;
 };
 class OwnedLinearSection {

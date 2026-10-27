@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Independent Fraction oracle for the published Phase 06 fan/history fixture.
+"""Independent Fraction oracle for the retained fan and temporal history fixture.
 
 Validates every exported occurrence-pair product, exact moments, work counters,
 and complete outer-series framing. Embedded RFCX/RFCXE/RFCXT grammars are opaque

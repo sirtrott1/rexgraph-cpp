@@ -2,7 +2,13 @@
 """Check tracked public files and, optionally, reachable Git history."""
 from pathlib import Path, PurePosixPath
 import argparse
+import ast
+import io
+import json
+import os
+import re
 import subprocess
+import tokenize
 
 ROOT = Path(__file__).resolve().parents[1]
 PRIVATE = {"internal", "private", "handoff", "paper", "papers", "research",
@@ -14,6 +20,132 @@ GENERATED = {".o", ".obj", ".a", ".lib", ".so", ".dylib", ".dll", ".exe",
              ".blg", ".fls", ".fdb_latexmk", ".tgz", ".7z"}
 SOURCE_HTML = {"examples/temporal_dynamics/index.html",
                "examples/temporal_relations/index.html"}
+ATTRIBUTION = re.compile(r"(?im)^.*(?:co[- ]authored[- ]by|generated[- ]by).*"
+                         r"(?:cod[e]x|chat[g]pt|open[a]i).*$")
+WORKSPACE_LINK = re.compile(r"(?:/home/[A-Za-z0-9_.-]+/|\.\./(?:\.\./)*(?:internal|private|handoff)/|"
+                            r"documentation/[A-Z][A-Z_]+\.(?:txt|json)|reference[/]software/)")
+PROCESS_LABEL = re.compile(r"\b(?:C(?:0[1-9]|1[0-6])|E0?[1-3]|B\d{1,2}[.-][A-Za-z0-9.-]+|"
+                           r"(?:GLUE|MOMENT|EXEC|RECODE|FORMAT|LEARN|REPAIR|EDIT)-\d+[a-z]?|"
+                           r"P\d+(?:\.\d+)+|ADR\s+\d+|[Pp]hase[- ]+\d+|[Bb]atch\s+\d+)\b")
+STYLE = re.compile(r"\b(?:leverage[sd]?|leveraging|delve[sd]?|delving|game[- ]chang(?:er|ing)|"
+                   r"cutting[- ]edge|world[- ]class|best[- ]in[- ]class|revolutionary|groundbreaking|"
+                   r"seamless(?:ly)?|supercharge[sd]?|synerg(?:y|ies)|transformative|"
+                   r"next[- ]generation|state[- ]of[- ]the[- ]art|robust(?:ly)?|powerful|"
+                   r"unlock(?:s|ed|ing)?|empower(?:s|ed|ing)?|foster(?:s|ed|ing)?)\b", re.I)
+DIVIDER = re.compile(r"(?m)^\s*(?:(?://|#|\*)\s*)?[-=_*]{5,}\s*$")
+
+
+def prose(rel, text):
+    path = PurePosixPath(rel)
+    if path.name == 'README.md':
+        return re.sub(r'```[^\n]*\n[\s\S]*?```', '', text)
+    if path.suffix in {'.cpp', '.hpp', '.h', '.c', '.comp'}:
+        tokens = re.finditer(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|//[^\n]*|/\*[\s\S]*?\*/', text)
+        return '\n'.join(m[0] for m in tokens if m[0].startswith(('//', '/*')))
+    if path.suffix == '.py':
+        try:
+            comments = [t.string for t in tokenize.generate_tokens(io.StringIO(text).readline)
+                        if t.type == tokenize.COMMENT]
+            docstrings = [n.value.value for n in ast.walk(ast.parse(text))
+                          if isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)
+                          and isinstance(n.value.value, str)]
+            return '\n'.join(comments + docstrings)
+        except (SyntaxError, tokenize.TokenError, IndentationError):
+            return ''
+    if path.name == 'CMakeLists.txt' or path.suffix in {'.cmake', '.sh', '.yml'}:
+        return '\n'.join(line for line in text.splitlines() if line.lstrip().startswith('#'))
+    return ''
+
+
+def content_reasons(rel, data):
+    text = data.decode('utf-8', errors='replace')
+    errors = []
+    if ATTRIBUTION.search(text):
+        errors.append('automated co-author or generation attribution')
+    if WORKSPACE_LINK.search(text):
+        errors.append('workspace-specific path or document reference')
+    public_prose = prose(rel, text)
+    for pattern, why in [(PROCESS_LABEL, 'implementation tracking label in prose'),
+                         (STYLE, 'promotional or vague wording'), (DIVIDER, 'decorative section divider')]:
+        if pattern.search(public_prose):
+            errors.append(why)
+    return errors
+
+
+def message_reasons(message):
+    errors = content_reasons('README.md', message.encode())
+    if re.search(r'\b(?:[Rr]elease [ABC]|[CE] workflows|private Python tests)\b', message):
+        errors.append('development record reference in commit message')
+    return errors
+
+
+def history_commits(base=None, event=None, event_name=None):
+    if event is not None:
+        kind = event_name if event_name is not None else os.environ.get('GITHUB_EVENT_NAME', '')
+        if kind in {'schedule', 'workflow_dispatch'}:
+            return [subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip()]
+        candidate = event.get('pull_request', {}).get('base', {}).get('sha') or event.get('before', '')
+        if re.fullmatch(r'[0-9a-f]{40}', candidate) and candidate != '0' * 40:
+            base = candidate
+            if 'pull_request' in event:
+                base = subprocess.check_output(['git', '-C', str(ROOT), 'merge-base', base, 'HEAD'], text=True).strip()
+        else:
+            default = event.get('repository', {}).get('default_branch')
+            ref = event.get('ref', '')
+            if default and ref.startswith(('refs/heads/', 'refs/tags/')) and ref != 'refs/heads/' + default:
+                base = subprocess.check_output(['git', '-C', str(ROOT), 'merge-base',
+                                                'refs/remotes/origin/' + default, 'HEAD'], text=True).strip()
+            else:
+                return subprocess.check_output(['git', '-C', str(ROOT), 'rev-list', '--reverse', 'HEAD'], text=True).splitlines()
+    if base is not None:
+        resolved = subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', '--verify', '--end-of-options',
+                                            base + '^{commit}'], text=True).strip()
+        ancestor = subprocess.run(['git', '-C', str(ROOT), 'merge-base', '--is-ancestor', resolved, 'HEAD'])
+        if ancestor.returncode:
+            raise ValueError('History base must be an ancestor of HEAD')
+        return subprocess.check_output(['git', '-C', str(ROOT), 'rev-list', '--reverse', resolved + '..HEAD'], text=True).splitlines()
+    return subprocess.check_output(['git', '-C', str(ROOT), 'rev-list', '--all'], text=True).splitlines()
+
+
+def history_errors(commits):
+    seen = set()
+    with subprocess.Popen(['git', '-C', str(ROOT), 'cat-file', '--batch'],
+                          stdin=subprocess.PIPE, stdout=subprocess.PIPE) as reader:
+        for version in commits:
+            entries = subprocess.check_output(['git', '-C', str(ROOT), 'ls-tree', '-rz', version])
+            for entry in entries.split(b'\0'):
+                if not entry:
+                    continue
+                metadata, rel = entry.split(b'\t', 1)
+                rel = rel.decode()
+                if why := reason(rel):
+                    yield f'{version}: {rel}: {why}'
+                blob = metadata.split()[2]
+                key = (rel, blob)
+                if key in seen:
+                    continue
+                seen.add(key)
+                reader.stdin.write(blob + b'\n')
+                reader.stdin.flush()
+                header = reader.stdout.readline().split()
+                if len(header) != 3 or header[1] != b'blob':
+                    raise ValueError('Expected a Git blob while checking history')
+                data = reader.stdout.read(int(header[2]))
+                if reader.stdout.read(1) != b'\n':
+                    raise ValueError('Incomplete Git blob response')
+                for why in content_reasons(rel, data):
+                    yield f'{version}: {rel}: {why}'
+            metadata, message = subprocess.check_output(['git', '-C', str(ROOT), 'show', '-s',
+                '--format=%an%n%ae%n%cn%n%ce%x00%B', version]).decode().split('\0', 1)
+            identities = metadata.splitlines()
+            names = '\n'.join(identities[i] for i in (0, 2))
+            if re.search(r'(?im)^(?:cod[e]x|chat[g]pt|open[a]i)(?:$|[ -](?:agent|bot)\b)', names):
+                yield f'{version}: automated attribution in commit metadata'
+            for why in message_reasons(message):
+                yield f'{version}: {why}'
+        reader.stdin.close()
+        if reader.wait():
+            raise ValueError('Git history reader failed')
 
 
 def paths(*args):
@@ -23,6 +155,8 @@ def paths(*args):
 
 def reason(rel):
     path = PurePosixPath(rel)
+    if any(rel == root or rel.startswith(root + "/") for root in ("extensions/rexlogic", "extensions/relational_temporal")):
+        return "separately distributed companion source"
     if path.suffix.lower() == ".md" and path.name != "README.md":
         return "Markdown must be a canonical README.md"
     if any(part in PRIVATE for part in path.parts[:-1]):
@@ -43,22 +177,34 @@ def reason(rel):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--history", action="store_true", help="also check every locally reachable commit")
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument('--base', help='with --history, check only commits added after this ancestor')
+    scope.add_argument('--event', type=Path,
+                       help='with --history, check commits introduced by a GitHub event; scheduled runs check HEAD')
     parser.add_argument("--working-tree", action="store_true",
                         help="also check untracked files admitted by Git ignores")
     args = parser.parse_args()
+    if (args.base or args.event) and not args.history:
+        parser.error('--base and --event require --history')
     inventories = [("index", paths("ls-files", "-z"))]
     if args.working_tree:
         inventories.append(("working tree", paths("ls-files", "--others", "--exclude-standard", "-z")))
-    if args.history:
-        commits = subprocess.check_output(["git", "-C", str(ROOT), "rev-list", "--all"]).decode().splitlines()
-        inventories.extend((commit, paths("ls-tree", "-rz", "--name-only", commit)) for commit in commits)
     errors = []
     for version, files in inventories:
         errors.extend(f"{version}: {rel}: {why}" for rel in files if (why := reason(rel)))
+        for rel in files:
+            path = ROOT / rel
+            if path.is_file():
+                errors.extend(f'{rel}: {why}' for why in content_reasons(rel, path.read_bytes()))
+    commits = []
+    if args.history:
+        event = json.loads(args.event.read_text()) if args.event else None
+        commits = history_commits(base=args.base, event=event)
+        errors.extend(history_errors(commits))
     if errors:
         print("\n".join(errors))
         return 1
-    historical = len(inventories) - 1 - int(args.working_tree)
+    historical = len(commits)
     untracked = len(inventories[1][1]) if args.working_tree else 0
     print(f"Public repository check passed: {len(inventories[0][1])} tracked files, "
           f"{untracked} untracked files, {historical} historical commits checked")

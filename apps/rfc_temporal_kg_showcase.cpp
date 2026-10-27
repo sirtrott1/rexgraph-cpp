@@ -577,7 +577,6 @@ int main(int argc, char** argv) {
         }
 
         std::cout << "RFC TEMPORAL KG SHOWCASE\n";
-        std::cout << "========================\n\n";
         std::cout << "1) Canonical relational memory\n";
         std::cout << "   entities=" << entities_list.size() << " retained_fact_relations=" << facts.size()
                   << " exact_records=" << retained_records << " predicate_types=" << predicates.size() << "\n";

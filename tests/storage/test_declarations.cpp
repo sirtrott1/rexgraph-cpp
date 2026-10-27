@@ -136,7 +136,7 @@ void graph_tests() {
     DeclarationRegistry deep(ds);check(deep.depth(id(64))==64,"declared depth");
     ds.push_back(Declaration::optional(id(65),id(64)));
     rejects([&]{ DeclarationRegistry bad(ds); }, "deep graph accepted");
-    rejects([&]{ CompiledLayout bad(root.declarations(),root.root(),static_cast<BooleanLayoutProfile>(2)); }, "unsupported profile");
+    rejects([&]{ CompiledLayout bad(root.declarations(),root.root(),static_cast<BooleanLayoutProfile>(3)); }, "unsupported profile");
     auto renamed = Declaration::boolean(id(1,2));
     DeclarationRegistry versions({Declaration::boolean(id(1)),renamed});
     check(versions.definitions().size()==2,"versions collapsed");

@@ -17,6 +17,7 @@ class NativeBilinearForm {
     std::shared_ptr<const State> state_;
     explicit NativeBilinearForm(State state):state_(std::make_shared<const State>(std::move(state))){}
     friend class PreparedNativeMoments;
+    friend class PreparedNativeActionMoments;
     friend class PreparedNativeEnsemble;
     friend class PreparedNativeMomentChange;
     void validate(numeric::ExactActionGuard& guard) const {

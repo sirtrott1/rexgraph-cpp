@@ -132,8 +132,14 @@ template<class Output> inline void put_value(Output& out, const CompiledLayout& 
         }
         case DeclarationKind::RationalTensor: {
             const auto& v = std::get<numeric::SparseRationalTensor>(value.data);
-            put_var(out, v.support().count());
-            v.support().for_each_active([&](auto i){ put_var(out, i); });
+            const auto count = v.support().count();
+            const bool compact = layout.profile() == composite::BooleanLayoutProfile::Lsb0OctetsV2;
+            const bool full = compact && count == v.domain().logical_size();
+            if (compact) out.put(full ? 1 : 0, 8);
+            if (!full) {
+                put_var(out, count);
+                v.support().for_each_active([&](auto i){ put_var(out, i); });
+            }
             put_var(out, v.stored_nonzeros());
             for (const auto& e : v.values().entries()) { put_var(out, e.index); put_rational(out, e.value); }
             break;
@@ -189,14 +195,21 @@ inline DeclaredValue get_value(machine::BitReader& in, const CompiledLayout& lay
         }
         case DeclarationKind::RationalTensor: {
             const auto domain = composite::DeclarationRegistry::tensor_domain(d);
-            const auto count = get_size(in);
-            require(count <= domain.logical_size() && count <= in.remaining()/8, "encoded tensor support count");
-            use.work(count); use.allocate<std::size_t>(count);
-            std::vector<std::size_t> indices; indices.reserve(count);
-            for (std::size_t i = 0; i < count; ++i) {
-                const auto index = get_size(in);
-                require(index < domain.logical_size() && (indices.empty() || indices.back() < index), "unordered/invalid tensor support");
-                indices.push_back(index);
+            const bool compact = layout.profile() == composite::BooleanLayoutProfile::Lsb0OctetsV2;
+            const auto tag = compact ? in.get(8) : 0;
+            require(tag <= 1, "reserved tensor support tag");
+            const bool full = tag == 1;
+            const auto count = full ? domain.logical_size() : get_size(in);
+            std::vector<std::size_t> indices;
+            if (!full) {
+                require(count <= domain.logical_size() && count <= in.remaining()/8, "encoded tensor support count");
+                require(!compact || count < domain.logical_size(), "noncanonical full tensor support");
+                use.work(count); use.allocate<std::size_t>(count); indices.reserve(count);
+                for (std::size_t i = 0; i < count; ++i) {
+                    const auto index = get_size(in);
+                    require(index < domain.logical_size() && (indices.empty() || indices.back() < index), "unordered/invalid tensor support");
+                    indices.push_back(index);
+                }
             }
             const auto nz = get_size(in);
             require(nz <= count && nz <= in.remaining()/33, "encoded tensor nonzero count");
@@ -204,12 +217,13 @@ inline DeclaredValue get_value(machine::BitReader& in, const CompiledLayout& lay
             std::vector<numeric::SparseRationalEntry> entries; entries.reserve(nz);
             for (std::size_t i = 0; i < nz; ++i) {
                 const auto index = get_size(in);
-                require(std::binary_search(indices.begin(), indices.end(), index) &&
+                require(index < domain.logical_size() && (full || std::binary_search(indices.begin(), indices.end(), index)) &&
                         (entries.empty() || entries.back().index < index), "invalid tensor nonzero support/order");
                 auto q = get_rational(in, use); require(q != 0, "explicit tensor numerical zero");
                 entries.push_back({index, std::move(q)});
             }
-            auto support = numeric::StructuralSupport::sparse(domain.logical_size(), std::move(indices));
+            auto support = full ? numeric::StructuralSupport::full(domain.logical_size())
+                                : numeric::StructuralSupport::sparse(domain.logical_size(), std::move(indices));
             auto values = numeric::SparseRationalVector(domain.logical_size(), std::move(entries));
             return DeclaredValue::tensor(numeric::SparseRationalTensor(domain, std::move(support), std::move(values)));
         }

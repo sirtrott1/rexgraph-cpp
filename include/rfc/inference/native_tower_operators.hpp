@@ -13,6 +13,7 @@ struct NativeTowerField {
 };
 struct NativeComplexTowerField {NativeTowerField real,imaginary;};
 class PreparedNativeTowerOperator {
+    friend class PreparedNativeCayleyOrbit;
     struct State {
         PreparedNativeOperatorFamily family;
         NativeTowerOperatorKind kind;
@@ -104,14 +105,18 @@ public:
             .plus(input.grades[k].scaled(-1,guard),guard).plus(d.grades[k].scaled(guard.mul(2,pin->t),guard),guard),"native-rational-anti-dirac-cayley-v1",guard));
         return out;
     }
-    NativeComplexTowerField execute(NativeComplexTowerField input,const NativeActionAvailability& availability,
-                            const runtime::ExecutionLease& lease=runtime::ExecutionLease{}) const {
+private:
+    NativeComplexTowerField execute_with_guard(NativeComplexTowerField input,const NativeActionAvailability& availability,
+        const runtime::ExecutionLease& lease,numeric::ExactActionGuard& guard) const {
         const auto pin=state_;validate(input.real);validate(input.imaginary);lease.check_cancelled();
         if(pin->kind!=NativeTowerOperatorKind::DiracCayley)throw std::invalid_argument("complex native tower requires Dirac Cayley profile");
         auto selected=pins(input.real);for(const auto& p:pins(input.imaginary))native_action_detail::append_pin(selected,p);
         for(const auto& p:selected)native_action_detail::available(p,availability);
         runtime::admit_execution({selected.size()+input.real.grades.size()*2,0,0,0,0},lease.policy());
-        numeric::ExactActionGuard guard(native_action_detail::limits(lease,selected,pin->family.dimension_limit()),[&lease]{lease.check_cancelled();});
+        const auto admitted=native_action_detail::limits(lease,selected,pin->family.dimension_limit());
+        if(guard.limits().dimension>admitted.dimension || guard.limits().steps>admitted.steps ||
+           guard.limits().entries>admitted.entries || guard.limits().integer_bits>admitted.integer_bits)
+            throw std::invalid_argument("shared tower guard exceeds current operand or host limits");
         pin->family.numeric_family().validate_source(guard);
         guard.value(pin->t);for(const auto* part:{&input.real,&input.imaginary})for(const auto& grade:part->grades)guard.sparse_vector(grade.sparse_values());
         if(pin->t==0){native_action_detail::append_owner(input.real.operator_owners,pin);native_action_detail::append_owner(input.imaginary.operator_owners,pin);
@@ -128,6 +133,23 @@ public:
                 .plus(dre.grades[k].scaled(guard.mul(2,pin->t),guard),guard),"native-Qi-dirac-cayley-v1",guard));
         }
         return out;
+    }
+    NativeTowerField zero_tower(numeric::ExactActionGuard& guard) const {
+        NativeTowerField out;const auto count=state_->family.tower().publication().endpoint()->source.grade_count();
+        for(std::size_t k=0;k<count;++k){
+            const auto carrier=state_->family.carrier(core::Grade{static_cast<std::uint16_t>(k)});
+            guard.step();guard.dimension(carrier.size());
+            out.grades.push_back(NativeFieldValue({carrier,numeric::SparseRationalVector(carrier.size()),{},state_->family.publications(),{state_},{"native-source-zero-v1"}}));
+        }
+        return out;
+    }
+public:
+    NativeComplexTowerField execute(NativeComplexTowerField input,const NativeActionAvailability& availability,
+                            const runtime::ExecutionLease& lease=runtime::ExecutionLease{}) const {
+        validate(input.real);validate(input.imaginary);
+        auto selected=pins(input.real);for(const auto& p:pins(input.imaginary))native_action_detail::append_pin(selected,p);
+        numeric::ExactActionGuard guard(native_action_detail::limits(lease,selected,state_->family.dimension_limit()),[&lease]{lease.check_cancelled();});
+        return execute_with_guard(std::move(input),availability,lease,guard);
     }
     numeric::Rational quadrance(const NativeTowerField& input,const NativeActionAvailability& availability,
                                const runtime::ExecutionLease& lease=runtime::ExecutionLease{}) const {
